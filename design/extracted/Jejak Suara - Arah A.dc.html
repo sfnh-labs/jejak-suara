@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: #f6f2e9; }
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:#f6f2e9;font-family:'Public Sans',system-ui,sans-serif;color:#16130f;">
+
+  <!-- ================= NAV ================= -->
+  <div style="position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:15px 48px;background:#f6f2e9;border-bottom:1px solid #16130f;">
+    <div onClick="{{ goBeranda }}" style="font-family:'Newsreader',serif;font-weight:700;font-size:22px;letter-spacing:-0.01em;cursor:pointer;">Jejak Suara</div>
+    <div style="display:flex;gap:28px;font-size:13px;font-weight:600;color:#7a7264;">
+      <span onClick="{{ goBeranda }}" style="cursor:pointer;color:{{ navBerandaColor }};">Beranda</span>
+      <span style="cursor:pointer;">Tokoh</span>
+      <span style="cursor:pointer;">Antrean Tinjauan</span>
+      <span style="cursor:pointer;">Tentang</span>
+    </div>
+  </div>
+
+  <!-- ================= BERANDA ================= -->
+  <sc-if value="{{ isBeranda }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:1100px;margin:0 auto;padding:0 48px 80px;">
+
+    <!-- masthead -->
+    <div style="padding:56px 0 32px;border-bottom:3px double #16130f;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:40px;">
+        <div style="max-width:680px;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8b2e1f;margin-bottom:16px;">Portal Rekam Jejak Tokoh Publik</div>
+          <h1 style="font-family:'Newsreader',serif;font-weight:500;font-size:58px;line-height:0.98;margin:0 0 18px;letter-spacing:-0.02em;">Lacak bagaimana tokoh bertindak di mata media.</h1>
+          <p style="font-size:16px;line-height:1.6;color:#4a443d;margin:0;max-width:560px;">Setiap catatan dirangkum dari pemberitaan terverifikasi sumber — lengkap dengan sentimen publik dari komentar YouTube pada skala merah ke hijau.</p>
+        </div>
+        <div style="flex:none;text-align:right;font-size:12.5px;color:#7a7264;line-height:1.7;border-left:1px solid #d8cfba;padding-left:24px;">
+          <div style="font-weight:700;color:#16130f;">Jumat, 19 Juni 2026</div>
+          <div>137 tokoh dipantau</div>
+          <div>4.812 catatan</div>
+          <div>2,3 jt komentar dianalisis</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- section label -->
+    <div style="display:flex;justify-content:space-between;align-items:baseline;padding:32px 0 18px;">
+      <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#16130f;">Tokoh Dipantau</div>
+      <div style="font-size:12.5px;color:#7a7264;">Diurutkan berdasarkan aktivitas terbaru</div>
+    </div>
+
+    <!-- figure grid -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#d8cfba;border:1px solid #d8cfba;">
+
+      <!-- Prabowo -->
+      <div onClick="{{ f_prabowo }}" style="background:#f6f2e9;padding:24px;cursor:pointer;display:flex;gap:16px;align-items:flex-start;" style-hover="background:#efe9dc;">
+        <div style="flex:none;width:54px;height:64px;background:repeating-linear-gradient(135deg,#e4ddcf,#e4ddcf 5px,#ece6d9 5px,#ece6d9 10px);border:1px solid #16130f;display:flex;align-items:flex-end;justify-content:center;"><span style="font-family:'Newsreader',serif;font-size:20px;color:#b9ab93;padding-bottom:4px;">PS</span></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8b2e1f;margin-bottom:4px;">Presiden RI</div>
+            <div style="font-family:'Newsreader',serif;font-weight:600;font-size:21px;line-height:1.1;">Prabowo Subianto</div>
+            <div style="position:relative;height:7px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);margin:14px 0 15px;">
+          <div style="position:absolute;left:57%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:12px;">🙂</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:#7a7264;"><span>+14 · cenderung positif</span><span>37 catatan</span></div>
+        </div>
+      </div>
+
+      <!-- Gibran -->
+      <div onClick="{{ f_gibran }}" style="background:#f6f2e9;padding:24px;cursor:pointer;display:flex;gap:16px;align-items:flex-start;" style-hover="background:#efe9dc;">
+        <div style="flex:none;width:54px;height:64px;background:repeating-linear-gradient(135deg,#e4ddcf,#e4ddcf 5px,#ece6d9 5px,#ece6d9 10px);border:1px solid #16130f;display:flex;align-items:flex-end;justify-content:center;"><span style="font-family:'Newsreader',serif;font-size:20px;color:#b9ab93;padding-bottom:4px;">GR</span></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8b2e1f;margin-bottom:4px;">Wakil Presiden RI</div>
+            <div style="font-family:'Newsreader',serif;font-weight:600;font-size:21px;line-height:1.1;">Gibran Rakabuming</div>
+            <div style="position:relative;height:7px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);margin:14px 0 15px;">
+          <div style="position:absolute;left:53%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:12px;">😐</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:#7a7264;"><span>+6 · netral</span><span>18 catatan</span></div>
+        </div>
+      </div>
+
+      <!-- Sri Mulyani -->
+      <div onClick="{{ f_srimulyani }}" style="background:#f6f2e9;padding:24px;cursor:pointer;display:flex;gap:16px;align-items:flex-start;" style-hover="background:#efe9dc;">
+        <div style="flex:none;width:54px;height:64px;background:repeating-linear-gradient(135deg,#e4ddcf,#e4ddcf 5px,#ece6d9 5px,#ece6d9 10px);border:1px solid #16130f;display:flex;align-items:flex-end;justify-content:center;"><span style="font-family:'Newsreader',serif;font-size:20px;color:#b9ab93;padding-bottom:4px;">SM</span></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8b2e1f;margin-bottom:4px;">Menteri Keuangan</div>
+            <div style="font-family:'Newsreader',serif;font-weight:600;font-size:21px;line-height:1.1;">Sri Mulyani</div>
+            <div style="position:relative;height:7px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);margin:14px 0 15px;">
+          <div style="position:absolute;left:60.5%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:12px;">🙂</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:#7a7264;"><span>+21 · cenderung positif</span><span>24 catatan</span></div>
+        </div>
+      </div>
+
+      <!-- Anies -->
+      <div onClick="{{ f_anies }}" style="background:#f6f2e9;padding:24px;cursor:pointer;display:flex;gap:16px;align-items:flex-start;" style-hover="background:#efe9dc;">
+        <div style="flex:none;width:54px;height:64px;background:repeating-linear-gradient(135deg,#e4ddcf,#e4ddcf 5px,#ece6d9 5px,#ece6d9 10px);border:1px solid #16130f;display:flex;align-items:flex-end;justify-content:center;"><span style="font-family:'Newsreader',serif;font-size:20px;color:#b9ab93;padding-bottom:4px;">AB</span></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8b2e1f;margin-bottom:4px;">Tokoh Oposisi</div>
+            <div style="font-family:'Newsreader',serif;font-weight:600;font-size:21px;line-height:1.1;">Anies Baswedan</div>
+            <div style="position:relative;height:7px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);margin:14px 0 15px;">
+          <div style="position:absolute;left:48.5%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:12px;">😐</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:#7a7264;"><span>−3 · netral</span><span>29 catatan</span></div>
+        </div>
+      </div>
+
+      <!-- Ganjar -->
+      <div onClick="{{ f_ganjar }}" style="background:#f6f2e9;padding:24px;cursor:pointer;display:flex;gap:16px;align-items:flex-start;" style-hover="background:#efe9dc;">
+        <div style="flex:none;width:54px;height:64px;background:repeating-linear-gradient(135deg,#e4ddcf,#e4ddcf 5px,#ece6d9 5px,#ece6d9 10px);border:1px solid #16130f;display:flex;align-items:flex-end;justify-content:center;"><span style="font-family:'Newsreader',serif;font-size:20px;color:#b9ab93;padding-bottom:4px;">GP</span></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8b2e1f;margin-bottom:4px;">Tokoh Oposisi</div>
+            <div style="font-family:'Newsreader',serif;font-weight:600;font-size:21px;line-height:1.1;">Ganjar Pranowo</div>
+            <div style="position:relative;height:7px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);margin:14px 0 15px;">
+          <div style="position:absolute;left:54.5%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:12px;">😐</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:#7a7264;"><span>+9 · netral</span><span>21 catatan</span></div>
+        </div>
+      </div>
+
+      <!-- Puan -->
+      <div onClick="{{ f_puan }}" style="background:#f6f2e9;padding:24px;cursor:pointer;display:flex;gap:16px;align-items:flex-start;" style-hover="background:#efe9dc;">
+        <div style="flex:none;width:54px;height:64px;background:repeating-linear-gradient(135deg,#e4ddcf,#e4ddcf 5px,#ece6d9 5px,#ece6d9 10px);border:1px solid #16130f;display:flex;align-items:flex-end;justify-content:center;"><span style="font-family:'Newsreader',serif;font-size:20px;color:#b9ab93;padding-bottom:4px;">PM</span></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8b2e1f;margin-bottom:4px;">Ketua DPR RI</div>
+            <div style="font-family:'Newsreader',serif;font-weight:600;font-size:21px;line-height:1.1;">Puan Maharani</div>
+            <div style="position:relative;height:7px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);margin:14px 0 15px;">
+          <div style="position:absolute;left:51%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:12px;">😐</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:#7a7264;"><span>+2 · netral</span><span>15 catatan</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ================= HALAMAN TOKOH ================= -->
+  <sc-if value="{{ isFigureView }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:1120px;margin:0 auto;padding:0 48px 80px;">
+
+    <div style="padding:22px 0 16px;font-size:12.5px;font-weight:600;color:#7a7264;">
+      <span onClick="{{ goBeranda }}" style="cursor:pointer;color:#8b2e1f;">Beranda</span>
+      <span style="margin:0 8px;color:#bcb3a0;">/</span>
+      <span onClick="{{ backToTokoh }}" style="cursor:pointer;color:{{ crumbFigColor }};">{{ fig.name }}</span>
+      <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ true }}"><span style="margin:0 8px;color:#bcb3a0;">/</span><span style="color:#7a7264;">{{ rec.kategori }}</span></sc-if>
+    </div>
+
+    <div style="{{ tokohGridStyle }}">
+
+      <!-- PROFILE (sticky) -->
+      <div style="{{ tokohProfileStyle }}">
+        <div style="width:108px;height:132px;background:repeating-linear-gradient(135deg,#e4ddcf,#e4ddcf 6px,#ece6d9 6px,#ece6d9 12px);border:1px solid #16130f;display:flex;align-items:flex-end;justify-content:center;margin-bottom:18px;">
+          <span style="font-family:'Newsreader',serif;font-size:40px;color:#b9ab93;padding-bottom:8px;">{{ fig.initials }}</span>
+        </div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8b2e1f;margin-bottom:8px;">{{ fig.role }}</div>
+        <h2 style="font-family:'Newsreader',serif;font-weight:500;font-size:34px;line-height:1.0;margin:0 0 16px;letter-spacing:-0.015em;">{{ fig.name }}</h2>
+        <div style="display:flex;flex-direction:column;gap:5px;font-size:13px;color:#4a443d;padding-bottom:18px;border-bottom:1px solid #d8cfba;">
+          <span><strong style="color:#16130f;">{{ fig.catatan }}</strong> catatan</span>
+          <span><strong style="color:#16130f;">{{ fig.outlet }}</strong> outlet meliput</span>
+          <span><strong style="color:#16130f;">{{ fig.comments }}</strong> komentar dianalisis</span>
+        </div>
+        <div style="margin-top:18px;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6b645b;margin-bottom:12px;">Sentimen rata-rata</div>
+          <div style="position:relative;height:10px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);margin-bottom:12px;">
+            <div style="position:absolute;left:{{ fig.avgLeft }};top:50%;transform:translate(-50%,-50%);width:30px;height:30px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:16px;">{{ fig.avgEmoji }}</div>
+          </div>
+          <div style="font-family:'Newsreader',serif;font-size:16px;">{{ fig.avgLabel }}</div>
+        </div>
+      </div>
+
+      <!-- CONTENT -->
+      <div style="min-width:0;">
+      <sc-if value="{{ isTokoh }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:6px 0 14px;border-bottom:3px double #16130f;position:sticky;top:72px;z-index:6;background:#f6f2e9;box-shadow:0 -20px 0 #f6f2e9;">
+          <span style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#16130f;">Rekam Jejak</span>
+          <span style="font-size:12.5px;color:#7a7264;">Terbaru lebih dulu</span>
+        </div>
+
+    <!-- filter chips -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;padding:18px 0 4px;">
+      <span style="font-size:11.5px;font-weight:600;color:#f6f2e9;background:#16130f;padding:5px 12px;border-radius:2px;cursor:pointer;">Semua</span>
+      <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:5px 12px;border-radius:2px;cursor:pointer;">Politik</span>
+      <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:5px 12px;border-radius:2px;cursor:pointer;">Ekonomi</span>
+      <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:5px 12px;border-radius:2px;cursor:pointer;">Pertahanan</span>
+      <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:5px 12px;border-radius:2px;cursor:pointer;">Kebijakan Sosial</span>
+      <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:5px 12px;border-radius:2px;cursor:pointer;">Hukum</span>
+    </div>
+
+    <!-- timeline -->
+    <div style="margin-top:8px;">
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="2">
+        <div style="position:sticky;top:104px;z-index:5;background:#f6f2e9;margin-left:-44px;padding:16px 0 12px 44px;display:flex;align-items:center;gap:10px;">
+          <span style="font-family:'Newsreader',serif;font-weight:600;font-size:20px;color:#16130f;">{{ g.year }}</span>
+          <span style="width:4px;height:4px;border-radius:50%;background:#b9ab93;"></span>
+          <span style="font-family:'Newsreader',serif;font-size:20px;color:#9b8f7d;">{{ g.month }}</span>
+          <span style="flex:1;height:1px;background:#d8cfba;margin-left:6px;"></span>
+        </div>
+        <div style="margin-left:14px;">
+        <sc-for list="{{ g.records }}" as="r" hint-placeholder-count="3">
+          <div onClick="{{ r.open }}" style="position:relative;border-left:1.5px solid #d8cfba;padding:36px 0 34px 42px;cursor:pointer;">
+            <div style="position:absolute;left:-14px;top:0;">
+              <span style="display:inline-block;background:{{ r.dateBg }};color:{{ r.dateColor }};font-size:11px;font-weight:700;letter-spacing:0.04em;padding:4px 12px;border-radius:99px;white-space:nowrap;box-shadow:0 0 0 4px #f6f2e9;">{{ r.dayBadge }}</span>
+            </div>
+            <div style="margin-bottom:8px;">
+              <span style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:{{ r.kategoriColor }};">{{ r.kategori }}</span>
+            </div>
+            <h3 style="font-family:'Newsreader',serif;font-weight:600;font-size:25px;line-height:1.16;margin:0 0 10px;letter-spacing:-0.01em;">{{ r.headline }}</h3>
+          <sc-if value="{{ showSummary }}" hint-placeholder-val="{{ true }}"><p style="font-size:14.5px;line-height:1.62;color:#3e382f;margin:0 0 14px;">{{ r.summary }}</p></sc-if>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <span onClick="{{ r.toggle }}" style="font-size:11.5px;font-weight:700;color:#8b2e1f;cursor:pointer;padding:3px 0;" style-hover="color:#b03a26;">{{ r.sourcesCta }} ({{ r.sumberCount }})</span>
+            </div>
+            <div style="display:flex;align-items:center;flex:none;padding-left:5px;">
+              <sc-for list="{{ r.sourceLogos }}" as="lg" hint-placeholder-count="3">
+                <div title="{{ lg.name }}" style="width:22px;height:22px;border-radius:5px;background:{{ lg.color }};color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Newsreader',serif;font-size:12px;font-weight:600;line-height:1;border:1.5px solid #f6f2e9;margin-left:-5px;">{{ lg.mono }}</div>
+              </sc-for>
+            </div>
+          </div>
+          <sc-if value="{{ r.expanded }}" hint-placeholder-val="{{ true }}">
+            <div onClick="{{ stopProp }}" style="background:#efe9dc;border:1px solid #ddd3bf;padding:4px 16px 6px;margin-bottom:16px;cursor:default;">
+              <sc-for list="{{ r.sourcesList }}" as="s" hint-placeholder-count="2">
+                <div style="display:flex;gap:12px;padding:11px 0;border-bottom:{{ s.borderBottom }};" style-hover="opacity:0.78;">
+                  <div style="flex:none;font-family:'Newsreader',serif;font-size:13px;color:#bcb3a0;width:22px;">{{ s.num }}</div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="font-size:13.5px;font-weight:600;color:#16130f;line-height:1.3;">{{ s.title }}</div>
+                    <div style="font-size:11.5px;color:#7a7264;margin-top:2px;">{{ s.outlet }} · {{ s.tanggal }}</div>
+                  </div>
+                  <div style="flex:none;font-size:11.5px;font-weight:600;color:#8b2e1f;align-self:center;">Buka ↗</div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;">
+            <span style="font-size:10.5px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#9b9285;">Sentimen Publik</span>
+            <span style="font-size:12px;color:#7a7264;">{{ r.comments }} komentar dari YouTube</span>
+          </div>
+          <div style="position:relative;height:8px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+            <div style="position:absolute;left:{{ r.markerLeft }};top:50%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:14px;">{{ r.emoji }}</div>
+          </div>
+          <div style="display:flex;gap:18px;margin-top:7px;font-size:11.5px;color:#7a7264;">
+            <span>{{ r.pos }}% positif</span><span>{{ r.net }}% netral</span><span>{{ r.neg }}% negatif</span>
+          </div>
+          </div>
+        </sc-for>
+        </div>
+      </sc-for>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ true }}">
+
+    <!-- header -->
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:{{ rec.kategoriColor }};margin-bottom:14px;">{{ rec.kategori }}</div>
+    <h1 style="font-family:'Newsreader',serif;font-weight:600;font-size:40px;line-height:1.1;margin:0 0 16px;letter-spacing:-0.015em;">{{ rec.headline }}</h1>
+    <div style="display:flex;gap:14px;align-items:center;font-size:13px;color:#7a7264;padding-bottom:22px;border-bottom:1px solid #d8cfba;margin-bottom:28px;">
+      <span style="font-weight:600;color:#16130f;">{{ rec.outlet }}</span><span>·</span><span>{{ rec.tanggal }}</span><span>·</span><span>tentang {{ fig.name }}</span>
+    </div>
+
+    <!-- sentiment (compact, no container) -->
+    <div style="margin-bottom:30px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;">
+        <span style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#9b9285;">Sentimen Publik · YouTube</span>
+        <span style="font-size:12px;color:#7a7264;">{{ rec.comments }} komentar · {{ rec.scoreLabel }}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:18px;">
+        <span style="font-family:'Newsreader',serif;font-size:34px;line-height:1;color:{{ rec.scoreColor }};flex:none;">{{ rec.score }}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="position:relative;height:8px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+            <div style="position:absolute;left:{{ rec.markerLeft }};top:50%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:14px;">{{ rec.emoji }}</div>
+          </div>
+          <div style="display:flex;gap:16px;margin-top:9px;font-size:11.5px;color:#7a7264;">
+            <span><strong style="color:#2e7a52;">{{ rec.pos }}%</strong> positif</span>
+            <span><strong style="color:#9b8a5e;">{{ rec.net }}%</strong> netral</span>
+            <span><strong style="color:#c0392b;">{{ rec.neg }}%</strong> negatif</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- summary -->
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#9b9285;margin-bottom:12px;">Ringkasan</div>
+    <p style="font-family:'Newsreader',serif;font-weight:400;font-size:19px;line-height:1.6;color:#16130f;margin:0 0 22px;">{{ rec.summary }}</p>
+
+    <!-- quote -->
+    <sc-if value="{{ rec.hasQuote }}" hint-placeholder-val="{{ true }}">
+      <blockquote style="font-family:'Newsreader',serif;font-style:italic;font-weight:500;font-size:24px;line-height:1.4;color:#16130f;border-left:3px solid #8b2e1f;padding:4px 0 4px 22px;margin:0 0 28px;">{{ rec.quote }}<div style="font-family:'Public Sans';font-style:normal;font-size:12.5px;font-weight:600;color:#7a7264;margin-top:10px;">— {{ fig.name }}, {{ rec.outlet }}</div></blockquote>
+    </sc-if>
+
+    <!-- corroboration -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:30px;">
+      <span style="font-size:11.5px;font-weight:600;color:{{ rec.badgeColor }};border:1px solid {{ rec.badgeBorder }};background:{{ rec.badgeBg }};padding:4px 10px;border-radius:2px;">{{ rec.badgeLabel }}</span>
+      <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:4px 10px;border-radius:2px;">{{ rec.kutipan }} kutipan terverifikasi</span>
+    </div>
+
+    <!-- sources -->
+    <div style="border-top:3px double #16130f;padding-top:22px;">
+      <div style="font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#16130f;margin-bottom:16px;">Artikel Sumber ({{ rec.sumberCount }})</div>
+      <sc-for list="{{ recSources }}" as="s" hint-placeholder-count="3">
+        <div style="display:flex;gap:14px;padding:14px 0;border-bottom:{{ s.borderBottom }};cursor:pointer;" style-hover="background:#efe9dc;">
+          <div style="flex:none;font-size:15px;font-weight:600;line-height:1.3;color:#bcb3a0;width:28px;">{{ s.num }}</div>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:600;color:#16130f;line-height:1.3;margin-bottom:4px;">{{ s.title }}</div>
+            <div style="font-size:12px;color:#7a7264;">{{ s.outlet }} · {{ s.tanggal }}</div>
+          </div>
+          <div style="flex:none;font-size:15px;font-weight:600;line-height:1.3;color:#8b2e1f;">↗</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- comments (inline) -->
+    <div style="border-top:3px double #16130f;padding-top:22px;margin-top:30px;">
+      <div style="font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#16130f;margin-bottom:6px;">Komentar Publik</div>
+      <div style="font-size:13px;color:#7a7264;margin-bottom:18px;">Contoh dari {{ rec.comments }} komentar YouTube pada liputan ini</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
+        <sc-for list="{{ topics }}" as="t" hint-placeholder-count="4">
+          <span style="font-size:12.5px;font-weight:600;color:#6b3a6b;background:#efe6ef;border:1px solid #d9c5d9;padding:4px 11px;border-radius:99px;">#{{ t }}</span>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;border-bottom:1px solid #d8cfba;padding-bottom:14px;margin-bottom:6px;">
+        <span style="font-size:11.5px;font-weight:600;color:#f6f2e9;background:#16130f;padding:5px 12px;border-radius:2px;cursor:pointer;">Semua</span>
+        <span style="font-size:11.5px;font-weight:600;color:#2e7a52;border:1px solid #b6d0bd;padding:5px 12px;border-radius:2px;cursor:pointer;">Positif</span>
+        <span style="font-size:11.5px;font-weight:600;color:#7a6a45;border:1px solid #ddd3bf;padding:5px 12px;border-radius:2px;cursor:pointer;">Netral</span>
+        <span style="font-size:11.5px;font-weight:600;color:#c0392b;border:1px solid #d8a99f;padding:5px 12px;border-radius:2px;cursor:pointer;">Negatif</span>
+        <span style="margin-left:auto;font-size:12px;color:#9b9285;">Paling relevan</span>
+      </div>
+      <sc-for list="{{ commentSamples }}" as="c" hint-placeholder-count="6">
+        <div style="display:flex;gap:14px;padding:18px 0;border-bottom:1px solid #d8cfba;">
+          <div style="flex:none;width:38px;height:38px;border-radius:50%;background:#e4ddcf;border:1px solid #c9bfa8;display:flex;align-items:center;justify-content:center;font-family:'Newsreader',serif;font-size:16px;color:#7a6f58;">{{ c.initial }}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+              <span style="font-size:13.5px;font-weight:700;color:#16130f;">{{ c.name }}</span>
+              <span style="font-size:12px;color:#9b9285;">{{ c.time }}</span>
+              <span style="margin-left:auto;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:{{ c.tagColor }};background:{{ c.tagBg }};border:1px solid {{ c.tagBorder }};padding:2px 8px;border-radius:2px;">{{ c.tag }}</span>
+            </div>
+            <p style="font-size:14.5px;line-height:1.55;color:#3e382f;margin:0 0 8px;">{{ c.text }}</p>
+            <div style="font-size:12px;color:#9b9285;">♥ {{ c.likes }}  ·  Balas</div>
+          </div>
+        </div>
+      </sc-for>
+      <div style="margin-top:16px;font-size:12.5px;color:#9b9285;">Menampilkan 7 dari {{ rec.comments }} komentar</div>
+    </div>
+
+    <div onClick="{{ backToTokoh }}" style="margin-top:32px;font-size:13px;font-weight:600;color:#8b2e1f;cursor:pointer;">← Kembali ke rekam jejak {{ fig.name }}</div>
+      </sc-if>
+
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;tokohLayout&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;2 kolom (profil sticky)&quot;, &quot;1 kolom (profil di atas)&quot;], &quot;default&quot;: &quot;2 kolom (profil sticky)&quot;, &quot;tsType&quot;: &quot;string&quot;},
+  &quot;compactRecords&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;}
+}">
+class Component extends DCLogic {
+  state = { screen: 'beranda', figureId: 'prabowo', recordId: null, expanded: {} };
+
+  logoFor(outlet) {
+    const map = {
+      'Detik.com': { mono: 'd', color: '#1467c8', name: 'detikcom' },
+      'Kompas': { mono: 'K', color: '#1a6aa8', name: 'Kompas' },
+      'Antara': { mono: 'A', color: '#c8102e', name: 'ANTARA' },
+      'CNBC Indonesia': { mono: 'C', color: '#13314f', name: 'CNBC Indonesia' },
+      'Tempo': { mono: 'T', color: '#b01e2e', name: 'TEMPO' },
+      'Republika': { mono: 'R', color: '#1f7a4d', name: 'Republika' },
+      'Bisnis.com': { mono: 'B', color: '#1f6fb2', name: 'Bisnis.com' },
+      'CNN Indonesia': { mono: 'C', color: '#cc0000', name: 'CNN Indonesia' },
+      'Kontan': { mono: 'K', color: '#e07b00', name: 'Kontan' },
+    };
+    return map[outlet] || { mono: (outlet || '?').charAt(0), color: '#6b645b', name: outlet };
+  }
+
+  go(screen, patch) {
+    this.setState({ screen, ...(patch || {}) });
+    try { window.scrollTo(0, 0); } catch (e) {}
+  }
+
+  data() {
+    const cat = {
+      Politik: '#3a4a8b', Ekonomi: '#7a5a2e', Pertahanan: '#3d6b4a',
+      'Kebijakan Sosial': '#7a5a2e', 'Hubungan Luar Negeri': '#6b3a6b', Hukum: '#8b2e1f',
+    };
+    const ok = { color: '#3d6b4a', border: '#b6d0bd', bg: '#e6efe8' };
+    const warn = { color: '#8b2e1f', border: '#d8a99f', bg: '#f5e7e3' };
+    const left = (s) => ((s + 100) / 2).toFixed(1) + '%';
+    const emo = (s) => s <= -40 ? '😡' : s <= -10 ? '🙁' : s < 16 ? '😐' : s < 46 ? '🙂' : '😄';
+    const disp = (s) => (s < 0 ? '−' : '+') + Math.abs(s);
+    const scol = (s) => s <= -10 ? '#c0392b' : s < 16 ? '#9b7b3f' : '#2e7a52';
+    const slbl = (s) => s <= -40 ? 'Mayoritas menolak' : s <= -10 ? 'Cenderung negatif' : s < 16 ? 'Terbelah / netral' : s < 46 ? 'Cenderung positif' : 'Mayoritas mendukung';
+    const mk = (o) => {
+      const b = o.media >= 2 ? { ...ok, label: '✓ Dikuatkan ' + o.media + ' media' } : { ...warn, label: '⚠ Satu sumber' };
+      return {
+        id: o.id, kategori: o.kat, kategoriColor: cat[o.kat] || '#6b645b',
+        outlet: o.outlet, tanggal: o.tgl, headline: o.h, summary: o.s,
+        quote: o.q || '', hasQuote: !!o.q, kutipan: o.kut, sumberCount: o.media,
+        comments: o.c, pos: o.pos, net: o.net, neg: o.neg,
+        score: disp(o.score), scoreColor: scol(o.score), scoreLabel: slbl(o.score),
+        emoji: emo(o.score), markerLeft: left(o.score),
+        badgeLabel: b.label, badgeColor: b.color, badgeBorder: b.border, badgeBg: b.bg,
+        sources: (o.src || []).map((x, i) => ({ num: String(i + 1).padStart(2, '0'), title: x.t, outlet: x.o, tanggal: x.d })),
+      };
+    };
+    return {
+      prabowo: {
+        initials: 'PS', name: 'Prabowo Subianto', role: 'Presiden Republik Indonesia',
+        catatan: '37', outlet: '12', comments: '96 rb', avgLabel: '+14 · cenderung positif', avgLeft: '57%', avgEmoji: '🙂',
+        records: [
+          mk({ id: 'p1', kat: 'Politik', outlet: 'Detik.com', tgl: '19 Jun 2026', media: 1, kut: 1, score: -15, c: '2,4 rb', pos: 28, net: 30, neg: 42,
+            h: 'PSI Pede Prabowo Tetap Gandeng Gibran di Pilpres 2029',
+            s: 'Ketua Harian DPP PSI menyatakan yakin Prabowo dan Gibran akan kembali maju bersama pada Pemilu Presiden 2029 untuk memastikan kesinambungan program pemerintah. Hingga kini belum ada pernyataan langsung dari Prabowo terkait pencalonan tersebut.',
+            src: [{ t: 'PSI Yakin Duet Prabowo-Gibran Berlanjut di 2029', o: 'Detik.com', d: '19 Jun 2026' }] }),
+          mk({ id: 'p2', kat: 'Pertahanan', outlet: 'Kompas', tgl: '12 Jun 2026', media: 5, kut: 3, score: 52, c: '8,1 rb', pos: 68, net: 20, neg: 12,
+            h: 'Prabowo Resmikan Tambahan Anggaran Modernisasi Alutsista',
+            s: 'Presiden meresmikan alokasi tambahan untuk modernisasi alat utama sistem persenjataan, menekankan kemandirian industri pertahanan dalam negeri sebagai prioritas jangka panjang.',
+            q: 'Pertahanan yang kuat adalah syarat mutlak kedaulatan bangsa.',
+            src: [{ t: 'Prabowo Tambah Anggaran Modernisasi Alutsista', o: 'Kompas', d: '12 Jun 2026' }, { t: 'Anggaran Pertahanan Naik, Fokus Industri Dalam Negeri', o: 'Tempo', d: '12 Jun 2026' }, { t: 'Modernisasi Alutsista Jadi Prioritas Prabowo', o: 'Antara', d: '12 Jun 2026' }, { t: 'Presiden Resmikan Tambahan Belanja Pertahanan', o: 'CNN Indonesia', d: '13 Jun 2026' }, { t: 'Kemandirian Pertahanan Ditegaskan Prabowo', o: 'Republika', d: '13 Jun 2026' }] }),
+          mk({ id: 'p3', kat: 'Kebijakan Sosial', outlet: 'Antara', tgl: '5 Jun 2026', media: 8, kut: 6, score: 8, c: '14 rb', pos: 41, net: 30, neg: 29,
+            h: 'Program Makan Bergizi Gratis Tembus 20 Juta Penerima',
+            s: 'Pemerintah melaporkan program Makan Bergizi Gratis telah menjangkau 20 juta penerima manfaat, meski sejumlah daerah masih melaporkan kendala distribusi dan kualitas pasokan.',
+            q: 'Tidak boleh ada satu pun anak Indonesia yang kelaparan.',
+            src: [{ t: 'MBG Capai 20 Juta Penerima', o: 'Antara', d: '5 Jun 2026' }, { t: 'Program Makan Bergizi Hadapi Kendala Distribusi', o: 'Kompas', d: '5 Jun 2026' }, { t: '20 Juta Anak Terima Makan Bergizi Gratis', o: 'Detik.com', d: '6 Jun 2026' }, { t: 'Evaluasi MBG di Sejumlah Daerah', o: 'Tempo', d: '6 Jun 2026' }] }),
+          mk({ id: 'p4', kat: 'Ekonomi', outlet: 'CNBC Indonesia', tgl: '28 Mei 2026', media: 4, kut: 2, score: -28, c: '6,3 rb', pos: 24, net: 28, neg: 48,
+            h: 'Prabowo Targetkan Pertumbuhan Ekonomi 8 Persen pada 2027',
+            s: 'Presiden menargetkan pertumbuhan ekonomi mencapai 8 persen pada 2027. Sejumlah ekonom menilai target tersebut ambisius di tengah tekanan global dan perlu didukung reformasi struktural.',
+            q: 'Kita harus berani menargetkan lompatan, bukan sekadar bertahan.',
+            src: [{ t: 'Prabowo Patok Pertumbuhan 8 Persen', o: 'CNBC Indonesia', d: '28 Mei 2026' }, { t: 'Ekonom Sebut Target 8 Persen Ambisius', o: 'Bisnis.com', d: '28 Mei 2026' }, { t: 'Jalan Menuju Pertumbuhan 8 Persen', o: 'Kontan', d: '29 Mei 2026' }, { t: 'Tanggapan Pelaku Usaha atas Target Ekonomi', o: 'Tempo', d: '29 Mei 2026' }] }),
+          mk({ id: 'p5', kat: 'Hubungan Luar Negeri', outlet: 'Tempo', tgl: '21 Mei 2026', media: 6, kut: 4, score: 34, c: '5,2 rb', pos: 58, net: 26, neg: 16,
+            h: 'Prabowo Tegaskan Politik Bebas-Aktif di KTT ASEAN',
+            s: 'Dalam KTT ASEAN, Presiden menegaskan komitmen Indonesia pada prinsip politik luar negeri bebas-aktif dan mendorong sentralitas ASEAN di tengah rivalitas kekuatan besar.',
+            q: 'Indonesia tidak akan menjadi bagian dari blok mana pun.',
+            src: [{ t: 'Prabowo Tegaskan Bebas-Aktif di ASEAN', o: 'Tempo', d: '21 Mei 2026' }, { t: 'Sentralitas ASEAN Disuarakan Indonesia', o: 'Antara', d: '21 Mei 2026' }, { t: 'Pidato Prabowo di KTT ASEAN', o: 'Kompas', d: '22 Mei 2026' }] }),
+          mk({ id: 'p6', kat: 'Hukum', outlet: 'Republika', tgl: '14 Mei 2026', media: 3, kut: 2, score: 19, c: '4,1 rb', pos: 49, net: 29, neg: 22,
+            h: 'Prabowo Minta Penegakan Hukum Tak Pandang Bulu',
+            s: 'Presiden meminta aparat penegak hukum bekerja tanpa pandang bulu dan menindak tegas korupsi, sembari menekankan pentingnya kepastian hukum bagi investasi.',
+            q: 'Hukum harus tajam ke atas, bukan hanya ke bawah.',
+            src: [{ t: 'Prabowo: Hukum Tak Pandang Bulu', o: 'Republika', d: '14 Mei 2026' }, { t: 'Presiden Tekankan Pemberantasan Korupsi', o: 'Detik.com', d: '14 Mei 2026' }, { t: 'Kepastian Hukum untuk Investasi', o: 'Bisnis.com', d: '15 Mei 2026' }] }),
+        ],
+      },
+      gibran: { initials: 'GR', name: 'Gibran Rakabuming', role: 'Wakil Presiden RI', catatan: '18', outlet: '9', comments: '41 rb', avgLabel: '+6 · netral', avgLeft: '53%', avgEmoji: '😐', records: [
+        mk({ id: 'g1', kat: 'Politik', outlet: 'Detik.com', tgl: '17 Jun 2026', media: 3, kut: 2, score: 22, c: '3,1 rb', pos: 51, net: 27, neg: 22, h: 'Gibran Tinjau Program Hilirisasi di Sulawesi', s: 'Wakil Presiden meninjau perkembangan proyek hilirisasi nikel di Sulawesi dan menekankan penyerapan tenaga kerja lokal.', src: [{ t: 'Gibran Tinjau Hilirisasi Nikel', o: 'Detik.com', d: '17 Jun 2026' }, { t: 'Hilirisasi Sulawesi Dipantau Wapres', o: 'Antara', d: '17 Jun 2026' }, { t: 'Penyerapan Tenaga Kerja Jadi Sorotan', o: 'Kompas', d: '18 Jun 2026' }] }),
+        mk({ id: 'g2', kat: 'Kebijakan Sosial', outlet: 'Kompas', tgl: '9 Jun 2026', media: 2, kut: 1, score: -4, c: '2,4 rb', pos: 33, net: 34, neg: 33, h: 'Gibran Dorong Digitalisasi UMKM Anak Muda', s: 'Wakil Presiden mendorong program digitalisasi UMKM yang dikelola anak muda, meski sejumlah pihak menyoroti akses permodalan.', src: [{ t: 'Gibran Dorong UMKM Digital', o: 'Kompas', d: '9 Jun 2026' }, { t: 'Akses Modal Jadi Tantangan UMKM Muda', o: 'Bisnis.com', d: '9 Jun 2026' }] }),
+      ] },
+      srimulyani: { initials: 'SM', name: 'Sri Mulyani', role: 'Menteri Keuangan', catatan: '24', outlet: '11', comments: '58 rb', avgLabel: '+21 · cenderung positif', avgLeft: '60.5%', avgEmoji: '🙂', records: [
+        mk({ id: 's1', kat: 'Ekonomi', outlet: 'Bisnis.com', tgl: '16 Jun 2026', media: 6, kut: 3, score: 38, c: '7,2 rb', pos: 60, net: 24, neg: 16, h: 'Sri Mulyani Jaga Defisit APBN di Bawah 3 Persen', s: 'Menteri Keuangan memastikan defisit APBN tetap terjaga di bawah 3 persen seiring penerimaan negara yang membaik.', q: 'Disiplin fiskal adalah fondasi kepercayaan investor.', src: [{ t: 'Defisit APBN Terjaga di Bawah 3%', o: 'Bisnis.com', d: '16 Jun 2026' }, { t: 'Penerimaan Negara Membaik', o: 'Kontan', d: '16 Jun 2026' }, { t: 'Sri Mulyani Soal Disiplin Fiskal', o: 'CNBC Indonesia', d: '17 Jun 2026' }] }),
+        mk({ id: 's2', kat: 'Ekonomi', outlet: 'CNBC Indonesia', tgl: '6 Jun 2026', media: 4, kut: 2, score: 12, c: '4,8 rb', pos: 44, net: 30, neg: 26, h: 'Sri Mulyani Sebut Penerimaan Pajak Tumbuh Dua Digit', s: 'Penerimaan pajak dilaporkan tumbuh dua digit, didorong perbaikan kepatuhan dan digitalisasi administrasi perpajakan.', src: [{ t: 'Pajak Tumbuh Dua Digit', o: 'CNBC Indonesia', d: '6 Jun 2026' }, { t: 'Digitalisasi Dorong Kepatuhan Pajak', o: 'Bisnis.com', d: '6 Jun 2026' }] }),
+      ] },
+      anies: { initials: 'AB', name: 'Anies Baswedan', role: 'Tokoh Oposisi', catatan: '29', outlet: '10', comments: '71 rb', avgLabel: '−3 · netral', avgLeft: '48.5%', avgEmoji: '😐', records: [
+        mk({ id: 'a1', kat: 'Politik', outlet: 'Tempo', tgl: '18 Jun 2026', media: 5, kut: 3, score: -12, c: '9,4 rb', pos: 35, net: 26, neg: 39, h: 'Anies Kritik Skema Pendanaan Makan Bergizi Gratis', s: 'Anies mengkritik skema pendanaan program Makan Bergizi Gratis dan mempertanyakan keberlanjutan anggarannya dalam jangka panjang.', q: 'Program baik harus dibiayai cara yang berkelanjutan.', src: [{ t: 'Anies Soroti Pendanaan MBG', o: 'Tempo', d: '18 Jun 2026' }, { t: 'Kritik atas Keberlanjutan Anggaran', o: 'Detik.com', d: '18 Jun 2026' }, { t: 'Tanggapan Pemerintah atas Kritik Anies', o: 'Kompas', d: '19 Jun 2026' }] }),
+        mk({ id: 'a2', kat: 'Politik', outlet: 'Republika', tgl: '7 Jun 2026', media: 3, kut: 2, score: 14, c: '5,1 rb', pos: 46, net: 30, neg: 24, h: 'Anies Serukan Penguatan Desentralisasi Fiskal', s: 'Anies menyerukan penguatan desentralisasi fiskal agar daerah memiliki ruang anggaran lebih besar untuk pelayanan publik.', src: [{ t: 'Anies Dorong Desentralisasi Fiskal', o: 'Republika', d: '7 Jun 2026' }, { t: 'Daerah Butuh Ruang Anggaran', o: 'Antara', d: '7 Jun 2026' }] }),
+      ] },
+      ganjar: { initials: 'GP', name: 'Ganjar Pranowo', role: 'Tokoh Oposisi', catatan: '21', outlet: '9', comments: '47 rb', avgLabel: '+9 · netral', avgLeft: '54.5%', avgEmoji: '😐', records: [
+        mk({ id: 'gn1', kat: 'Politik', outlet: 'Kompas', tgl: '13 Jun 2026', media: 4, kut: 2, score: 3, c: '4,3 rb', pos: 40, net: 32, neg: 28, h: 'Ganjar Soroti Tata Kelola Bansos di Daerah', s: 'Ganjar menyoroti tata kelola penyaluran bantuan sosial di sejumlah daerah dan mendorong transparansi data penerima.', src: [{ t: 'Ganjar Soroti Tata Kelola Bansos', o: 'Kompas', d: '13 Jun 2026' }, { t: 'Transparansi Data Penerima Didorong', o: 'Tempo', d: '13 Jun 2026' }] }),
+      ] },
+      puan: { initials: 'PM', name: 'Puan Maharani', role: 'Ketua DPR RI', catatan: '15', outlet: '8', comments: '33 rb', avgLabel: '+2 · netral', avgLeft: '51%', avgEmoji: '😐', records: [
+        mk({ id: 'pu1', kat: 'Politik', outlet: 'Antara', tgl: '15 Jun 2026', media: 2, kut: 1, score: 5, c: '2,2 rb', pos: 39, net: 33, neg: 28, h: 'Puan Pastikan DPR Kawal Revisi UU Pemilu', s: 'Ketua DPR memastikan pembahasan revisi UU Pemilu berjalan terbuka dan melibatkan masukan publik.', src: [{ t: 'Puan: DPR Kawal Revisi UU Pemilu', o: 'Antara', d: '15 Jun 2026' }, { t: 'Pembahasan UU Pemilu Libatkan Publik', o: 'Detik.com', d: '15 Jun 2026' }] }),
+      ] },
+    };
+  }
+
+  renderVals() {
+    const D = this.data();
+    const fig = D[this.state.figureId] || D.prabowo;
+    const open = (figureId) => this.go('tokoh', { figureId, recordId: null });
+    const records = fig.records.map((r, i) => ({
+      ...r,
+      first: i === 0,
+      dateBg: i === 0 ? '#b04a22' : '#6b645b',
+      dateColor: '#ffffff',
+      open: () => this.go('detail', { recordId: r.id }),
+      expanded: !!this.state.expanded[r.id],
+      sourcesCta: this.state.expanded[r.id] ? '▾ Hide Sources' : '▸ Show Sources',
+      outletLogo: this.logoFor(r.outlet),
+      sourceLogos: (r.sources || []).map((s) => this.logoFor(s.outlet)),
+      sourcesList: (r.sources || []).map((s, i, arr) => ({ ...s, borderBottom: i === arr.length - 1 ? 'none' : '1px solid #ddd3bf' })),
+      toggle: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.setState((s) => ({ expanded: { ...s.expanded, [r.id]: !s.expanded[r.id] } })); },
+    }));
+
+    const MONTHS = { Jan: 'Januari', Feb: 'Februari', Mar: 'Maret', Apr: 'April', Mei: 'Mei', Jun: 'Juni', Jul: 'Juli', Agu: 'Agustus', Agt: 'Agustus', Sep: 'September', Okt: 'Oktober', Nov: 'November', Des: 'Desember' };
+    const groups = [];
+    records.forEach((r) => {
+      const p = (r.tanggal || '').split(' ');
+      r.dayBadge = p[0] + ' ' + p[1];
+      const key = p[2] + p[1];
+      let g = groups.find((x) => x.key === key);
+      if (!g) { g = { key, year: p[2], month: MONTHS[p[1]] || p[1], records: [] }; groups.push(g); }
+      g.records.push(r);
+    });
+    const rec = fig.records.find((r) => r.id === this.state.recordId) || fig.records[0];
+
+    // --- sample YouTube comments, weighted to the record's polarity ---
+    const tagMap = {
+      Positif: { color: '#2e7a52', bg: '#e6efe8', border: '#b6d0bd' },
+      Netral: { color: '#7a6a45', bg: '#efe9dc', border: '#ddd3bf' },
+      Negatif: { color: '#c0392b', bg: '#f5e7e3', border: '#d8a99f' },
+    };
+    const pool = {
+      pos: [
+        { t: 'Akhirnya ada langkah konkret. Lanjutkan, Pak!', n: 'Andi Pratama' },
+        { t: 'Semoga programnya benar-benar sampai ke rakyat kecil.', n: 'Siti Rahma' },
+        { t: 'Ini baru pemimpin yang berani ambil keputusan.', n: 'Bagus Wicaksono' },
+      ],
+      net: [
+        { t: 'Kita tunggu realisasinya dulu, jangan cepat menilai.', n: 'Rizky Maulana' },
+        { t: 'Perlu data yang lebih jelas soal angka-angkanya.', n: 'Hendra Saputra' },
+      ],
+      neg: [
+        { t: 'Janji manis lagi, buktinya mana di lapangan?', n: 'Joko Susilo' },
+        { t: 'Anggarannya dari mana? Jangan sampai nambah utang.', n: 'Maria Fransiska' },
+      ],
+    };
+    const order = rec.neg > rec.pos ? ['neg', 'net', 'pos'] : ['pos', 'net', 'neg'];
+    const tagName = { pos: 'Positif', net: 'Netral', neg: 'Negatif' };
+    const times = ['2 jam lalu', '5 jam lalu', '9 jam lalu', '14 jam lalu', '1 hari lalu', '1 hari lalu', '2 hari lalu'];
+    const likes = [412, 86, 153, 47, 239, 21, 98];
+    const commentSamples = [];
+    order.forEach((k) => pool[k].forEach((c) => {
+      const i = commentSamples.length;
+      const ts = tagMap[tagName[k]];
+      commentSamples.push({ initial: c.n.charAt(0), name: c.n, text: c.t, tag: tagName[k], tagColor: ts.color, tagBg: ts.bg, tagBorder: ts.border, time: times[i % 7], likes: likes[i % 7] });
+    }));
+    const topicMap = {
+      Politik: ['koalisi', '2029', 'kursi', 'rakyat'],
+      Pertahanan: ['anggaran', 'alutsista', 'kedaulatan', 'utang'],
+      'Kebijakan Sosial': ['distribusi', 'anak', 'gizi', 'anggaran'],
+      Ekonomi: ['pertumbuhan', 'utang', 'investasi', 'realistis'],
+      'Hubungan Luar Negeri': ['ASEAN', 'netral', 'diplomasi', 'blok'],
+      Hukum: ['korupsi', 'keadilan', 'tegas', 'pilih kasih'],
+    };
+    const topics = topicMap[rec.kategori] || ['kebijakan', 'rakyat', 'janji', 'bukti'];
+
+    const layout = this.props.tokohLayout || '2 kolom (profil sticky)';
+    const sidebar = layout.indexOf('2 kolom') === 0;
+    return {
+      tokohGridStyle: sidebar
+        ? 'display:grid;grid-template-columns:300px 1fr;gap:52px;align-items:start;padding-top:8px;'
+        : 'display:block;padding-top:8px;',
+      tokohProfileStyle: sidebar
+        ? 'position:sticky;top:72px;align-self:start;'
+        : 'margin:0 auto 36px;max-width:720px;',
+      showSummary: !this.props.compactRecords,
+      isBeranda: this.state.screen === 'beranda',
+      isTokoh: this.state.screen === 'tokoh',
+      isDetail: this.state.screen === 'detail',
+      isFigureView: this.state.screen === 'tokoh' || this.state.screen === 'detail',
+      crumbFigColor: this.state.screen === 'detail' ? '#8b2e1f' : '#16130f',
+      navBerandaColor: this.state.screen === 'beranda' ? '#16130f' : '#7a7264',
+      goBeranda: () => this.go('beranda', { recordId: null }),
+      backToTokoh: () => this.go('tokoh', { recordId: null }),
+      stopProp: (e) => { if (e && e.stopPropagation) e.stopPropagation(); },
+      commentSamples, topics,
+      f_prabowo: () => open('prabowo'),
+      f_gibran: () => open('gibran'),
+      f_srimulyani: () => open('srimulyani'),
+      f_anies: () => open('anies'),
+      f_ganjar: () => open('ganjar'),
+      f_puan: () => open('puan'),
+      fig, records, rec, groups,
+      recSources: (rec.sources || []).map((s, i, arr) => ({ ...s, borderBottom: i === arr.length - 1 ? 'none' : '1px solid #d8cfba' })),
+    };
+  }
+}
+</script>
+</body>
+</html>

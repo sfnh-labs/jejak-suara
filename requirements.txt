@@ -1,0 +1,7 @@
+# Core pipeline dependencies — kept intentionally minimal.
+# (config, storage, hashing all use the stdlib: tomllib, sqlite3, hashlib)
+anthropic>=0.49.0      # Claude API client (summarization + grounded citations)
+feedparser>=6.0.11     # RSS/Atom ingestion for Indonesian news outlets
+trafilatura>=2.0.0     # full-text article extraction (fetch stage); stdlib fallback if absent
+flask>=3.0.0           # web UI: public timeline + reviewer queue (server-rendered)
+youtube-transcript-api>=1.2.3  # YouTube transcript fetching for video news ingestion

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Jejak Suara — Beranda{% endblock %}
+{% block content %}
+  <h1>Rekam Jejak Pejabat Publik</h1>
+  <p class="muted">
+    {{ review_count }} peristiwa menunggu tinjauan editor.
+    <a href="{{ url_for('review_queue') }}">Buka antrean →</a>
+  </p>
+
+  {% for row in rows %}
+    <div class="card">
+      <h2><a href="{{ url_for('figure', figure_id=row.figure.id) }}">{{ row.figure.name }}</a></h2>
+      <div class="muted">{{ row.figure.role }}</div>
+      <p>
+        <span class="pill">{{ row.approved }} peristiwa tayang</span>
+        {% if row.flagged %}<span class="pill flag">{{ row.flagged }} ditandai</span>{% endif %}
+      </p>
+    </div>
+  {% else %}
+    <div class="card">Belum ada tokoh yang dipantau. Tambahkan di <code>figures.toml</code>.</div>
+  {% endfor %}
+{% endblock %}

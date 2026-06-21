@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Antrean Tinjauan — Jejak Suara{% endblock %}
+{% block content %}
+  <h1>Antrean Tinjauan</h1>
+  <p class="muted">
+    Draf hasil rangkuman menunggu persetujuan. Periksa kutipan sumber dan tanda
+    <span class="flag">satu sumber</span> sebelum menyetujui. Tidak ada yang tayang
+    tanpa persetujuan.
+  </p>
+
+  {% for r in rows %}
+    <div class="card">
+      <div class="muted">
+        {{ figures.get(r.figure_id, r.figure_id) }} · {{ r.event_date | fdate }}
+      </div>
+      <p><strong>{{ r.event_title }}</strong></p>
+      <div class="summary">{{ r.summary }}</div>
+
+      <details>
+        <summary>Artikel sumber ({{ r.articles|length }})</summary>
+        {% for a in r.articles %}
+          <div class="cite">
+            <strong>{{ a.source }}</strong>
+            {% if a.published_at %} · {{ a.published_at | fdate }}{% endif %}
+            <br>
+            <a href="{{ a.url }}" target="_blank">{{ a.title }}</a>
+          </div>
+        {% endfor %}
+      </details>
+
+      <p class="muted">
+        <span class="pill">Dikuatkan {{ r.corroboration }} media</span>
+        <span class="pill">{{ r.n_citations }} kutipan</span>
+        {% if r.single_source %}<span class="pill flag">⚠ satu sumber</span>{% endif %}
+      </p>
+      <form class="inline" method="post" action="{{ url_for('review_action', event_id=r.event_id, action='approve') }}">
+        <button class="approve" type="submit">Setujui</button>
+      </form>
+      <form class="inline" method="post" action="{{ url_for('review_action', event_id=r.event_id, action='reject') }}">
+        <button class="reject" type="submit">Tolak</button>
+      </form>
+    </div>
+  {% else %}
+    <div class="card">Antrean kosong — tidak ada draf menunggu tinjauan.</div>
+  {% endfor %}
+{% endblock %}

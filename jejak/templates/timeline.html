@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ figure_name }} — Jejak Suara{% endblock %}
+{% block content %}
+  <h1>{{ figure_name }}</h1>
+  <p class="muted">Lini masa peristiwa yang telah ditinjau editor.</p>
+
+  {% for ev in events %}
+    {% set fl = follow_links.get(ev.event_id, {}) %}
+    <div class="card" id="event-{{ ev.event_id }}">
+      <div class="muted">{{ ev.date | fdate }}</div>
+      <p><strong>{{ ev.title }}</strong></p>
+      <p>{{ ev.summary | link_figures(all_figures) }}</p>
+
+      {% if fl %}
+        <p class="follow-nav">
+          {% if fl.get("prev") %}
+            <a href="#event-{{ fl.prev.event_id }}" class="follow-link" title="Kesamaan: {{ fl.prev.sim }}">‹ Sebelumnya</a>
+          {% endif %}
+          {% if fl.get("next") %}
+            <a href="#event-{{ fl.next.event_id }}" class="follow-link" title="Kesamaan: {{ fl.next.sim }}">Selanjutnya ›</a>
+          {% endif %}
+        </p>
+      {% endif %}
+
+      <p class="muted">
+        <span class="pill">Dikuatkan {{ ev.corroboration }} media</span>
+        {% if ev.sentiment %}
+          <span class="pill sent-{{ ev.sentiment.label }}">
+            {{ ev.sentiment.channel }}: {{ ev.sentiment.label }}
+            ({{ '%+.2f'|format(ev.sentiment.score) }}, n={{ ev.sentiment.sample_size }})
+          </span>
+        {% endif %}
+        <form class="inline" method="post" action="{{ url_for('laporkan', event_id=ev.event_id) }}" style="margin-left:.5rem">
+          <button class="flag-btn" type="submit" title="Tarik kembali ke antrean tinjauan">Laporkan</button>
+        </form>
+      </p>
+
+      {% if ev.sentiment and ev.sentiment.samples %}
+        <details>
+          <summary>Lihat contoh reaksi publik ({{ ev.sentiment.samples|length }})</summary>
+          {% for s in ev.sentiment.samples %}
+            <div class="cite sent-{{ s.label }}">{{ s.text }}</div>
+          {% endfor %}
+          <p class="muted" style="font-size:.78rem">
+            Komentar publik dari YouTube, belum diverifikasi dan dapat mengandung
+            ujaran kasar; ditampilkan sebagai contoh reaksi, bukan pandangan redaksi
+            maupun penilaian atas kebenaran peristiwa.
+          </p>
+        </details>
+      {% endif %}
+
+      {% if ev.citations %}
+        <details>
+          <summary>{{ ev.citations|length }} kutipan sumber</summary>
+          {% for c in ev.citations %}
+            <div class="cite">
+              <strong>{{ c.document_title or 'Sumber' }}</strong>
+              {% if c.cited_text %}— "{{ c.cited_text }}"{% endif %}
+            </div>
+          {% endfor %}
+        </details>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="card">Belum ada peristiwa tayang untuk tokoh ini.</div>
+  {% endfor %}
+
+  {% if related_events %}
+    <h2 style="margin-top:2rem">Lihat juga</h2>
+    {% for r in related_events %}
+      <div class="card related-card">
+        <div class="muted">
+          <a href="{{ url_for('figure', figure_id=r.figure_id) }}#event-{{ r.event_id }}">{{ r.figure_name }}</a>
+          · {{ r.date | fdate }}
+        </div>
+        <p>{{ r.summary[:200] }}{% if r.summary | length > 200 %}…{% endif %}</p>
+        <p class="muted">
+          <span class="pill">Dikuatkan {{ r.corroboration }} media</span>
+        </p>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endblock %}

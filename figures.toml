@@ -1,0 +1,21 @@
+# Public figures whose track records we are building.
+#
+# `aliases` are matched (case-insensitive) against article titles + summaries
+# during ingestion to attribute an article to a figure. Include common
+# spellings, titles, and nicknames to improve recall.
+
+[[figure]]
+id = "prabowo-subianto"
+name = "Prabowo Subianto"
+role = "Presiden Republik Indonesia"
+# Keep aliases distinctive — "Prabowo" is unambiguous in Indonesian news; avoid
+# bare "Presiden" (would match any president mention and mis-attribute).
+aliases = ["Prabowo", "Presiden Prabowo", "Prabowo Subianto Djojohadikusumo"]
+active = true
+
+[[figure]]
+id = "budiman-sudjatmiko"
+name = "Budiman Sudjatmiko"
+role = "Politisi / Mantan Anggota DPR"
+aliases = ["Budiman Sudjatmiko", "Budiman"]
+active = true

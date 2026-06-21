@@ -1,0 +1,28 @@
+# Vercel deployment
+vercel.json
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Dependencies
+node_modules/
+web/node_modules/
+
+# Next.js
+web/.next/
+web/out/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Database (dev SQLite stays local)
+jejak.db
+smoke*.db
+
+# Editor
+.claude/settings.local.json

@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;600;700&family=Archivo:wght@500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+</style>
+</helmet>
+
+<div style="width:max-content;min-width:100%;min-height:100vh;box-sizing:border-box;padding:48px;background:#e7e5df;font-family:'Public Sans',system-ui,sans-serif;">
+
+  <!-- ===== INTRO / RATIONALE ===== -->
+  <div style="max-width:900px;margin-bottom:40px;">
+    <div style="font-family:'Public Sans';font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#9b7b3f;margin-bottom:14px;">Jejak Suara · Halaman Tokoh — 3 Arah Desain</div>
+    <h1 style="font-family:'Newsreader',serif;font-weight:500;font-size:40px;line-height:1.1;margin:0 0 16px;color:#1a1714;letter-spacing:-0.01em;">Rekam jejak tokoh + sentimen publik, satu halaman</h1>
+    <p style="font-size:15.5px;line-height:1.6;color:#4a443d;margin:0 0 18px;max-width:680px;">Tiap catatan menampilkan ringkasan bersumber (model data dari app Anda: headline, outlet, tanggal, kutipan, jumlah media penguat) <strong>plus slider sentimen merah→hijau dengan penanda emoji</strong> dari komentar YouTube. Di bawah ini tiga arah visual untuk halaman tokoh Prabowo Subianto — pilih satu untuk saya kembangkan jadi prototipe lengkap (Beranda ↔ Halaman Tokoh ↔ Detail catatan).</p>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;font-size:13px;color:#6b645b;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:120px;height:8px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);"></div>
+        <span>Skala sentimen: negatif → positif</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;"><span style="font-size:16px;">😡</span><span style="font-size:16px;">🙁</span><span style="font-size:16px;">😐</span><span style="font-size:16px;">🙂</span><span style="font-size:16px;">😄</span><span>penanda emoji = posisi rata-rata</span></div>
+    </div>
+  </div>
+
+  <!-- ===== FRAMES ROW ===== -->
+  <div style="display:flex;gap:48px;align-items:flex-start;">
+
+    <!-- ============================================================ -->
+    <!-- DIRECTION A — DOSIR (newspaper / serif editorial) -->
+    <!-- ============================================================ -->
+    <div style="flex:none;width:880px;">
+      <div style="font-family:'Public Sans';font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#6b645b;margin-bottom:12px;">Arah A — “Dosir” · koran editorial, serif</div>
+      <div data-screen-label="Tokoh / Arah A" style="background:#f6f2e9;border-radius:2px;box-shadow:0 1px 3px rgba(0,0,0,.1);overflow:hidden;color:#16130f;">
+
+        <!-- nav -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 36px;border-bottom:1px solid #16130f;">
+          <div style="font-family:'Newsreader',serif;font-weight:600;font-size:21px;letter-spacing:-0.01em;">Jejak Suara</div>
+          <div style="display:flex;gap:26px;font-size:13px;font-weight:600;color:#4a443d;">
+            <span>Beranda</span><span>Tokoh</span><span style="color:#16130f;border-bottom:2px solid #8b2e1f;padding-bottom:2px;">Rekam Jejak</span>
+          </div>
+        </div>
+
+        <!-- masthead -->
+        <div style="padding:34px 36px 28px;border-bottom:3px double #16130f;">
+          <div style="display:flex;gap:26px;align-items:flex-end;">
+            <div style="flex:none;width:108px;height:132px;background:repeating-linear-gradient(135deg,#e4ddcf,#e4ddcf 6px,#ece6d9 6px,#ece6d9 12px);border:1px solid #16130f;display:flex;align-items:flex-end;justify-content:center;">
+              <span style="font-family:'Newsreader',serif;font-size:40px;color:#b9ab93;padding-bottom:8px;">PS</span>
+            </div>
+            <div style="flex:1;">
+              <div style="font-family:'Public Sans';font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8b2e1f;margin-bottom:8px;">Presiden Republik Indonesia · Menjabat sejak 2024</div>
+              <h2 style="font-family:'Newsreader',serif;font-weight:500;font-size:46px;line-height:0.98;margin:0 0 10px;letter-spacing:-0.015em;">Prabowo Subianto</h2>
+              <div style="display:flex;gap:22px;font-size:13px;color:#4a443d;">
+                <span><strong style="color:#16130f;">37</strong> catatan</span>
+                <span><strong style="color:#16130f;">12</strong> outlet</span>
+                <span><strong style="color:#16130f;">96 rb</strong> komentar dianalisis</span>
+              </div>
+            </div>
+          </div>
+          <!-- aggregate sentiment strip -->
+          <div style="margin-top:24px;padding:16px 18px;background:#efe9dc;border:1px solid #ddd3bf;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+              <span style="font-family:'Public Sans';font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6b645b;">Sentimen rata-rata · seluruh catatan</span>
+              <span style="font-family:'Newsreader',serif;font-size:17px;">+14 · cenderung positif</span>
+            </div>
+            <div style="position:relative;height:10px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+              <div style="position:absolute;left:57%;top:50%;transform:translate(-50%,-50%);width:30px;height:30px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:16px;">🙂</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- records (timeline list) -->
+        <div style="padding:8px 36px 34px;">
+
+          <!-- record 1 -->
+          <div style="padding:26px 0;border-bottom:1px solid #d8cfba;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+              <span style="font-family:'Public Sans';font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#3a4a8b;">Politik</span>
+              <span style="font-size:12.5px;color:#7a7264;">Detik.com · 19 Jun 2026</span>
+            </div>
+            <h3 style="font-family:'Newsreader',serif;font-weight:600;font-size:25px;line-height:1.16;margin:0 0 10px;letter-spacing:-0.01em;">PSI Pede Prabowo Tetap Gandeng Gibran di Pilpres 2029</h3>
+            <p style="font-size:14.5px;line-height:1.62;color:#3e382f;margin:0 0 12px;">Ketua Harian DPP PSI menyatakan yakin Prabowo dan Gibran akan kembali maju bersama pada Pemilu Presiden 2029 untuk memastikan kesinambungan program pemerintah.</p>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+              <span style="font-size:11.5px;font-weight:600;color:#8b2e1f;border:1px solid #d8a99f;background:#f5e7e3;padding:3px 9px;border-radius:2px;display:inline-flex;align-items:center;gap:5px;">⚠ Satu sumber</span>
+              <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:3px 9px;border-radius:2px;">1 kutipan</span>
+              <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:3px 9px;border-radius:2px;">▸ Artikel sumber (1)</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;">
+              <span style="font-family:'Public Sans';font-size:10.5px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#9b9285;">Sentimen YouTube</span>
+              <span style="font-size:12px;color:#7a7264;">2,4 rb komentar</span>
+            </div>
+            <div style="position:relative;height:8px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+              <div style="position:absolute;left:42%;top:50%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:14px;">🙁</div>
+            </div>
+            <div style="display:flex;gap:18px;margin-top:7px;font-size:11.5px;color:#7a7264;">
+              <span>28% positif</span><span>30% netral</span><span>42% negatif</span>
+            </div>
+          </div>
+
+          <!-- record 2 -->
+          <div style="padding:26px 0;border-bottom:1px solid #d8cfba;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+              <span style="font-family:'Public Sans';font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#3d6b4a;">Pertahanan</span>
+              <span style="font-size:12.5px;color:#7a7264;">Kompas · 12 Jun 2026</span>
+            </div>
+            <h3 style="font-family:'Newsreader',serif;font-weight:600;font-size:25px;line-height:1.16;margin:0 0 10px;letter-spacing:-0.01em;">Prabowo Resmikan Tambahan Anggaran Modernisasi Alutsista</h3>
+            <p style="font-size:14.5px;line-height:1.62;color:#3e382f;margin:0 0 10px;">Presiden meresmikan alokasi tambahan untuk modernisasi alat utama sistem persenjataan, menekankan kemandirian industri pertahanan dalam negeri.</p>
+            <p style="font-family:'Newsreader',serif;font-style:italic;font-size:16px;line-height:1.45;color:#16130f;border-left:2px solid #8b2e1f;padding-left:14px;margin:0 0 12px;">“Pertahanan yang kuat adalah syarat mutlak kedaulatan bangsa.”</p>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+              <span style="font-size:11.5px;font-weight:600;color:#3d6b4a;border:1px solid #b6d0bd;background:#e6efe8;padding:3px 9px;border-radius:2px;">✓ Dikuatkan 5 media</span>
+              <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:3px 9px;border-radius:2px;">3 kutipan</span>
+              <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:3px 9px;border-radius:2px;">▸ Artikel sumber (5)</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;">
+              <span style="font-family:'Public Sans';font-size:10.5px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#9b9285;">Sentimen YouTube</span>
+              <span style="font-size:12px;color:#7a7264;">8,1 rb komentar</span>
+            </div>
+            <div style="position:relative;height:8px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+              <div style="position:absolute;left:76%;top:50%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:14px;">🙂</div>
+            </div>
+            <div style="display:flex;gap:18px;margin-top:7px;font-size:11.5px;color:#7a7264;">
+              <span>68% positif</span><span>20% netral</span><span>12% negatif</span>
+            </div>
+          </div>
+
+          <!-- record 3 -->
+          <div style="padding:26px 0 4px;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+              <span style="font-family:'Public Sans';font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#7a5a2e;">Kebijakan Sosial</span>
+              <span style="font-size:12.5px;color:#7a7264;">Antara · 5 Jun 2026</span>
+            </div>
+            <h3 style="font-family:'Newsreader',serif;font-weight:600;font-size:25px;line-height:1.16;margin:0 0 10px;letter-spacing:-0.01em;">Program Makan Bergizi Gratis Tembus 20 Juta Penerima</h3>
+            <p style="font-size:14.5px;line-height:1.62;color:#3e382f;margin:0 0 10px;">Pemerintah melaporkan program telah menjangkau 20 juta penerima manfaat, meski sejumlah daerah masih melaporkan kendala distribusi.</p>
+            <p style="font-family:'Newsreader',serif;font-style:italic;font-size:16px;line-height:1.45;color:#16130f;border-left:2px solid #8b2e1f;padding-left:14px;margin:0 0 12px;">“Tidak boleh ada satu pun anak Indonesia yang kelaparan.”</p>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+              <span style="font-size:11.5px;font-weight:600;color:#3d6b4a;border:1px solid #b6d0bd;background:#e6efe8;padding:3px 9px;border-radius:2px;">✓ Dikuatkan 8 media</span>
+              <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:3px 9px;border-radius:2px;">6 kutipan</span>
+              <span style="font-size:11.5px;font-weight:600;color:#6b645b;border:1px solid #d8cfba;padding:3px 9px;border-radius:2px;">▸ Artikel sumber (8)</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;">
+              <span style="font-family:'Public Sans';font-size:10.5px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#9b9285;">Sentimen YouTube</span>
+              <span style="font-size:12px;color:#7a7264;">14 rb komentar</span>
+            </div>
+            <div style="position:relative;height:8px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+              <div style="position:absolute;left:54%;top:50%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:#f6f2e9;border:1px solid #16130f;display:flex;align-items:center;justify-content:center;font-size:14px;">😐</div>
+            </div>
+            <div style="display:flex;gap:18px;margin-top:7px;font-size:11.5px;color:#7a7264;">
+              <span>41% positif</span><span>30% netral</span><span>29% negatif</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- DIRECTION B — INDEKS (bold grotesk data-editorial) -->
+    <!-- ============================================================ -->
+    <div style="flex:none;width:880px;">
+      <div style="font-family:'Public Sans';font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#6b645b;margin-bottom:12px;">Arah B — “Indeks” · grotesk tebal, data-editorial</div>
+      <div data-screen-label="Tokoh / Arah B" style="background:#ffffff;border-radius:2px;box-shadow:0 1px 3px rgba(0,0,0,.1);overflow:hidden;color:#111111;font-family:'Archivo',sans-serif;">
+
+        <!-- nav -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 34px;border-bottom:1px solid #ececec;">
+          <div style="font-family:'Archivo';font-weight:900;font-size:19px;letter-spacing:-0.02em;text-transform:uppercase;">Jejak<span style="color:#1b4dff;">Suara</span></div>
+          <div style="display:flex;gap:24px;font-size:13px;font-weight:600;color:#888;">
+            <span>Beranda</span><span>Tokoh</span><span style="color:#111;">Rekam Jejak</span>
+          </div>
+        </div>
+
+        <!-- masthead -->
+        <div style="padding:32px 34px;background:#0e0e10;color:#fff;">
+          <div style="display:flex;gap:24px;align-items:center;">
+            <div style="flex:none;width:88px;height:88px;border-radius:50%;background:linear-gradient(135deg,#2a2a30,#46464f);display:flex;align-items:center;justify-content:center;font-family:'Archivo';font-weight:800;font-size:30px;color:#8b8b96;border:2px solid #2a2a30;">PS</div>
+            <div style="flex:1;">
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1b4dff;margin-bottom:6px;">Presiden RI · Menjabat sejak 2024</div>
+              <h2 style="font-family:'Archivo';font-weight:900;font-size:38px;line-height:0.95;margin:0;letter-spacing:-0.02em;text-transform:uppercase;">Prabowo Subianto</h2>
+            </div>
+          </div>
+          <!-- stat row -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#26262b;margin-top:24px;border:1px solid #26262b;">
+            <div style="background:#0e0e10;padding:14px 16px;">
+              <div style="font-family:'Archivo';font-weight:800;font-size:24px;">37</div>
+              <div style="font-size:11px;color:#8b8b96;font-weight:600;">catatan</div>
+            </div>
+            <div style="background:#0e0e10;padding:14px 16px;">
+              <div style="font-family:'Archivo';font-weight:800;font-size:24px;">12</div>
+              <div style="font-size:11px;color:#8b8b96;font-weight:600;">outlet</div>
+            </div>
+            <div style="background:#0e0e10;padding:14px 16px;">
+              <div style="font-family:'Archivo';font-weight:800;font-size:24px;">96<span style="font-size:14px;">rb</span></div>
+              <div style="font-size:11px;color:#8b8b96;font-weight:600;">komentar</div>
+            </div>
+            <div style="background:#0e0e10;padding:14px 16px;">
+              <div style="font-family:'Archivo';font-weight:800;font-size:24px;color:#3ec98a;">+14</div>
+              <div style="font-size:11px;color:#8b8b96;font-weight:600;">sentimen</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- records -->
+        <div style="padding:4px 34px 30px;">
+
+          <!-- record 1 -->
+          <div style="padding:24px 0;border-bottom:1px solid #ececec;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+              <span style="font-size:10.5px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#fff;background:#3a4a8b;padding:4px 9px;border-radius:3px;">Politik</span>
+              <span style="font-size:12.5px;font-weight:600;color:#999;">Detik.com</span>
+              <span style="font-size:12.5px;color:#bbb;">·</span>
+              <span style="font-size:12.5px;font-weight:600;color:#999;">19 Jun 2026</span>
+            </div>
+            <div style="display:flex;gap:24px;align-items:flex-start;">
+              <div style="flex:1;">
+                <h3 style="font-family:'Archivo';font-weight:800;font-size:21px;line-height:1.15;margin:0 0 9px;letter-spacing:-0.01em;">PSI Pede Prabowo Tetap Gandeng Gibran di Pilpres 2029</h3>
+                <p style="font-family:'Public Sans';font-size:14px;line-height:1.6;color:#555;margin:0 0 12px;">Ketua Harian DPP PSI menyatakan yakin Prabowo dan Gibran akan kembali maju bersama pada Pemilu Presiden 2029.</p>
+                <div style="display:flex;gap:7px;">
+                  <span style="font-size:11px;font-weight:700;color:#c0392b;background:#fbeae7;padding:4px 9px;border-radius:3px;">⚠ Satu sumber</span>
+                  <span style="font-size:11px;font-weight:700;color:#777;background:#f3f3f3;padding:4px 9px;border-radius:3px;">1 kutipan</span>
+                </div>
+              </div>
+              <!-- sentiment card -->
+              <div style="flex:none;width:232px;background:#f7f7f8;border-radius:8px;padding:15px 16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                  <span style="font-size:10px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#999;">Sentimen</span>
+                  <span style="font-family:'Archivo';font-weight:800;font-size:18px;color:#c0392b;">−15</span>
+                </div>
+                <div style="position:relative;height:9px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+                  <div style="position:absolute;left:42%;top:50%;transform:translate(-50%,-50%);width:28px;height:28px;border-radius:50%;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;font-size:15px;">🙁</div>
+                </div>
+                <div style="display:flex;height:6px;border-radius:99px;overflow:hidden;margin-top:14px;">
+                  <div style="width:28%;background:#2e9e6b;"></div><div style="width:30%;background:#d9d4c6;"></div><div style="width:42%;background:#d6453e;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:7px;font-size:10.5px;font-weight:600;color:#888;">
+                  <span style="color:#2e9e6b;">28%</span><span>30%</span><span style="color:#d6453e;">42%</span>
+                </div>
+                <div style="font-size:10.5px;color:#aaa;margin-top:8px;">2,4 rb komentar YouTube</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- record 2 -->
+          <div style="padding:24px 0;border-bottom:1px solid #ececec;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+              <span style="font-size:10.5px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#fff;background:#3d6b4a;padding:4px 9px;border-radius:3px;">Pertahanan</span>
+              <span style="font-size:12.5px;font-weight:600;color:#999;">Kompas</span>
+              <span style="font-size:12.5px;color:#bbb;">·</span>
+              <span style="font-size:12.5px;font-weight:600;color:#999;">12 Jun 2026</span>
+            </div>
+            <div style="display:flex;gap:24px;align-items:flex-start;">
+              <div style="flex:1;">
+                <h3 style="font-family:'Archivo';font-weight:800;font-size:21px;line-height:1.15;margin:0 0 9px;letter-spacing:-0.01em;">Prabowo Resmikan Tambahan Anggaran Modernisasi Alutsista</h3>
+                <p style="font-family:'Public Sans';font-size:14px;line-height:1.6;color:#555;margin:0 0 10px;">Presiden meresmikan alokasi tambahan untuk modernisasi alutsista, menekankan kemandirian industri pertahanan dalam negeri.</p>
+                <p style="font-family:'Archivo';font-weight:600;font-size:14.5px;line-height:1.4;color:#111;margin:0 0 12px;border-left:3px solid #1b4dff;padding-left:12px;">“Pertahanan yang kuat adalah syarat mutlak kedaulatan bangsa.”</p>
+                <div style="display:flex;gap:7px;">
+                  <span style="font-size:11px;font-weight:700;color:#1f7a4d;background:#e7f3ec;padding:4px 9px;border-radius:3px;">✓ Dikuatkan 5 media</span>
+                  <span style="font-size:11px;font-weight:700;color:#777;background:#f3f3f3;padding:4px 9px;border-radius:3px;">3 kutipan</span>
+                </div>
+              </div>
+              <div style="flex:none;width:232px;background:#f7f7f8;border-radius:8px;padding:15px 16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                  <span style="font-size:10px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#999;">Sentimen</span>
+                  <span style="font-family:'Archivo';font-weight:800;font-size:18px;color:#1f7a4d;">+52</span>
+                </div>
+                <div style="position:relative;height:9px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+                  <div style="position:absolute;left:76%;top:50%;transform:translate(-50%,-50%);width:28px;height:28px;border-radius:50%;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;font-size:15px;">🙂</div>
+                </div>
+                <div style="display:flex;height:6px;border-radius:99px;overflow:hidden;margin-top:14px;">
+                  <div style="width:68%;background:#2e9e6b;"></div><div style="width:20%;background:#d9d4c6;"></div><div style="width:12%;background:#d6453e;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:7px;font-size:10.5px;font-weight:600;color:#888;">
+                  <span style="color:#2e9e6b;">68%</span><span>20%</span><span style="color:#d6453e;">12%</span>
+                </div>
+                <div style="font-size:10.5px;color:#aaa;margin-top:8px;">8,1 rb komentar YouTube</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- record 3 -->
+          <div style="padding:24px 0 4px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+              <span style="font-size:10.5px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#fff;background:#7a5a2e;padding:4px 9px;border-radius:3px;">Kebijakan Sosial</span>
+              <span style="font-size:12.5px;font-weight:600;color:#999;">Antara</span>
+              <span style="font-size:12.5px;color:#bbb;">·</span>
+              <span style="font-size:12.5px;font-weight:600;color:#999;">5 Jun 2026</span>
+            </div>
+            <div style="display:flex;gap:24px;align-items:flex-start;">
+              <div style="flex:1;">
+                <h3 style="font-family:'Archivo';font-weight:800;font-size:21px;line-height:1.15;margin:0 0 9px;letter-spacing:-0.01em;">Program Makan Bergizi Gratis Tembus 20 Juta Penerima</h3>
+                <p style="font-family:'Public Sans';font-size:14px;line-height:1.6;color:#555;margin:0 0 10px;">Program menjangkau 20 juta penerima manfaat, meski sejumlah daerah masih melaporkan kendala distribusi.</p>
+                <p style="font-family:'Archivo';font-weight:600;font-size:14.5px;line-height:1.4;color:#111;margin:0 0 12px;border-left:3px solid #1b4dff;padding-left:12px;">“Tidak boleh ada satu pun anak Indonesia yang kelaparan.”</p>
+                <div style="display:flex;gap:7px;">
+                  <span style="font-size:11px;font-weight:700;color:#1f7a4d;background:#e7f3ec;padding:4px 9px;border-radius:3px;">✓ Dikuatkan 8 media</span>
+                  <span style="font-size:11px;font-weight:700;color:#777;background:#f3f3f3;padding:4px 9px;border-radius:3px;">6 kutipan</span>
+                </div>
+              </div>
+              <div style="flex:none;width:232px;background:#f7f7f8;border-radius:8px;padding:15px 16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                  <span style="font-size:10px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#999;">Sentimen</span>
+                  <span style="font-family:'Archivo';font-weight:800;font-size:18px;color:#9b7b3f;">+8</span>
+                </div>
+                <div style="position:relative;height:9px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+                  <div style="position:absolute;left:54%;top:50%;transform:translate(-50%,-50%);width:28px;height:28px;border-radius:50%;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;font-size:15px;">😐</div>
+                </div>
+                <div style="display:flex;height:6px;border-radius:99px;overflow:hidden;margin-top:14px;">
+                  <div style="width:41%;background:#2e9e6b;"></div><div style="width:30%;background:#d9d4c6;"></div><div style="width:29%;background:#d6453e;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:7px;font-size:10.5px;font-weight:600;color:#888;">
+                  <span style="color:#2e9e6b;">41%</span><span>30%</span><span style="color:#d6453e;">29%</span>
+                </div>
+                <div style="font-size:10.5px;color:#aaa;margin-top:8px;">14 rb komentar YouTube</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- DIRECTION C — LINI (dark modern feed) -->
+    <!-- ============================================================ -->
+    <div style="flex:none;width:880px;">
+      <div style="font-family:'Public Sans';font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#6b645b;margin-bottom:12px;">Arah C — “Lini” · feed gelap modern</div>
+      <div data-screen-label="Tokoh / Arah C" style="background:#15161b;border-radius:2px;box-shadow:0 1px 3px rgba(0,0,0,.1);overflow:hidden;color:#eceaf2;font-family:'Space Grotesk',sans-serif;">
+
+        <!-- nav -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 34px;border-bottom:1px solid #26272f;">
+          <div style="font-family:'Space Grotesk';font-weight:700;font-size:19px;letter-spacing:-0.01em;">Jejak Suara</div>
+          <div style="display:flex;gap:24px;font-size:13px;font-weight:500;color:#7d7e8c;">
+            <span>Beranda</span><span>Tokoh</span><span style="color:#eceaf2;">Rekam Jejak</span>
+          </div>
+        </div>
+
+        <!-- masthead -->
+        <div style="padding:34px;position:relative;background:radial-gradient(120% 120% at 80% 0%,#23202e 0%,#15161b 60%);">
+          <div style="display:flex;gap:22px;align-items:center;">
+            <div style="flex:none;width:96px;height:96px;border-radius:20px;background:linear-gradient(135deg,#2c2a38,#3a3850);display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk';font-weight:700;font-size:32px;color:#6f6c85;">PS</div>
+            <div style="flex:1;">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8b7bff;margin-bottom:7px;">Presiden RI · Menjabat sejak 2024</div>
+              <h2 style="font-family:'Space Grotesk';font-weight:700;font-size:36px;line-height:1;margin:0 0 12px;letter-spacing:-0.02em;">Prabowo Subianto</h2>
+              <div style="display:flex;gap:18px;font-size:13px;color:#9a9bab;">
+                <span><strong style="color:#eceaf2;">37</strong> catatan</span>
+                <span><strong style="color:#eceaf2;">12</strong> outlet</span>
+                <span><strong style="color:#eceaf2;">96 rb</strong> komentar</span>
+              </div>
+            </div>
+            <div style="flex:none;text-align:center;background:#1d1e26;border:1px solid #2e2f3a;border-radius:16px;padding:16px 22px;">
+              <div style="font-family:'Space Grotesk';font-weight:700;font-size:30px;color:#3ec98a;line-height:1;">+14</div>
+              <div style="font-size:10.5px;color:#7d7e8c;margin-top:6px;letter-spacing:0.06em;text-transform:uppercase;">Sentimen<br>rata-rata</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- record cards -->
+        <div style="padding:8px 34px 34px;display:flex;flex-direction:column;gap:18px;">
+
+          <!-- record 1 -->
+          <div style="background:#1b1c23;border:1px solid #26272f;border-radius:18px;padding:24px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+              <span style="font-size:10.5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:#a7b3ff;background:rgba(91,108,255,.14);padding:4px 11px;border-radius:99px;">Politik</span>
+              <span style="font-size:12.5px;color:#7d7e8c;">Detik.com · 19 Jun 2026</span>
+            </div>
+            <h3 style="font-family:'Space Grotesk';font-weight:700;font-size:23px;line-height:1.18;margin:0 0 10px;letter-spacing:-0.01em;">PSI Pede Prabowo Tetap Gandeng Gibran di Pilpres 2029</h3>
+            <p style="font-size:14.5px;line-height:1.6;color:#a9aab8;margin:0 0 16px;">Ketua Harian DPP PSI menyatakan yakin Prabowo dan Gibran akan kembali maju bersama pada Pemilu Presiden 2029.</p>
+            <div style="display:flex;gap:8px;margin-bottom:20px;">
+              <span style="font-size:11px;font-weight:600;color:#ff8f7a;background:rgba(214,69,62,.16);padding:5px 11px;border-radius:99px;">⚠ Satu sumber</span>
+              <span style="font-size:11px;font-weight:600;color:#9a9bab;background:#23242c;padding:5px 11px;border-radius:99px;">1 kutipan</span>
+              <span style="font-size:11px;font-weight:600;color:#9a9bab;background:#23242c;padding:5px 11px;border-radius:99px;">Artikel sumber (1)</span>
+            </div>
+            <!-- big sentiment -->
+            <div style="background:#15161b;border-radius:14px;padding:18px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#7d7e8c;">▶ Sentimen YouTube · 2,4 rb komentar</span>
+                <span style="font-family:'Space Grotesk';font-weight:700;font-size:20px;color:#ff8f7a;">−15</span>
+              </div>
+              <div style="position:relative;height:12px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+                <div style="position:absolute;left:42%;top:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;background:#1b1c23;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:17px;box-shadow:0 2px 10px rgba(0,0,0,.5);">🙁</div>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:12px;color:#9a9bab;">
+                <span><strong style="color:#3ec98a;">28%</strong> positif</span><span><strong style="color:#cfcad8;">30%</strong> netral</span><span><strong style="color:#ff8f7a;">42%</strong> negatif</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- record 2 -->
+          <div style="background:#1b1c23;border:1px solid #26272f;border-radius:18px;padding:24px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+              <span style="font-size:10.5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:#86e3b4;background:rgba(46,158,107,.16);padding:4px 11px;border-radius:99px;">Pertahanan</span>
+              <span style="font-size:12.5px;color:#7d7e8c;">Kompas · 12 Jun 2026</span>
+            </div>
+            <h3 style="font-family:'Space Grotesk';font-weight:700;font-size:23px;line-height:1.18;margin:0 0 10px;letter-spacing:-0.01em;">Prabowo Resmikan Tambahan Anggaran Modernisasi Alutsista</h3>
+            <p style="font-size:14.5px;line-height:1.6;color:#a9aab8;margin:0 0 14px;">Presiden meresmikan alokasi tambahan untuk modernisasi alutsista, menekankan kemandirian industri pertahanan dalam negeri.</p>
+            <p style="font-family:'Space Grotesk';font-weight:500;font-size:15px;line-height:1.45;color:#eceaf2;margin:0 0 16px;border-left:2px solid #8b7bff;padding-left:14px;">“Pertahanan yang kuat adalah syarat mutlak kedaulatan bangsa.”</p>
+            <div style="display:flex;gap:8px;margin-bottom:20px;">
+              <span style="font-size:11px;font-weight:600;color:#86e3b4;background:rgba(46,158,107,.16);padding:5px 11px;border-radius:99px;">✓ Dikuatkan 5 media</span>
+              <span style="font-size:11px;font-weight:600;color:#9a9bab;background:#23242c;padding:5px 11px;border-radius:99px;">3 kutipan</span>
+            </div>
+            <div style="background:#15161b;border-radius:14px;padding:18px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#7d7e8c;">▶ Sentimen YouTube · 8,1 rb komentar</span>
+                <span style="font-family:'Space Grotesk';font-weight:700;font-size:20px;color:#3ec98a;">+52</span>
+              </div>
+              <div style="position:relative;height:12px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+                <div style="position:absolute;left:76%;top:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;background:#1b1c23;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:17px;box-shadow:0 2px 10px rgba(0,0,0,.5);">🙂</div>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:12px;color:#9a9bab;">
+                <span><strong style="color:#3ec98a;">68%</strong> positif</span><span><strong style="color:#cfcad8;">20%</strong> netral</span><span><strong style="color:#ff8f7a;">12%</strong> negatif</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- record 3 -->
+          <div style="background:#1b1c23;border:1px solid #26272f;border-radius:18px;padding:24px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+              <span style="font-size:10.5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:#f0c986;background:rgba(224,165,59,.16);padding:4px 11px;border-radius:99px;">Kebijakan Sosial</span>
+              <span style="font-size:12.5px;color:#7d7e8c;">Antara · 5 Jun 2026</span>
+            </div>
+            <h3 style="font-family:'Space Grotesk';font-weight:700;font-size:23px;line-height:1.18;margin:0 0 10px;letter-spacing:-0.01em;">Program Makan Bergizi Gratis Tembus 20 Juta Penerima</h3>
+            <p style="font-size:14.5px;line-height:1.6;color:#a9aab8;margin:0 0 14px;">Program menjangkau 20 juta penerima manfaat, meski sejumlah daerah masih melaporkan kendala distribusi.</p>
+            <p style="font-family:'Space Grotesk';font-weight:500;font-size:15px;line-height:1.45;color:#eceaf2;margin:0 0 16px;border-left:2px solid #8b7bff;padding-left:14px;">“Tidak boleh ada satu pun anak Indonesia yang kelaparan.”</p>
+            <div style="display:flex;gap:8px;margin-bottom:20px;">
+              <span style="font-size:11px;font-weight:600;color:#86e3b4;background:rgba(46,158,107,.16);padding:5px 11px;border-radius:99px;">✓ Dikuatkan 8 media</span>
+              <span style="font-size:11px;font-weight:600;color:#9a9bab;background:#23242c;padding:5px 11px;border-radius:99px;">6 kutipan</span>
+            </div>
+            <div style="background:#15161b;border-radius:14px;padding:18px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#7d7e8c;">▶ Sentimen YouTube · 14 rb komentar</span>
+                <span style="font-family:'Space Grotesk';font-weight:700;font-size:20px;color:#f0c986;">+8</span>
+              </div>
+              <div style="position:relative;height:12px;border-radius:99px;background:linear-gradient(90deg,#d6453e,#e0a53b 50%,#2e9e6b);">
+                <div style="position:absolute;left:54%;top:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;background:#1b1c23;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:17px;box-shadow:0 2px 10px rgba(0,0,0,.5);">😐</div>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:12px;color:#9a9bab;">
+                <span><strong style="color:#3ec98a;">41%</strong> positif</span><span><strong style="color:#cfcad8;">30%</strong> netral</span><span><strong style="color:#ff8f7a;">29%</strong> negatif</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

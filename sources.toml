@@ -1,0 +1,36 @@
+# News sources to ingest from.
+# Indonesian outlets with public RSS feeds. Diversity of ownership/alignment
+# matters for fair corroboration — don't load only one media group.
+#
+# `weight` is a rough independence/reliability hint (0.0–1.0) used later when
+# scoring corroboration. It is NOT an editorial endorsement; tune over time.
+
+[[source]]
+name = "Antara"
+rss = "https://www.antaranews.com/rss/terkini"
+weight = 0.9          # state news agency — wide coverage, primary-ish
+
+[[source]]
+name = "Kompas"
+rss = "https://www.kompas.com/feed"
+weight = 0.85
+
+[[source]]
+name = "Tempo"
+rss = "https://rss.tempo.co/nasional"
+weight = 0.85
+
+[[source]]
+name = "CNN Indonesia"
+rss = "https://www.cnnindonesia.com/nasional/rss"
+weight = 0.8
+
+[[source]]
+name = "Detik"
+rss = "https://news.detik.com/berita/rss"
+weight = 0.75
+
+[[source]]
+name = "Republika"
+rss = "https://www.republika.co.id/rss"
+weight = 0.75
