@@ -267,8 +267,18 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
     return results
 
 
+# Re-fetch sentiment for recent events (within this many days) when older than this.
+_FRESH_DAYS = int(os.environ.get("SENTIMENT_FRESH_DAYS", "3"))
+_STALE_HOURS = int(os.environ.get("SENTIMENT_STALE_HOURS", "6"))
+
+
 def sentiment_pending(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
-    """Run sentiment for APPROVED events that don't have YouTube + Reddit results yet.
+    """Run sentiment for events that need it.
+
+    Two categories:
+    1. Approved events with no sentiment rows at all (brand-new).
+    2. Approved events from the last N days whose last sentiment is stale
+       (older than M hours), so we re-fetch fresh comments.
 
     We only measure reaction on events we'd actually publish — no point spending
     quota on rejected drafts.
@@ -276,12 +286,27 @@ def sentiment_pending(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
     ids = [r["id"] for r in conn.execute(
         """SELECT e.id FROM events e
            WHERE e.status = 'approved'
-             AND (NOT EXISTS (SELECT 1 FROM sentiment s WHERE s.event_id = e.id AND s.channel = 'youtube')
-                  OR NOT EXISTS (SELECT 1 FROM sentiment s WHERE s.event_id = e.id AND s.channel = 'reddit'))
+             AND (
+               -- entirely un-analysed
+               NOT EXISTS (SELECT 1 FROM sentiment s WHERE s.event_id = e.id)
+               -- OR recent + stale
+               OR (
+                 e.event_date >= datetime('now', ? || ' days', 'start of day')
+                 AND EXISTS (
+                   SELECT 1 FROM sentiment s
+                   WHERE s.event_id = e.id
+                   GROUP BY s.event_id
+                   HAVING max(s.collected_at) <= datetime('now', ? || ' hours')
+                 )
+               )
+             )
            ORDER BY e.event_date DESC LIMIT ?""",
-        (limit,),
+        (str(-_FRESH_DAYS), str(-_STALE_HOURS), limit),
     ).fetchall()]
     results: list[dict] = []
     for eid in ids:
+        # Delete stale rows so fresh ones replace them
+        conn.execute("DELETE FROM sentiment WHERE event_id = ?", (eid,))
+        conn.commit()
         results.extend(sentiment_event(conn, eid))
     return results

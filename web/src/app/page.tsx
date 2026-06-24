@@ -80,6 +80,7 @@ function Nav() {
       <div style={{ display: "flex", gap: 28, fontSize: 13, fontWeight: 600, color: "#7a7264" }}>
         <Link href="/" style={{ color: "#16130f", textDecoration: "none" }}>Beranda</Link>
         <Link href="/" style={{ color: "#7a7264", textDecoration: "none" }}>Tokoh</Link>
+        <Link href="/timeline" style={{ color: "#7a7264", textDecoration: "none" }}>Lini Masa</Link>
         <Link href="/review" style={{ color: "#7a7264", textDecoration: "none" }}>Antrean Tinjauan</Link>
         <span style={{ cursor: "pointer" }}>Tentang</span>
       </div>

@@ -36,4 +36,7 @@
     color: var(--color-ink);
     font-family: var(--font-sans);
   }
+  .fig-link:hover {
+    color: var(--color-clay) !important;
+  }
 }

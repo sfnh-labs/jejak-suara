@@ -11,7 +11,8 @@
     python -m jejak.cli reject  <event_id>
     python -m jejak.cli timeline <figure_id> # approved, publishable events
     python -m jejak.cli youtube-ingest       # search YouTube + fetch transcripts
-    python -m jejak.cli run                  # ingest + fetch + cluster + summarize + youtube-ingest
+    python -m jejak.cli translate            # auto-translate non-ID articles
+    python -m jejak.cli run                  # ingest + fetch + translate + cluster + summarize + youtube-ingest
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ import sys
 import re
 
 from . import cluster as cluster_mod
-from . import db, fetch, ingest, review, sentiment, summarize
+from . import db, fetch, ingest, review, sentiment, summarize, translate
 from . import youtube_ingest
 
 _BULAN = [
@@ -71,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("summarize")
     sub.add_parser("review")
     sub.add_parser("sentiment")
+    sub.add_parser("translate")
     sub.add_parser("run")
     sub.add_parser("youtube-ingest")
     p_app = sub.add_parser("approve"); p_app.add_argument("event_id", type=int)
@@ -94,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
             print("ingest:", ingest.ingest(conn))
         if args.cmd in ("fetch", "run"):
             print("fetch:", fetch.fetch_bodies(conn))
+        if args.cmd in ("translate", "run"):
+            print("translate:", translate.translate_articles(conn))
         if args.cmd == "run":
             print("youtube-ingest:", youtube_ingest.ingest_youtube(conn))
         if args.cmd in ("cluster", "run"):

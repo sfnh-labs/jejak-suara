@@ -5,3 +5,4 @@ feedparser>=6.0.11     # RSS/Atom ingestion for Indonesian news outlets
 trafilatura>=2.0.0     # full-text article extraction (fetch stage); stdlib fallback if absent
 flask>=3.0.0           # web UI: public timeline + reviewer queue (server-rendered)
 youtube-transcript-api>=1.2.3  # YouTube transcript fetching for video news ingestion
+langdetect>=1.0.9             # language detection for auto-translate

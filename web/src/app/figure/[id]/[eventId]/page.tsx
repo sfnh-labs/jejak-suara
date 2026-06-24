@@ -1,4 +1,5 @@
 import Link from "next/link";
+import TranslatedText from "@/components/TranslatedText";
 
 const eventData = {
   1: {
@@ -117,7 +118,9 @@ export default async function DetailCatatan({ params }: { params: Promise<{ id: 
 
             {/* Summary */}
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9b9285", marginBottom: 12 }}>Ringkasan</div>
-            <p style={{ fontFamily: "'Newsreader', serif", fontWeight: 400, fontSize: 19, lineHeight: 1.6, color: "#16130f", margin: "0 0 22px" }}>{rec.summary}</p>
+            <p style={{ fontFamily: "'Newsreader', serif", fontWeight: 400, fontSize: 19, lineHeight: 1.6, color: "#16130f", margin: "0 0 22px" }}>
+              <TranslatedText translated={rec.summary} original={null} originalLang={null} as="span" />
+            </p>
 
             {/* Quote */}
             {rec.quote && (

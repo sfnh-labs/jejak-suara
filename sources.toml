@@ -34,3 +34,23 @@ weight = 0.75
 name = "Republika"
 rss = "https://www.republika.co.id/rss"
 weight = 0.75
+
+# --- International sources ---
+# These provide external/global perspective on Indonesian figures.
+# Weights kept moderate — lower saturation in Indonesian domestic coverage
+# means fewer figure matches, but valuable for cross-border corroboration.
+
+[[source]]
+name = "Al Jazeera"
+rss = "https://www.aljazeera.com/xml/rss/all.xml"
+weight = 0.7
+
+[[source]]
+name = "The Guardian"
+rss = "https://www.theguardian.com/world/indonesia/rss"
+weight = 0.8          # Indonesia-specific section, high relevance
+
+[[source]]
+name = "BBC News"
+rss = "https://feeds.bbci.co.uk/news/world/asia/rss.xml"
+weight = 0.65

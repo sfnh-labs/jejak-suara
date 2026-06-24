@@ -1,3 +1,15 @@
+CREATE TABLE IF NOT EXISTS events (
+    id          SERIAL PRIMARY KEY,
+    figure_id   TEXT NOT NULL,
+    title       TEXT,
+    event_date  TEXT,
+    event_type  TEXT DEFAULT 'other',
+    status      TEXT NOT NULL DEFAULT 'new',
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_figure ON events(figure_id);
+CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
+
 CREATE TABLE IF NOT EXISTS articles (
     id           TEXT PRIMARY KEY,
     figure_id    TEXT NOT NULL,
@@ -6,6 +18,8 @@ CREATE TABLE IF NOT EXISTS articles (
     title        TEXT NOT NULL,
     summary      TEXT,
     body         TEXT,
+    body_original TEXT,
+    body_lang    TEXT DEFAULT 'id',
     fetch_status TEXT,
     published_at TEXT,
     fetched_at   TEXT NOT NULL,
@@ -13,17 +27,6 @@ CREATE TABLE IF NOT EXISTS articles (
 );
 CREATE INDEX IF NOT EXISTS idx_articles_figure ON articles(figure_id);
 CREATE INDEX IF NOT EXISTS idx_articles_event  ON articles(event_id);
-
-CREATE TABLE IF NOT EXISTS events (
-    id          SERIAL PRIMARY KEY,
-    figure_id   TEXT NOT NULL,
-    title       TEXT,
-    event_date  TEXT,
-    status      TEXT NOT NULL DEFAULT 'new',
-    created_at  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_events_figure ON events(figure_id);
-CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 
 CREATE TABLE IF NOT EXISTS event_summaries (
     event_id            INTEGER PRIMARY KEY REFERENCES events(id),

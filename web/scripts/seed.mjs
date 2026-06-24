@@ -1,5 +1,5 @@
 import sqlite3 from "better-sqlite3";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -19,32 +19,32 @@ async function main() {
   const { Pool } = await import("@neondatabase/serverless");
   const pool = new Pool({ connectionString: dbUrl });
 
+  const source = join(ROOT, "..", "jejak.db");
+  const sqlite = new sqlite3(source);
+
   try {
     console.log("Applying schema...");
     for (const stmt of SCHEMA.split(";").filter((s) => s.trim())) {
       await pool.query(stmt);
     }
 
-    const source = join(ROOT, "..", "jejak.db");
-    const sqlite = new sqlite3(source);
-
-    const categories = [
-      { table: "events", key: "id", cols: ["figure_id", "title", "event_date", "status", "created_at"] },
+    const tables = [
+      { table: "events", key: "id", cols: ["id", "figure_id", "title", "event_date", "status", "created_at"] },
       { table: "event_summaries", key: "event_id", cols: ["event_id", "summary_text", "citations_json", "corroboration_count", "single_source_flag", "model", "generated_at"] },
-      { table: "sentiment", key: "id", cols: ["event_id", "channel", "score", "label", "sample_size", "samples_json", "collected_at"], skip: true },
-      { table: "corrections", key: "id", cols: ["event_id", "submitted_by", "body", "status", "created_at"], skip: true },
-      { table: "articles", key: "id", cols: ["id", "figure_id", "source", "url", "title", "summary", "body", "fetch_status", "published_at", "fetched_at", "event_id"], skip: true },
+      { table: "sentiment", key: "id", cols: ["event_id", "channel", "score", "label", "sample_size", "samples_json", "collected_at"] },
+      { table: "corrections", key: "id", cols: ["event_id", "submitted_by", "body", "status", "created_at"] },
+      { table: "articles", key: "id", cols: ["id", "figure_id", "source", "url", "title", "summary", "body", "fetch_status", "published_at", "fetched_at", "event_id"] },
     ];
 
-    for (const { table, key, cols } of categories) {
-      const rows = sqlite.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
+    for (const { table, key, cols } of tables) {
+      const rows = sqlite.prepare(`SELECT * FROM ${table}`).all();
       if (rows.length === 0) {
-        console.log(`  ${table}: 0 rows (skipped)`);
+        console.log(`  ${table}: 0 rows`);
         continue;
       }
 
-      const placeholders = cols.map(() => "?").join(", ");
       const names = cols.join(", ");
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
 
       for (const row of rows) {
         const values = cols.map((c) => row[c] ?? null);
@@ -62,19 +62,18 @@ async function main() {
 
     console.log("Seed complete.");
   } finally {
-    sqlite?.close();
+    sqlite.close();
     await pool.end();
   }
 }
 
 async function dumpSql() {
-  const { default: sqlite3 } = await import("better-sqlite3");
   const source = join(ROOT, "..", "jejak.db");
   const sqlite = new sqlite3(source);
   const lines = [SCHEMA, ""];
 
   for (const table of ["events", "event_summaries", "sentiment", "corrections", "articles"]) {
-    const rows = sqlite.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
+    const rows = sqlite.prepare(`SELECT * FROM ${table}`).all();
     for (const row of rows) {
       const cols = Object.keys(row).filter((k) => row[k] !== null);
       const vals = cols.map((c) => {
@@ -82,9 +81,7 @@ async function dumpSql() {
         if (typeof v === "number") return v;
         return `'${String(v).replace(/'/g, "''")}'`;
       });
-      const names = cols.join(", ");
-      const placeholders = vals.join(", ");
-      lines.push(`INSERT INTO ${table} (${names}) VALUES (${placeholders});`);
+      lines.push(`INSERT INTO ${table} (${cols.join(", ")}) VALUES (${vals.join(", ")});`);
     }
     if (rows.length > 0) lines.push("");
     console.log(`  ${table}: ${rows.length} rows`);
@@ -93,6 +90,7 @@ async function dumpSql() {
   const outPath = join(ROOT, "scripts", "seed.sql");
   writeFileSync(outPath, lines.join("\n"), "utf-8");
   console.log(`\nSQL dump written to ${outPath}`);
+  sqlite.close();
 }
 
 main().catch((err) => {

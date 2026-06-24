@@ -28,6 +28,33 @@ WINDOW_DAYS = 7
 THRESHOLD = 0.58
 MIN_SHARED = 3
 
+# Keyword-based event type inference from article text.
+_EVENT_TYPE_KEYWORDS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\b(pidato|berpidato|orasi|pida(to|h))\b", re.I), "Pidato"),
+    (re.compile(r"\b(debat|berdebat|debat(us|er)?)\b", re.I), "Debat"),
+    (re.compile(r"\b(demonstrasi|demo|unjuk rasa|protes|demo(besaran)?)\b", re.I), "Demonstrasi"),
+    (re.compile(r"\b(kebijakan|kebijakan baru|peraturan|regulasi|beleid)\b", re.I), "Kebijakan"),
+    (re.compile(r"\b(kunjungan|berkunjung|melawat|lawatan)\b", re.I), "Kunjungan"),
+    (re.compile(r"\b(pertemuan|bertemu|rapat|sidang|audiensi)\b", re.I), "Pertemuan"),
+    (re.compile(r"\b(wawancara|interviu|interview)\b", re.I), "Wawancara"),
+    (re.compile(r"\b(konferensi pers|jumpa pers|press conference)\b", re.I), "Konferensi Pers"),
+    (re.compile(r"\b(pernyataan|pernyataan resmi|siaran pers)\b", re.I), "Pernyataan"),
+    (re.compile(r"\b(pelantikan|dilantik|pengukuhan|inaugurasi)\b", re.I), "Pelantikan"),
+    (re.compile(r"\b(keputusan|putusan|vonis|dakwa|tuntutan)\b", re.I), "Keputusan"),
+    (re.compile(r"\b(pemilu|pemilihan|pilkada|pileg|pilpres)\b", re.I), " Pemilu"),
+    (re.compile(r"\b(pencalonan|calon|mencalonkan|kandidat)\b", re.I), "Pencalonan"),
+    (re.compile(r"\b(pengunduran|mundur|resign|mengundurkan diri)\b", re.I), "Pengunduran Diri"),
+]
+
+
+def _infer_event_type(texts: list[str]) -> str:
+    """Infer event type from article texts using keyword matching."""
+    combined = " ".join(texts).lower()
+    for pattern, etype in _EVENT_TYPE_KEYWORDS:
+        if pattern.search(combined):
+            return etype
+    return "other"
+
 
 def _figure_terms() -> set[str]:
     """All figure name/alias tokens (lowered) to exclude from overlap checks."""
@@ -127,10 +154,12 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
                 best, match_id = sim, eid
 
         if match_id is None:
+            art_texts = [txt]
+            etype = _infer_event_type(art_texts)
             cur = conn.execute(
-                "INSERT INTO events (figure_id, title, event_date, status, created_at) "
-                "VALUES (?, ?, ?, 'new', ?)",
-                (art["figure_id"], art["title"], art["published_at"] or now_iso, now_iso),
+                "INSERT INTO events (figure_id, title, event_date, event_type, status, created_at) "
+                "VALUES (?, ?, ?, ?, 'new', ?)",
+                (art["figure_id"], art["title"], art["published_at"] or now_iso, etype, now_iso),
             )
             match_id = cur.lastrowid
             open_events.append((match_id, art["figure_id"], when, vec, toks))
@@ -147,6 +176,12 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
                     if norm > 0:
                         updated = updated / norm
                     open_events[i] = (eid, fig, ewhen, updated, ev_toks | toks)
+                    # Re-infer event_type from all article texts in the event
+                    art_texts = [a["body"] or a["title"] for a in conn.execute(
+                        "SELECT title, body FROM articles WHERE event_id = ?", (eid,)
+                    ).fetchall()] + [txt]
+                    etype = _infer_event_type(art_texts)
+                    conn.execute("UPDATE events SET event_type = ? WHERE id = ?", (etype, eid))
                     break
 
         conn.execute("UPDATE articles SET event_id = ? WHERE id = ?", (match_id, art["id"]))

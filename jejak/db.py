@@ -35,9 +35,10 @@ CREATE INDEX IF NOT EXISTS idx_articles_event  ON articles(event_id);
 
 CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    figure_id   TEXT NOT NULL,
-    title       TEXT,                      -- working title until summarized
-    event_date  TEXT,                      -- earliest article date in cluster
+    figure_id   TEXT NOT NULL,               -- single or comma-separated figure IDs
+    title       TEXT,                       -- working title until summarized
+    event_date  TEXT,                       -- earliest article date in cluster
+    event_type  TEXT DEFAULT 'other',       -- Pidato, Debat, Demonstrasi, Kebijakan, dll.
     status      TEXT NOT NULL DEFAULT 'new', -- new|summarized|approved|rejected
     created_at  TEXT NOT NULL
 );
@@ -92,6 +93,11 @@ _MIGRATIONS = {
     "articles": [
         ("body", "TEXT"),
         ("fetch_status", "TEXT"),
+        ("body_original", "TEXT"),
+        ("body_lang", "TEXT"),
+    ],
+    "events": [
+        ("event_type", "TEXT DEFAULT 'other'"),
     ],
     "sentiment": [
         ("samples_json", "TEXT"),
@@ -100,8 +106,17 @@ _MIGRATIONS = {
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Idempotently add any columns missing from an older database."""
+    """Idempotently add any columns missing from an older database.
+
+    Skips tables that don't exist yet (e.g. first run before init).
+    """
     for table, cols in _MIGRATIONS.items():
+        row = conn.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not row or row[0] == 0:
+            continue
         existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         for name, decl in cols:
             if name not in existing:
