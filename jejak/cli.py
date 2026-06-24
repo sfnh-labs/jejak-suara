@@ -12,11 +12,12 @@
     python -m jejak.cli timeline <figure_id> # approved, publishable events
     python -m jejak.cli youtube-ingest       # search YouTube + fetch transcripts
     python -m jejak.cli translate            # auto-translate non-ID articles
-    python -m jejak.cli run                  # ingest + fetch + translate + cluster + summarize + youtube-ingest
+    python -m jejak.cli run                  # ingest + fetch + translate + cluster + summarize [+ youtube-ingest if key set]
 """
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import re
@@ -99,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             print("fetch:", fetch.fetch_bodies(conn))
         if args.cmd in ("translate", "run"):
             print("translate:", translate.translate_articles(conn))
-        if args.cmd == "run":
+        if args.cmd == "run" and os.environ.get("YOUTUBE_API_KEY"):
             print("youtube-ingest:", youtube_ingest.ingest_youtube(conn))
         if args.cmd in ("cluster", "run"):
             print("cluster:", cluster_mod.cluster(conn))
