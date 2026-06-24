@@ -1,10 +1,16 @@
-import sqlite3 from "better-sqlite3";
 import { readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
+let sqlite3;
+try {
+  sqlite3 = (await import("better-sqlite3")).default;
+} catch {
+  console.log("better-sqlite3 not installed. Run: npm install better-sqlite3");
+  process.exit(1);
+}
 
 const SCHEMA = readFileSync(join(__dirname, "..", "src", "lib", "schema.sql"), "utf-8");
 
