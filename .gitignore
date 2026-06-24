@@ -1,5 +1,5 @@
 # Vercel deployment
-vercel.json
+# vercel.json  # tracked — contains build/output config for CI
 
 # Environment
 .env
