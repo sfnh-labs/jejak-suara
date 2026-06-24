@@ -87,7 +87,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     conn = db.connect()
-    db.migrate(conn)  # idempotently bring an older DB up to the current schema
+    conn.executescript(db.SCHEMA)  # idempotently ensure tables exist (CI/first-run)
+    db.migrate(conn)               # add any columns missing from an older DB
     try:
         if args.cmd in ("ingest", "run"):
             print("ingest:", ingest.ingest(conn))
