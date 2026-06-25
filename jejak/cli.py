@@ -7,12 +7,13 @@
     python -m jejak.cli summarize            # grounded drafts for new events
     python -m jejak.cli review               # list events awaiting approval
     python -m jejak.cli sentiment            # public-reaction scores for approved events
+    python -m jejak.cli buzzer               # coordinated-engagement detection
     python -m jejak.cli approve <event_id>
     python -m jejak.cli reject  <event_id>
     python -m jejak.cli timeline <figure_id> # approved, publishable events
     python -m jejak.cli youtube-ingest       # search YouTube + fetch transcripts
     python -m jejak.cli translate            # auto-translate non-ID articles
-    python -m jejak.cli run                  # ingest + fetch + translate + cluster + summarize [+ youtube-ingest if key set]
+    python -m jejak.cli run                  # ingest + fetch + translate + cluster + summarize [+ sentiment + buzzer]
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ import sys
 import re
 
 from . import cluster as cluster_mod
+from . import buzzer as buzzer_mod
 from . import db, fetch, ingest, review, sentiment, summarize, translate
 from . import youtube_ingest
 
@@ -56,9 +58,6 @@ def _print_review_row(r: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # The pipeline emits non-ASCII (Indonesian text, '●'/'⚠'/'—' glyphs). On
-    # Windows the console defaults to cp1252, which raises UnicodeEncodeError on
-    # those. Force UTF-8 so output is correct on every platform.
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
@@ -73,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("summarize")
     sub.add_parser("review")
     sub.add_parser("sentiment")
+    sub.add_parser("buzzer")
     sub.add_parser("translate")
     sub.add_parser("run")
     sub.add_parser("youtube-ingest")
@@ -88,8 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     conn = db.connect()
-    conn.executescript(db.SCHEMA)  # idempotently ensure tables exist (CI/first-run)
-    db.migrate(conn)               # add any columns missing from an older DB
+    conn.executescript(db.SCHEMA)
+    db.migrate(conn)
     try:
         if args.cmd in ("ingest", "run"):
             print("ingest:", ingest.ingest(conn))
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("review queue empty.")
             for r in rows:
                 _print_review_row(r)
-        if args.cmd == "sentiment":
+        if args.cmd in ("sentiment", "run"):
             results = sentiment.sentiment_pending(conn)
             if not results:
                 print("no approved events need sentiment.")
@@ -127,6 +127,17 @@ def main(argv: list[str] | None = None) -> int:
                       f"{res.get('label','?')} "
                       f"(score={score_str}, "
                       f"n={n}){flag}")
+        if args.cmd in ("buzzer", "run"):
+            results = buzzer_mod.analyze_all(conn)
+            if not results:
+                print("no events need buzzer analysis.")
+            for r in results:
+                sigs = r["signals_triggered"]
+                sig_str = ",".join(sigs) if sigs else "none"
+                print(f"buzzer [{r['event_id']}]: "
+                      f"score={r['anomaly_score']:.3f} "
+                      f"anomaly={r['anomaly_pct']:.1f}% "
+                      f"signals=[{sig_str}]")
         if args.cmd == "approve":
             review.approve(conn, args.event_id)
             print(f"event {args.event_id} approved")

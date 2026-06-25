@@ -6,3 +6,6 @@ trafilatura>=2.0.0     # full-text article extraction (fetch stage); stdlib fall
 flask>=3.0.0           # web UI: public timeline + reviewer queue (server-rendered)
 youtube-transcript-api>=1.2.3  # YouTube transcript fetching for video news ingestion
 langdetect>=1.0.9             # language detection for auto-translate
+rapidfuzz>=3.9.0             # fuzzy string matching for copypasta detection (buzzer)
+sentence-transformers>=3.0.0 # semantic embeddings for clustering
+numpy>=1.24.0                # required by sentence-transformers

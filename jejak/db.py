@@ -59,12 +59,39 @@ CREATE TABLE IF NOT EXISTS event_summaries (
 CREATE TABLE IF NOT EXISTS sentiment (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id     INTEGER NOT NULL,
-    channel      TEXT NOT NULL,            -- 'social' (public reaction) for v1
+    channel      TEXT NOT NULL,            -- 'youtube' or 'reddit'
     score        REAL,                     -- -1.0 .. 1.0
     label        TEXT,                     -- negative|neutral|positive
     sample_size  INTEGER,
     samples_json TEXT,                     -- few example comments + labels (display only)
     collected_at TEXT NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES events(id)
+);
+
+CREATE TABLE IF NOT EXISTS comments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id     INTEGER NOT NULL,
+    video_id     TEXT,
+    author_id    TEXT,
+    author_name  TEXT,
+    text         TEXT NOT NULL,
+    like_count   INTEGER DEFAULT 0,
+    published_at TEXT,
+    stance       TEXT,                     -- negative|neutral|positive (from classification)
+    collected_at TEXT NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES events(id)
+);
+CREATE INDEX IF NOT EXISTS idx_comments_event  ON comments(event_id);
+CREATE INDEX IF NOT EXISTS idx_comments_author ON comments(author_id);
+
+CREATE TABLE IF NOT EXISTS buzzer_signals (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id             INTEGER NOT NULL UNIQUE,
+    anomaly_score        REAL,           -- 0..1
+    anomaly_pct          REAL,           -- 0..100
+    suspicious_ids_json  TEXT,           -- list of comment IDs
+    signals_triggered    TEXT,           -- comma-separated signal names
+    analyzed_at          TEXT NOT NULL,
     FOREIGN KEY (event_id) REFERENCES events(id)
 );
 
@@ -88,7 +115,6 @@ def connect(path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
     return conn
 
 
-# Columns added after the initial schema; applied to pre-existing databases.
 _MIGRATIONS = {
     "articles": [
         ("body", "TEXT"),
@@ -106,10 +132,7 @@ _MIGRATIONS = {
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Idempotently add any columns missing from an older database.
-
-    Skips tables that don't exist yet (e.g. first run before init).
-    """
+    """Idempotently add any columns missing from an older database."""
     for table, cols in _MIGRATIONS.items():
         row = conn.execute(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?",

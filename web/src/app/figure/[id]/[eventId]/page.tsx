@@ -1,9 +1,17 @@
 import Link from "next/link";
 import TranslatedText from "@/components/TranslatedText";
 
-const eventData = {
+const eventData: Record<number, {
+  kategori: string; kategoriColor: string; tipe?: string;
+  headline: string; outlet: string; tanggal: string; about: string;
+  summary: string; score: number; c: string;
+  pos: number; net: number; neg: number;
+  media: number; kut: number; quote: string;
+  src: { title: string; outlet: string; date: string }[];
+  anomaly?: { pct: number; signals: string[] };
+}> = {
   1: {
-    kategori: "Politik", kategoriColor: "#3a4a8b",
+    kategori: "Politik", kategoriColor: "#3a4a8b", tipe: "Pernyataan",
     headline: "PSI Pede Prabowo Tetap Gandeng Gibran di Pilpres 2029",
     outlet: "Detik.com", tanggal: "19 Jun 2026", about: "Prabowo Subianto",
     summary: "Ketua Harian DPP PSI menyatakan yakin Prabowo dan Gibran akan kembali maju bersama pada Pemilu Presiden 2029 untuk memastikan kesinambungan program pemerintah. Hingga kini belum ada pernyataan langsung dari Prabowo terkait pencalonan tersebut.",
@@ -16,7 +24,7 @@ const eventData = {
     ],
   },
   2: {
-    kategori: "Pertahanan", kategoriColor: "#3d6b4a",
+    kategori: "Pertahanan", kategoriColor: "#3d6b4a", tipe: "Kebijakan",
     headline: "Prabowo Resmikan Tambahan Anggaran Modernisasi Alutsista",
     outlet: "Kompas", tanggal: "12 Jun 2026", about: "Prabowo Subianto",
     summary: "Presiden meresmikan alokasi tambahan untuk modernisasi alat utama sistem persenjataan, menekankan kemandirian industri pertahanan dalam negeri sebagai prioritas jangka panjang.",
@@ -31,6 +39,7 @@ const eventData = {
       { title: "Presiden Resmikan Tambahan Belanja Pertahanan", outlet: "CNN Indonesia", date: "13 Jun 2026" },
       { title: "Kemandirian Pertahanan Ditegaskan Prabowo", outlet: "Republika", date: "13 Jun 2026" },
     ],
+    anomaly: { pct: 8.2, signals: ["cross_event", "extremity"] },
   },
 };
 
@@ -136,6 +145,27 @@ export default async function DetailCatatan({ params }: { params: Promise<{ id: 
               <span style={{ fontSize: 11.5, fontWeight: 600, color: "#6b645b", border: "1px solid #d8cfba", padding: "4px 10px", borderRadius: 2 }}>{rec.kut} kutipan terverifikasi</span>
             </div>
 
+            {/* Buzzer anomaly indicator */}
+            {rec.anomaly && rec.anomaly.pct > 0 && (
+              <details style={{ marginBottom: 22, fontSize: 13, color: "#8b2e1f" }}>
+                <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 12, letterSpacing: "0.04em" }}>
+                  ⚠ {rec.anomaly.pct}% komentar menunjukkan pola terkoordinasi
+                </summary>
+                <div style={{ marginTop: 8, padding: "10px 14px", background: "#f5e7e3", border: "1px solid #d8a99f", borderRadius: 2, fontSize: 12.5, color: "#4a443d", lineHeight: 1.6 }}>
+                  Sinyal terpicu: {rec.anomaly.signals.map((s) => {
+                    const labels: Record<string, string> = {
+                      cross_event: "Lintas peristiwa", copypasta: "Teks serupa",
+                      extremity: "Ekstrem", velocity: "Kecepatan tinggi",
+                      volume: "Dominasi volume",
+                    };
+                    return <span key={s} style={{ display: "inline-block", background: "#8b2e1f", color: "#f6f2e9", padding: "1px 8px", borderRadius: 2, fontSize: 10.5, fontWeight: 700, marginRight: 6, textTransform: "uppercase" }}>{labels[s] || s}</span>;
+                  })}
+                  <br />
+                  Koordinasi dideteksi dari pola komentar, bukan identitas akun. Ini indikasi kemungkinan aktivitas terkoordinasi, bukan kesimpulan final.
+                </div>
+              </details>
+            )}
+
             {/* Sources */}
             <div style={{ borderTop: "3px double #16130f", paddingTop: 22 }}>
               <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#16130f", marginBottom: 16 }}>Artikel Sumber ({rec.src.length})</div>
@@ -203,6 +233,7 @@ function Nav() {
       <div style={{ display: "flex", gap: 28, fontSize: 13, fontWeight: 600, color: "#7a7264" }}>
         <Link href="/" style={{ color: "#7a7264", textDecoration: "none" }}>Beranda</Link>
         <Link href="/" style={{ color: "#7a7264", textDecoration: "none" }}>Tokoh</Link>
+        <Link href="/timeline" style={{ color: "#7a7264", textDecoration: "none" }}>Lini Masa</Link>
         <Link href="/review" style={{ color: "#7a7264", textDecoration: "none" }}>Antrean Tinjauan</Link>
       </div>
     </div>

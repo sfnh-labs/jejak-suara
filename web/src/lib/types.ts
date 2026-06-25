@@ -50,3 +50,13 @@ export interface Figure {
   role: string;
   aliases: string[];
 }
+
+export interface BuzzerSignal {
+  id: number;
+  event_id: number;
+  anomaly_score: number | null;
+  anomaly_pct: number | null;
+  suspicious_ids_json: string | null;
+  signals_triggered: string | null;
+  analyzed_at: string;
+}

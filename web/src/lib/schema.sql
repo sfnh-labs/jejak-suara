@@ -57,3 +57,13 @@ CREATE TABLE IF NOT EXISTS corrections (
     status       TEXT NOT NULL DEFAULT 'open',
     created_at   TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS buzzer_signals (
+    id                  SERIAL PRIMARY KEY,
+    event_id            INTEGER NOT NULL UNIQUE REFERENCES events(id),
+    anomaly_score       REAL,
+    anomaly_pct         REAL,
+    suspicious_ids_json TEXT,
+    signals_triggered   TEXT,
+    analyzed_at         TEXT NOT NULL
+);

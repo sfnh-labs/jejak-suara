@@ -39,9 +39,8 @@ def _get(endpoint: str, params: dict) -> dict:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        # 403 commonly = quota exceeded or comments disabled; surface cleanly.
         raise YouTubeError(f"HTTP {e.code} on {endpoint}") from e
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise YouTubeError(f"{type(e).__name__} on {endpoint}") from e
 
 
@@ -61,11 +60,11 @@ def search_videos(query: str, max_results: int = 5,
             if item.get("id", {}).get("videoId")]
 
 
-def video_comments(video_id: str, max_results: int = 50) -> list[str]:
-    """Return top-level comment texts for a video (relevance-ordered).
+def video_comments(video_id: str, max_results: int = 50) -> list[dict]:
+    """Return top-level comments for a video with metadata.
 
-    Returns [] if comments are disabled or the video is unavailable, rather than
-    raising — sentiment is best-effort.
+    Each dict: {text, author_id, author_name, like_count, published_at}
+    Returns [] if comments are disabled or the video is unavailable.
     """
     try:
         data = _get("commentThreads", {
@@ -81,15 +80,25 @@ def video_comments(video_id: str, max_results: int = 50) -> list[str]:
     for item in data.get("items", []):
         snip = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
         text = snip.get("textDisplay") or snip.get("textOriginal")
-        if text:
-            out.append(text)
+        if not text:
+            continue
+        out.append({
+            "text": text,
+            "author_id": snip.get("authorChannelId", {}).get("value", ""),
+            "author_name": snip.get("authorDisplayName", ""),
+            "like_count": snip.get("likeCount", 0),
+            "published_at": snip.get("publishedAt", ""),
+        })
     return out
 
 
 def gather_comments(query: str, max_videos: int = 5,
-                    per_video: int = 30, cap: int = 100) -> list[str]:
-    """Search for videos about `query` and collect up to `cap` comments total."""
-    comments: list[str] = []
+                    per_video: int = 30, cap: int = 100) -> list[dict]:
+    """Search for videos about `query` and collect up to `cap` comments total.
+
+    Returns list of dicts with {text, author_id, author_name, like_count, published_at}.
+    """
+    comments: list[dict] = []
     for vid in search_videos(query, max_results=max_videos):
         comments.extend(video_comments(vid, max_results=per_video))
         if len(comments) >= cap:

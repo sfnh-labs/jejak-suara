@@ -115,7 +115,6 @@ def _classify_ollama(comments: list[str], prompt: str) -> list[str]:
     result = _ollama_chat(messages)
     text = result.get("message", {}).get("content", "")
 
-    # Parse "N. label" or "label" lines
     labels: list[str] = []
     valid = {"negative", "neutral", "positive"}
     for line in text.splitlines():
@@ -125,7 +124,6 @@ def _classify_ollama(comments: list[str], prompt: str) -> list[str]:
         if word in valid:
             labels.append(word)
 
-    # Defend against mismatch: pad/truncate
     labels = (labels + ["neutral"] * len(comments))[:len(comments)]
     return labels
 
@@ -135,19 +133,14 @@ _SAMPLE_MAX_LEN = 240      # truncate long comments for display
 
 
 def _sample_comments(comments: list[str], labels: list[str]) -> list[dict]:
-    """Pick a few example comments per stance, for display only.
-
-    Balanced across negative/neutral/positive so one loud side doesn't dominate
-    the samples. These are UNVERIFIED third-party comments — stored purely to
-    illustrate the aggregate, never as the system's own voice.
-    """
+    """Pick a few example comments per stance, for display only."""
     picked: list[dict] = []
     for stance in ("negative", "neutral", "positive"):
         n = 0
         for text, label in zip(comments, labels):
             if label != stance:
                 continue
-            text = " ".join(text.split())  # collapse whitespace/newlines
+            text = " ".join(text.split())
             if len(text) > _SAMPLE_MAX_LEN:
                 text = text[:_SAMPLE_MAX_LEN].rstrip() + "…"
             picked.append({"text": text, "label": label})
@@ -171,8 +164,6 @@ def _aggregate(labels: list[str]) -> tuple[float, str, dict]:
     return score, label, dist
 
 
-# Indonesian headline filler we drop so the query keeps content words. Cheap
-# heuristic — a proper relevance pre-filter is roadmap work, not this.
 _QUERY_STOPWORDS = {
     "dan", "di", "ke", "dari", "yang", "untuk", "dengan", "pada", "bahas",
     "soal", "hingga", "akan", "bakal", "buka", "suara", "kabar", "kemarin",
@@ -181,13 +172,6 @@ _QUERY_MAX_WORDS = 7
 
 
 def _query_for_event(conn: sqlite3.Connection, event_id: int) -> str:
-    """Build a YouTube search query for an event.
-
-    A full verbatim headline is too specific — YouTube returns nothing — so we
-    keep the figure name plus a handful of content words from the title. We also
-    avoid duplicating the figure name when the headline already names them
-    (directly or via an alias).
-    """
     row = conn.execute(
         "SELECT e.title, e.figure_id FROM events e WHERE e.id = ?", (event_id,)
     ).fetchone()
@@ -209,17 +193,40 @@ def _query_for_event(conn: sqlite3.Connection, event_id: int) -> str:
     return " ".join(parts).strip()
 
 
+def _store_comments(conn: sqlite3.Connection, event_id: int,
+                    comments: list[dict], labels: list[str],
+                    video_id: str | None = None) -> None:
+    """Bulk-insert individual comments with their stance labels."""
+    now = datetime.now(timezone.utc).isoformat()
+    for cmt, label in zip(comments, labels):
+        conn.execute(
+            """INSERT INTO comments
+               (event_id, video_id, author_id, author_name, text,
+                like_count, published_at, stance, collected_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (event_id, video_id,
+             cmt.get("author_id", ""),
+             cmt.get("author_name", ""),
+             cmt.get("text", ""),
+             cmt.get("like_count", 0),
+             cmt.get("published_at", ""),
+             label,
+             now),
+        )
+
+
 def _run_sentiment(conn: sqlite3.Connection, event_id: int,
-                   query: str, comments: list[str],
+                   query: str, comments: list[dict],
                    channel: str) -> dict:
-    """Classify, aggregate, and store sentiment for one channel."""
+    """Classify, aggregate, store sentiment + individual comments."""
     if not comments:
         return {"event_id": event_id, "query": query, "sample_size": 0,
                 "channel": channel, "note": "no comments gathered"}
 
-    labels = classify_comments(comments)
+    texts = [c["text"] for c in comments]
+    labels = classify_comments(texts)
     score, label, dist = _aggregate(labels)
-    samples = _sample_comments(comments, labels)
+    samples = _sample_comments(texts, labels)
 
     conn.execute(
         """INSERT INTO sentiment
@@ -229,6 +236,9 @@ def _run_sentiment(conn: sqlite3.Connection, event_id: int,
          json.dumps(samples, ensure_ascii=False),
          datetime.now(timezone.utc).isoformat()),
     )
+
+    _store_comments(conn, event_id, comments, labels)
+
     conn.commit()
     return {"event_id": event_id, "query": query, "channel": channel,
             "sample_size": len(labels), "score": round(score, 3),
@@ -246,7 +256,6 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
     query = _query_for_event(conn, event_id)
     results: list[dict] = []
 
-    # YouTube (requires API key)
     try:
         yt_comments = youtube.gather_comments(query, cap=cap)
         results.append(_run_sentiment(
@@ -255,7 +264,6 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
         results.append({"event_id": event_id, "query": query,
                         "channel": "youtube", "note": str(e)})
 
-    # Reddit (free, best-effort)
     try:
         reddit_comments = reddit.gather_comments(query, cap=cap)
         results.append(_run_sentiment(
@@ -267,7 +275,6 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
     return results
 
 
-# Re-fetch sentiment for recent events (within this many days) when older than this.
 _FRESH_DAYS = int(os.environ.get("SENTIMENT_FRESH_DAYS", "3"))
 _STALE_HOURS = int(os.environ.get("SENTIMENT_STALE_HOURS", "6"))
 
@@ -279,17 +286,12 @@ def sentiment_pending(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
     1. Approved events with no sentiment rows at all (brand-new).
     2. Approved events from the last N days whose last sentiment is stale
        (older than M hours), so we re-fetch fresh comments.
-
-    We only measure reaction on events we'd actually publish — no point spending
-    quota on rejected drafts.
     """
     ids = [r["id"] for r in conn.execute(
         """SELECT e.id FROM events e
            WHERE e.status = 'approved'
              AND (
-               -- entirely un-analysed
                NOT EXISTS (SELECT 1 FROM sentiment s WHERE s.event_id = e.id)
-               -- OR recent + stale
                OR (
                  e.event_date >= datetime('now', ? || ' days', 'start of day')
                  AND EXISTS (
@@ -305,8 +307,8 @@ def sentiment_pending(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
     ).fetchall()]
     results: list[dict] = []
     for eid in ids:
-        # Delete stale rows so fresh ones replace them
         conn.execute("DELETE FROM sentiment WHERE event_id = ?", (eid,))
+        conn.execute("DELETE FROM comments WHERE event_id = ?", (eid,))
         conn.commit()
         results.extend(sentiment_event(conn, eid))
     return results

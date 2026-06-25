@@ -40,6 +40,8 @@ async function main() {
       { table: "sentiment", key: "id", cols: ["event_id", "channel", "score", "label", "sample_size", "samples_json", "collected_at"] },
       { table: "corrections", key: "id", cols: ["event_id", "submitted_by", "body", "status", "created_at"] },
       { table: "articles", key: "id", cols: ["id", "figure_id", "source", "url", "title", "summary", "body", "fetch_status", "published_at", "fetched_at", "event_id"] },
+      { table: "comments", key: "id", cols: ["event_id", "video_id", "author_id", "author_name", "text", "like_count", "published_at", "stance", "collected_at"] },
+      { table: "buzzer_signals", key: "id", cols: ["event_id", "anomaly_score", "anomaly_pct", "suspicious_ids_json", "signals_triggered", "analyzed_at"] },
     ];
 
     for (const { table, key, cols } of tables) {
@@ -78,7 +80,7 @@ async function dumpSql() {
   const sqlite = new sqlite3(source);
   const lines = [SCHEMA, ""];
 
-  for (const table of ["events", "event_summaries", "sentiment", "corrections", "articles"]) {
+  for (const table of ["events", "event_summaries", "sentiment", "corrections", "articles", "comments", "buzzer_signals"]) {
     const rows = sqlite.prepare(`SELECT * FROM ${table}`).all();
     for (const row of rows) {
       const cols = Object.keys(row).filter((k) => row[k] !== null);
