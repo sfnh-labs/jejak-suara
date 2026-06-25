@@ -17,9 +17,7 @@ Dev environment facts for jejak-suara on this Windows machine (set up 2026-06-13
   pipeline's non-ASCII (`●`, `⚠`, em-dash, Indonesian text). `jejak/cli.py` now forces
   stdout/stderr to UTF-8 at startup; for ad-hoc `python -c`/flask runs, set
   `$env:PYTHONIOENCODING = "utf-8"` first.
-- **API keys** (both set persistently at **User** scope, not visible to an
-  already-running shell — read via `[Environment]::GetEnvironmentVariable(name,"User")`):
-  `ANTHROPIC_API_KEY` (summarize=Opus, sentiment classify=Haiku) and
+- **API keys** (persistent **User** env var, not visible to running shells):
   `YOUTUBE_API_KEY` (sentiment comment gathering). A valid YouTube key is 39 chars
   starting `AIza`.
 

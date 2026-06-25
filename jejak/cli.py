@@ -105,11 +105,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd in ("cluster", "run"):
             print("cluster:", cluster_mod.cluster(conn))
         if args.cmd in ("summarize", "run"):
-            if summarize.SUMMARIZE_PROVIDER == "ollama" and not os.environ.get("SUMMARIZE_PROVIDER"):
-                print("skip summarize: ANTHROPIC_API_KEY not set and Ollama not explicitly configured")
-            else:
-                for res in summarize.summarize_pending(conn):
-                    print("summarized:", res)
+            for res in summarize.summarize_pending(conn):
+                print("summarized:", res)
         if args.cmd == "review":
             rows = review.queue(conn)
             if not rows:

@@ -48,7 +48,6 @@ These are not incidental — they shape the schema:
 
 ```bash
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=...        # or: ant auth login
 
 python -m jejak.cli init            # create jejak.db
 # edit figures.toml — add the officials to track (with aliases)

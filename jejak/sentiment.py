@@ -1,8 +1,7 @@
 """Stage 5 — Public-reaction sentiment (lower-cost channel).
 
 For an event, gather public comments from YouTube news videos and classify each
-one's stance toward the figure/event. Classification uses Anthropic Haiku when
-ANTHROPIC_API_KEY is set, or falls back to Ollama (local model).
+one's stance toward the figure/event. Classification uses a local Ollama model.
 
 IMPORTANT framing: this measures *public reaction on one platform*, not truth and
 not a verdict. It is brigadable and platform-skewed. Always surface it labelled
@@ -22,7 +21,6 @@ from . import reddit, youtube
 
 CHANNEL = "social"
 
-ANTHROPIC_MODEL = "claude-haiku-4-5"
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
@@ -36,10 +34,6 @@ Judge stance toward the figure/event only — not the comment's general mood.
 Return labels in the SAME ORDER as the numbered comments."""
 
 _SCORE = {"negative": -1.0, "neutral": 0.0, "positive": 1.0}
-
-
-def _has_anthropic_key() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def _ollama_chat(messages: list[dict]) -> dict:
@@ -61,48 +55,13 @@ def _ollama_chat(messages: list[dict]) -> dict:
         raise RuntimeError(f"Ollama not reachable: {e.reason}") from e
 
 
-def classify_comments(comments: list[str], client=None) -> list[str]:
-    """Return a stance label per comment (best-effort; aligns by order).
-
-    Uses Anthropic Haiku if ANTHROPIC_API_KEY is set, otherwise Ollama.
-    """
+def classify_comments(comments: list[str]) -> list[str]:
+    """Return a stance label per comment (best-effort; aligns by order)."""
     if not comments:
         return []
     numbered = "\n".join(f"{i+1}. {c}" for i, c in enumerate(comments))
     prompt = f"Classify these {len(comments)} comments:\n\n{numbered}"
-
-    if _has_anthropic_key():
-        return _classify_anthropic(comments, prompt, client)
     return _classify_ollama(comments, prompt)
-
-
-def _classify_anthropic(comments: list[str], prompt: str,
-                        client) -> list[str]:
-    """Classify via Claude Haiku with structured JSON output."""
-    import anthropic
-    _SCHEMA = {
-        "type": "object",
-        "properties": {
-            "labels": {
-                "type": "array",
-                "items": {"type": "string", "enum": ["negative", "neutral", "positive"]},
-            }
-        },
-        "required": ["labels"],
-        "additionalProperties": False,
-    }
-    client = client or anthropic.Anthropic()
-    resp = client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=2048,
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
-        output_config={"format": {"type": "json_schema", "schema": _SCHEMA}},
-    )
-    text = next((b.text for b in resp.content if b.type == "text"), "{}")
-    labels = json.loads(text).get("labels", [])
-    labels = (labels + ["neutral"] * len(comments))[:len(comments)]
-    return labels
 
 
 def _classify_ollama(comments: list[str], prompt: str) -> list[str]:

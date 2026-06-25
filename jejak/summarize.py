@@ -4,13 +4,10 @@ This is the legally load-bearing stage. We do NOT let the model write in its own
 voice from memory. Instead we hand it the actual articles as citable documents,
 so every sentence it produces is tied back to a specific source.
 
-Two providers are supported, controlled by the SUMMARIZE_PROVIDER env var:
-  - "anthropic" (default): uses Claude with structured Citations API (Opus 4.8).
-    Auto-falls back to "ollama" when ANTHROPIC_API_KEY is unset.
-  - "ollama": uses a local model via Ollama with inline citation markers
+Uses a local Ollama model with inline citation markers [Sumber N].
 
-Ollama provider settings:
-  - OLLAMA_MODEL  (default: qwen2.5:7b)
+Settings:
+  - OLLAMA_MODEL    (default: qwen2.5:7b)
   - OLLAMA_BASE_URL (default: http://localhost:11434)
 """
 from __future__ import annotations
@@ -23,17 +20,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-import anthropic
-
-# --- Provider configuration ---
-SUMMARIZE_PROVIDER = os.environ.get("SUMMARIZE_PROVIDER", "anthropic")
-_has_anthropic_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-if SUMMARIZE_PROVIDER == "anthropic" and not _has_anthropic_key:
-    SUMMARIZE_PROVIDER = "ollama"
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-
-ANTHROPIC_MODEL = "claude-opus-4-8"
 
 SYSTEM = """You are an editorial assistant for a public accountability archive documenting public officials.
 You write neutral, factual, NON-DEFAMATORY summaries of a single news event,
@@ -48,92 +36,11 @@ Hard rules:
   speculation about intent or guilt.
 - Write in Indonesian (Bahasa Indonesia), matching the sources.
 - Format as bullet points (one bullet per key fact), each ending with [Sumber N].
-  Keep the total short — 3–6 bullets. No introductory paragraph, no closing
+  Keep the total short — 3-6 bullets. No introductory paragraph, no closing
   sentence — just the bullets.
 
 You are drafting for a human editor who will review before anything is published."""
 
-
-def _client() -> anthropic.Anthropic:
-    return anthropic.Anthropic()
-
-
-# ---------------------------------------------------------------------------
-# Anthropic provider — structured Citations API
-# ---------------------------------------------------------------------------
-
-def _documents(articles: list[sqlite3.Row]) -> list[dict]:
-    """Each source article becomes a citable document block.
-
-    Prefer the fetched full `body`; fall back to the RSS lead when the fetch
-    stage hasn't run or failed for that article.
-    """
-    docs = []
-    for a in articles:
-        body = a["title"]
-        full = a["body"] if "body" in a.keys() else None
-        if full:
-            body += "\n\n" + full
-        elif a["summary"]:
-            body += "\n\n" + a["summary"]
-        docs.append({
-            "type": "document",
-            "title": f"{a['source']} — {a['published_at'] or 'tanggal tidak diketahui'}",
-            "source": {"type": "text", "media_type": "text/plain", "data": body},
-            "citations": {"enabled": True},
-        })
-    return docs
-
-
-def _parse_response(content) -> tuple[str, list[dict]]:
-    """Flatten Claude's response into (summary_text, citations).
-
-    Each text block may carry `citations`; we keep them so the reviewer (and the
-    UI later) can show exactly which outlet backs each sentence.
-    """
-    text_parts: list[str] = []
-    citations: list[dict] = []
-    for block in content:
-        if block.type != "text":
-            continue
-        text_parts.append(block.text)
-        for c in (getattr(block, "citations", None) or []):
-            citations.append({
-                "cited_text": getattr(c, "cited_text", None),
-                "document_index": getattr(c, "document_index", None),
-                "document_title": getattr(c, "document_title", None),
-                "start": getattr(c, "start_char_index", None),
-                "end": getattr(c, "end_char_index", None),
-                "for_text": block.text,
-            })
-    return "".join(text_parts), citations
-
-
-def _summarize_anthropic(
-    articles: list[sqlite3.Row],
-    client: anthropic.Anthropic,
-) -> tuple[str, list[dict]]:
-    """Summarize via Claude with structured citations."""
-    user_blocks = _documents(articles)
-    user_blocks.append({
-        "type": "text",
-        "text": ("Tuliskan ringkasan netral peristiwa di atas, dengan atribusi ke "
-                 "sumber. Jika hanya satu sumber yang melaporkannya, nyatakan bahwa "
-                 "peristiwa ini belum terkonfirmasi oleh media lain."),
-    })
-
-    resp = client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=1024,
-        system=SYSTEM,
-        messages=[{"role": "user", "content": user_blocks}],
-    )
-    return _parse_response(resp.content)
-
-
-# ---------------------------------------------------------------------------
-# Ollama provider — inline citation markers via local model
-# ---------------------------------------------------------------------------
 
 def _ollama_chat(messages: list[dict]) -> dict:
     """Call the Ollama chat API and return the parsed response body."""
@@ -184,7 +91,7 @@ _OLLAMA_USER_PROMPT = (
 )
 
 
-def _summarize_ollama(articles: list[sqlite3.Row]) -> tuple[str, list[dict]]:
+def summarize_ollama(articles: list[sqlite3.Row]) -> tuple[str, list[dict]]:
     """Summarize via a local Ollama model with inline citation markers."""
     formatted = _format_articles(articles)
     messages = [
@@ -194,7 +101,6 @@ def _summarize_ollama(articles: list[sqlite3.Row]) -> tuple[str, list[dict]]:
     result = _ollama_chat(messages)
     text = result.get("message", {}).get("content", "").strip()
 
-    # Build citations from inline [Sumber N] markers
     citations: list[dict] = []
     for m in re.finditer(r'\[Sumber (\d+)\]', text):
         idx = int(m.group(1)) - 1
@@ -211,18 +117,10 @@ def _summarize_ollama(articles: list[sqlite3.Row]) -> tuple[str, list[dict]]:
     return text, citations
 
 
-# ---------------------------------------------------------------------------
-# Shared orchestration
-# ---------------------------------------------------------------------------
-
-
-def summarize_event(
-    conn: sqlite3.Connection, event_id: int,
-    client: anthropic.Anthropic | None = None,
-) -> dict:
+def summarize_event(conn: sqlite3.Connection, event_id: int) -> dict:
     """Generate a grounded draft summary for one event and store it.
 
-    Sets the event status to 'summarized' (still NOT published — awaits review).
+    Sets the event status to 'approved' (ready for the public timeline).
     Returns a small result dict for logging.
     """
     articles = conn.execute(
@@ -237,14 +135,8 @@ def summarize_event(
     corroboration = len(outlets)
     single_source = 1 if corroboration < 2 else 0
 
-    # Dispatch to the configured provider
-    if SUMMARIZE_PROVIDER == "ollama":
-        summary_text, citations = _summarize_ollama(articles)
-        model_used = f"ollama/{OLLAMA_MODEL}"
-    else:
-        client = client or _client()
-        summary_text, citations = _summarize_anthropic(articles, client)
-        model_used = ANTHROPIC_MODEL
+    summary_text, citations = summarize_ollama(articles)
+    model_used = f"ollama/{OLLAMA_MODEL}"
 
     conn.execute(
         """INSERT INTO event_summaries
@@ -282,6 +174,4 @@ def summarize_pending(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
         "SELECT id FROM events WHERE status = 'new' ORDER BY created_at LIMIT ?",
         (limit,),
     ).fetchall()]
-    # Ollama has no persistent client object; Anthropic pre-builds one.
-    client = None if SUMMARIZE_PROVIDER == "ollama" else _client()
-    return [summarize_event(conn, eid, client) for eid in ids]
+    return [summarize_event(conn, eid) for eid in ids]

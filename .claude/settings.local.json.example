@@ -1,7 +1,5 @@
 {
-  "//": "Copy this file to settings.local.json and paste this project's Anthropic API key.",
+  "//": "Copy this file to settings.local.json for Claude desktop project config.",
   "//2": "settings.local.json is git-ignored and must NEVER be committed.",
-  "env": {
-    "ANTHROPIC_API_KEY": "sk-ant-..."
-  }
+  "env": {}
 }

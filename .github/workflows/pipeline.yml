@@ -21,10 +21,6 @@ jobs:
 
       - name: Run pipeline
         run: python -m jejak.cli run
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Sync to Neon
         run: python scripts/sync_to_neon.py
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
