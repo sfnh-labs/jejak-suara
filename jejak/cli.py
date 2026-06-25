@@ -105,8 +105,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd in ("cluster", "run"):
             print("cluster:", cluster_mod.cluster(conn))
         if args.cmd in ("summarize", "run"):
-            for res in summarize.summarize_pending(conn):
-                print("summarized:", res)
+            try:
+                for res in summarize.summarize_pending(conn):
+                    print("summarized:", res)
+            except RuntimeError as e:
+                print(f"skip summarize: {e}")
         if args.cmd == "review":
             rows = review.queue(conn)
             if not rows:
