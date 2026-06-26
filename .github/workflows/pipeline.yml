@@ -24,3 +24,5 @@ jobs:
 
       - name: Sync to Neon
         run: python scripts/sync_to_neon.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
