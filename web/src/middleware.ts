@@ -7,6 +7,19 @@ function decodeBase64(str: string): string {
   return atob(str);
 }
 
+/** Compares in time independent of where the first difference falls. */
+function safeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const left = encoder.encode(a);
+  const right = encoder.encode(b);
+  // Length is not secret here (it leaks through the comparison either way),
+  // but bail early so the loop below always compares equal-length buffers.
+  if (left.length !== right.length) return false;
+  let diff = 0;
+  for (let i = 0; i < left.length; i++) diff |= left[i] ^ right[i];
+  return diff === 0;
+}
+
 export function middleware(request: NextRequest) {
   if (!CLOSED_LAUNCH || !AUTH_CREDENTIALS) {
     return NextResponse.next();
@@ -18,7 +31,7 @@ export function middleware(request: NextRequest) {
     const encoded = authHeader.slice(6);
     try {
       const decoded = decodeBase64(encoded);
-      if (decoded === AUTH_CREDENTIALS) {
+      if (safeEqual(decoded, AUTH_CREDENTIALS)) {
         return NextResponse.next();
       }
     } catch {
@@ -26,7 +39,6 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  const url = new URL(request.url);
   return new NextResponse(null, {
     status: 401,
     headers: {
