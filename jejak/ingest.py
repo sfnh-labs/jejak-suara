@@ -6,12 +6,14 @@ alias match, and store (deduped by URL hash). No AI here; this is plumbing.
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 from datetime import datetime, timezone
 from time import mktime
 
 import feedparser
 
+from . import mentions
 from .config import Figure, Source, load_figures, load_sources
 
 
@@ -30,29 +32,108 @@ def _published_iso(entry) -> str | None:
     return None
 
 
-def _attribute(text: str, figures: list[Figure]) -> Figure | None:
-    """Return the figure whose alias appears in `text`, or None.
+# A headline opening "Nama Orang:" attributes the quote that follows to them.
+_SPEAKER_RE = re.compile(r"^([A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*){0,2})\s*:")
 
-    First-match wins. Good enough for v1; a disambiguation pass can come later
-    (e.g. two figures sharing a surname).
-    """
+
+def _first_alias_at(text: str, figures: list[Figure]) -> tuple[int, Figure | None]:
+    """Earliest position at which any tracked figure is named, and who."""
     low = text.lower()
+    best, who = len(low) + 1, None
     for fig in figures:
-        if any(term in low for term in fig.match_terms()):
-            return fig
-    return None
+        for term in fig.match_terms():
+            pos = low.find(term)
+            if 0 <= pos < best:
+                best, who = pos, fig
+    return best, who
+
+
+def _attribute(text: str, figures: list[Figure]) -> Figure | None:
+    """The figure an article is *about* — the one acting, not merely named.
+
+    A record on someone's page has to be their own conduct or words. Matching
+    any mention anywhere put half of Prabowo's timeline on other people's
+    doings: "Pimpinan MPR Temui Prabowo" is the MPR's action, and
+    "Ketua DPN Tani Merdeka Tantang Para Pembenci Prabowo" is that chairman's.
+
+    Indonesian headlines lead with the actor, so the subject is whoever is named
+    first. If a titled office-holder appears ahead of the tracked figure, the
+    article belongs to them — they become a candidate figure in their own right
+    and the tracked figure is only referenced.
+    """
+    # Only the headline decides authorship. A name appearing further down is
+    # context, not a claim that the article is about that person.
+    headline = text.split("\n", 1)[0]
+    alias_at, figure = _first_alias_at(headline, figures)
+    if figure is None:
+        return None
+
+    actor_at = mentions.first_title_position(headline)
+    if actor_at is not None and actor_at < alias_at:
+        return None
+
+    # "Cak Imin: Prabowo sedang..." — a headline that opens by attributing a
+    # quote belongs to the speaker, even when they carry no office title.
+    speaker = _SPEAKER_RE.match(headline)
+    if speaker and speaker.end(1) <= alias_at:
+        said_by = speaker.group(1).lower()
+        if not any(term in said_by for term in figure.match_terms()):
+            return None
+    return figure
+
+
+def reattribute(conn: sqlite3.Connection,
+                figures: list[Figure] | None = None) -> dict[str, int]:
+    """Re-apply subject attribution to articles already stored.
+
+    Needed whenever the attribution rule or the tracked roster changes. An
+    article that changes hands is unclustered so the next cluster run rebuilds
+    the affected events from the corrected ownership.
+    """
+    figures = figures or load_figures()
+    stats = {"checked": 0, "changed": 0, "events_removed": 0}
+
+    for art in conn.execute("SELECT id, figure_id, title FROM articles").fetchall():
+        stats["checked"] += 1
+        subject = _attribute(art["title"] or "", figures)
+        want = subject.id if subject else None
+        if want != art["figure_id"]:
+            conn.execute(
+                "UPDATE articles SET figure_id = ?, event_id = NULL WHERE id = ?",
+                (want, art["id"]),
+            )
+            stats["changed"] += 1
+
+    orphans = [r["id"] for r in conn.execute(
+        """SELECT id FROM events
+            WHERE id NOT IN (SELECT event_id FROM articles WHERE event_id IS NOT NULL)"""
+    ).fetchall()]
+    if orphans:
+        marks = ",".join("?" * len(orphans))
+        for table in ("event_summaries", "event_figures", "sentiment",
+                      "comments", "buzzer_signals"):
+            conn.execute(f"DELETE FROM {table} WHERE event_id IN ({marks})", orphans)
+        conn.execute(f"DELETE FROM events WHERE id IN ({marks})", orphans)
+        stats["events_removed"] = len(orphans)
+
+    conn.commit()
+    return stats
 
 
 def ingest(conn: sqlite3.Connection,
            sources: list[Source] | None = None,
            figures: list[Figure] | None = None) -> dict[str, int]:
-    """Fetch all feeds, store newly-seen articles attributed to a tracked figure.
+    """Fetch all feeds and store every newly-seen article.
 
-    Returns counts: {fetched, matched, inserted, skipped_existing}.
+    Articles matching a tracked figure carry that figure_id; the rest are stored
+    with figure_id NULL as candidate material for peristiwa.
+
+    Returns counts: {fetched, matched, general, inserted, skipped_existing}.
     """
     sources = sources or load_sources()
     figures = figures or load_figures()
-    stats = {"fetched": 0, "matched": 0, "inserted": 0, "skipped_existing": 0}
+    stats = {"fetched": 0, "matched": 0, "general": 0,
+             "inserted": 0, "skipped_existing": 0}
 
     for src in sources:
         feed = feedparser.parse(src.rss)
@@ -64,10 +145,14 @@ def ingest(conn: sqlite3.Connection,
             if not url:
                 continue
 
+            # Unattributed articles are kept, not dropped: they are the raw
+            # material for peristiwa (national events, which belong to no
+            # figure). Clustering discards the ones that never corroborate.
             figure = _attribute(f"{title}\n{summary}", figures)
-            if figure is None:
-                continue
-            stats["matched"] += 1
+            if figure is not None:
+                stats["matched"] += 1
+            else:
+                stats["general"] += 1
 
             art_id = _hash_url(url)
             exists = conn.execute(
@@ -81,8 +166,8 @@ def ingest(conn: sqlite3.Connection,
                 """INSERT INTO articles
                    (id, figure_id, source, url, title, summary, published_at, fetched_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (art_id, figure.id, src.name, url, title, summary,
-                 _published_iso(entry), _now()),
+                (art_id, figure.id if figure else None, src.name, url, title,
+                 summary, _published_iso(entry), _now()),
             )
             stats["inserted"] += 1
 
