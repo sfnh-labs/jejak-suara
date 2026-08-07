@@ -1,110 +1,203 @@
 # Jejak Suara
 
 A timeline-style information portal that builds **track records of public officials**
-from news reporting — fact-checked across multiple sources, summarized per event,
-and (later) annotated with public sentiment.
+from news reporting — corroborated across multiple sources, summarized per event,
+and annotated with public reaction.
 
-This repo is the **data pipeline** (built first, by design). The public timeline UI
-comes after the pipeline produces trustworthy, reviewed events.
+The repo holds two halves: the Python **data pipeline** (`jejak/`) that collects and
+summarizes, and the Next.js **web app** (`web/`) that publishes. Neon Postgres sits
+between them.
 
 ## Pipeline
 
 ```
-RSS ──▶ ingest ──▶ fetch ──▶ cluster ──▶ summarize (grounded) ──▶ human review ──▶ timeline
-        articles   bodies    events      drafts + citations        approve/reject   (published)
-                                                                          │
-                                                                sentiment (social) ─┘  [planned]
+RSS ──▶ ingest ──▶ fetch ──▶ translate ──▶ cluster ──▶ summarize ──▶ timeline
+        articles   bodies    to Indonesian  events     drafts        (published)
+                                                          │
+                                              sentiment + buzzer ───┘
 ```
 
 | Stage | Module | What it does |
 |-------|--------|--------------|
-| 1. Ingest | `jejak/ingest.py` | Pull RSS, attribute articles to tracked figures, dedupe. No AI. |
+| 1. Ingest | `jejak/ingest.py` | Pull RSS, attribute articles to tracked figures, dedupe by URL hash. No AI. |
+| 1b. YouTube | `jejak/youtube_ingest.py` | Search news videos, pull transcripts as additional articles. |
 | 1.5 Fetch | `jejak/fetch.py` | Backfill full article text (trafilatura, stdlib fallback). Fail-soft, rate-limited. |
-| 2. Cluster | `jejak/cluster.py` | Group many articles about one activity into a single **event**. |
-| 3. Summarize | `jejak/summarize.py` | Claude **Opus 4.8** drafts a neutral summary, **grounded in the source articles via Citations** — every sentence ties to a source span. |
-| 4. Review | `jejak/review.py` | Human approves/rejects before anything is publishable. |
-| 5. Sentiment | `jejak/sentiment.py` | Public reaction per **approved** event: YouTube comments classified by **Haiku 4.5**, aggregated. Labelled "public reaction", never a verdict. |
+| 1.7 Translate | `jejak/translate.py` | Translate non-Indonesian sources to Indonesian; original kept in `body_original`. |
+| 2. Cluster | `jejak/cluster.py` | Group articles about one activity into a single **event** (embedding similarity + a shared-content-word guard). |
+| 3. Summarize | `jejak/summarize.py` | Neutral, attributed summary grounded in the event's articles, with `[Sumber N]` citation markers. |
+| 4. Sentiment | `jejak/sentiment.py` | Public reaction per event: YouTube and Reddit comments classified by stance, aggregated. |
+| 5. Buzzer | `jejak/buzzer.py` | Coordinated-engagement signals over the collected comments. |
 
-## Why it's built this way (design principles)
+All model work runs against a **local Ollama** (`qwen2.5:7b` by default) — there is no
+hosted LLM in this project. Clustering uses `sentence-transformers`
+(`paraphrase-multilingual-MiniLM-L12-v2`) locally.
 
-These are not incidental — they shape the schema:
+## Design principles
 
-1. **Report, never assert.** The system stores *what outlets reported*, attributed,
+These shape the schema, not just the copy:
+
+1. **Report, never assert.** The system stores *what outlets reported*, attributed —
    never a claim in its own voice. This is deliberate given **UU ITE** (Indonesia's
    defamation exposure for named officials). The summarizer's system prompt enforces
    neutral, attributed language.
-2. **Grounding over generation.** The summarizer is handed the actual articles as
-   Claude *document* blocks with citations enabled. Sentences without a citation are
-   a review red flag — this is the guard against AI hallucinating facts into a
-   public record of an official.
-3. **Corroboration is first-class.** Each event records how many distinct outlets
-   back it; single-source events are flagged (`⚠ SINGLE SOURCE`) in review.
-4. **Human-in-the-loop.** `events.status` gates publishing: `new → summarized →
-   approved`. Nothing auto-publishes.
-5. **Right of reply.** A `corrections` table exists from day one as the legal safety
-   valve.
+2. **Grounding over generation.** The summarizer only sees the event's own articles
+   and is instructed to cite each bullet with `[Sumber N]`. A summary with no citation
+   markers is a red flag worth reading before it goes out.
+3. **Corroboration is first-class.** Each event records how many distinct outlets back
+   it; single-source events carry a `⚠ satu sumber` badge everywhere they appear.
+4. **Public reaction is not a verdict.** Sentiment is labelled as platform reaction
+   with its sample size. It is brigadable and one-platform skewed. Never present it as
+   fact or judgement.
+5. **Right of reply.** A `corrections` table exists as the legal safety valve.
+
+### Publishing policy
+
+Summaries **publish automatically** — `summarize` writes the event straight to
+`approved`. There is no human approval step in the current pipeline.
+
+That is a deliberate tradeoff and it is the project's main standing risk: a 7B local
+model's text about a named public official reaches the site without a person reading
+it first. What mitigates it is the grounding prompt, the corroboration count, and the
+single-source badge — not review. If you want the gate back, have
+`summarize.summarize_event` write `summarized` instead of `approved`; `jejak/review.py`
+and the Flask reviewer queue already expect exactly that state and need no other change.
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
+ollama serve &                      # summarize / translate / sentiment need this
 
 python -m jejak.cli init            # create jejak.db
 # edit figures.toml — add the officials to track (with aliases)
-
-python -m jejak.cli run             # ingest + cluster + summarize
-python -m jejak.cli review          # see drafts awaiting approval
-python -m jejak.cli approve 1
-python -m jejak.cli timeline example-001
+python -m jejak.cli run             # ingest + fetch + translate + cluster + summarize + sentiment + buzzer
 ```
 
 Configuration is TOML: `sources.toml` (news feeds) and `figures.toml` (tracked people).
+Environment variables live in `.env.example`.
 
-### Web UI
+### Where each stage runs
+
+GitHub's runners have no Ollama, so the work is split:
+
+| | Collection (ingest, fetch, cluster) | Model stages (translate, summarize, sentiment, buzzer) |
+|---|---|---|
+| **Where** | GitHub Actions, every 6h | Your workstation, on demand |
+| **Workflow** | `.github/workflows/pipeline.yml` | manual |
+
+To publish new events, run the model stages locally and push:
 
 ```bash
-flask --app jejak.web run        # http://127.0.0.1:5000
+python scripts/sync_to_neon.py --pull      # get what CI has collected
+python -m jejak.cli translate
+python -m jejak.cli summarize
+python -m jejak.cli sentiment
+python -m jejak.cli buzzer
+python scripts/sync_to_neon.py --push      # publish
 ```
 
-- `/` — figures, with approved + pending-review counts
-- `/figure/<id>` — public timeline (approved events, citations, sentiment)
-- `/review` — reviewer queue: read draft + flags, **approve/reject** (the
-  human-in-the-loop gate)
+## Storage and sync
 
-Server-rendered Flask + Jinja (no JS build). DB path via `$JEJAK_DB` (default
-`jejak.db`). **No auth** — localhost dev tool; put the reviewer routes behind
-authentication before exposing anywhere.
+SQLite (`jejak.db`) is the pipeline's working copy; **Neon Postgres is the durable
+store** that the web app reads. `scripts/sync_to_neon.py` moves rows both ways and
+preserves row identity in both directions:
 
-## Model usage
+```bash
+python scripts/sync_to_neon.py           # pull, then push
+python scripts/sync_to_neon.py --pull    # hydrate SQLite from Neon
+python scripts/sync_to_neon.py --push    # publish SQLite to Neon
+python scripts/sync_to_neon.py --reset   # TRUNCATE Neon, rebuild from SQLite
+```
 
-- **Summarization:** `claude-opus-4-8` ($5 / $25 per 1M tok) — chosen for correctness on
-  legally-sensitive output, not cost. Summaries are infrequent and high-stakes.
-- **Sentiment classification:** `claude-haiku-4-5` ($1 / $5 per 1M tok) — high-volume
-  per-comment classification, the cost-appropriate tier.
+Pulling first matters: CI throws its working copy away each run, so without hydration
+article dedupe and clustering would restart from an empty database every time.
 
-## Sentiment (public reaction)
+`--reset` is destructive and exists to repair a Neon database corrupted by the older
+sync, which omitted `events.id` and therefore appended a duplicate copy of every event
+on each run.
 
-`python -m jejak.cli sentiment` runs on **approved** events only (no quota spent on
-rejected drafts). It searches YouTube for news videos about the event, pulls public
-comments, classifies each comment's stance with Haiku, and stores an aggregate
-score + label + sample size.
+The Postgres schema lives in `web/src/lib/schema.sql`.
 
-- Requires `YOUTUBE_API_KEY` (free 10k-units/day quota; one event ≈ ~100 units).
-- Surfaced as **"public reaction (YouTube)"** with sample size — it is platform
-  reaction, brigadable and skewed; **never** present it as a verdict or fact.
-- Known limits: comment relevance is approximate; one-platform skew. A relevance
-  pre-filter and multi-platform blending are future work.
+## Web
+
+`web/` is a Next.js 15 app reading Neon directly. Every data route is
+`force-dynamic`, so pages always reflect the latest sync and the build never needs
+database access.
+
+```bash
+cd web && npm install && npm run dev      # http://localhost:3000
+```
+
+| Route | Page |
+|---|---|
+| `/` | Beranda — figure bubbles with sentiment trend, plus the newest records |
+| `/tokoh/[id]` | Figure page: Rekam Jejak timeline, `?tab=cv` for the CV panel |
+| `/tokoh/[id]/[eventId]` | One record: summary, sources, public reaction, prev/next |
+| `/linimasa` | Every record across all figures |
+| `/tentang` | Background, principles, roadmap |
+
+Needs `DATABASE_URL`. Set `CLOSED_LAUNCH=true` plus `BASIC_AUTH_CREDENTIALS="user:pass"`
+to put the whole site behind HTTP Basic auth (`web/src/middleware.ts`).
+
+#### Running locally without Neon
+
+`web/scripts/local-db.mjs` starts a real Postgres (PGlite over the wire protocol)
+with nothing to install, so you can develop against your own `jejak.db` data:
+
+```bash
+cd web && npm run local-db          # terminal 1 — serves on 127.0.0.1:5433
+
+export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5433/postgres"
+python ../scripts/sync_to_neon.py --push    # terminal 2 — load SQLite data
+npm run build && npm start                   # serve the site
+```
+
+`src/lib/db.ts` picks the driver from the host: `pg` for localhost, Neon's HTTP
+driver otherwise. The dev server accepts one client at a time, so use
+`npm start` rather than `npm run dev` — Next's dev mode forks render workers and
+they compete for the connection.
+
+CV content is static reference material — add entries to `web/src/lib/cv.ts`, keyed by
+the figure id from `figures.toml`. A figure without an entry simply shows no CV tab.
+
+There is also a local Flask UI (`jejak/web.py`, `flask --app jejak.web run`) used as an
+operator tool against SQLite. It has **no auth** — keep it on localhost.
+
+### Deploying to Cloudflare
+
+The app runs on **Cloudflare Workers** via the OpenNext adapter (`wrangler.jsonc`,
+`open-next.config.ts`). Cloudflare Pages is in maintenance mode for new Next.js
+projects, so Workers is the supported target.
+
+```bash
+cd web
+npm run preview     # build + run the real Worker locally
+npm run deploy      # build + publish
+```
+
+Set secrets on the Worker before the first deploy:
+
+```bash
+npx wrangler secret put DATABASE_URL
+npx wrangler secret put BASIC_AUTH_CREDENTIALS   # only if CLOSED_LAUNCH=true
+```
+
+For local Worker runs, put the same values in `web/.dev.vars` (gitignored).
+
+## Testing
+
+```bash
+pytest -q
+```
+
+`.github/workflows/check.yml` runs the Python tests plus `tsc --noEmit` and lint for
+the web app on every push.
 
 ## Roadmap
 
-- **Sentiment depth:** add a relevance pre-filter (drop off-topic comments before
-  scoring), show the full distribution, and optionally blend a second platform.
-- **Better clustering:** swap `cluster._similar()` for embedding similarity.
-- **Postgres:** the SQLite schema ports directly.
-- **Timeline UI:** consumes `review.timeline()` (approved events only).
-
-## Status
-
-Pipeline stages 1–5 implemented (ingest, fetch, cluster, summarize, review,
-sentiment) plus a Flask web UI (public timeline + reviewer queue). SQLite for
-development.
+- **Sentiment depth:** relevance pre-filter for off-topic comments, full distribution
+  display, second platform blended in.
+- **Attribution:** `ingest._attribute` is first-match substring matching, so a short
+  alias can capture articles about a different person with the same name.
+- **Buzzer:** the extremity signal currently flags minority opinion as much as
+  coordination; it needs rework before it carries much weight.

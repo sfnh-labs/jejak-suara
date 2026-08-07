@@ -1,9 +1,21 @@
-name: Pipeline
+name: Pipeline (ingest)
+
+# Collection stages only. summarize / translate / sentiment need a local Ollama
+# that GitHub runners do not have, so those run on a workstation — see the
+# "Publishing" section of the README.
+#
+# The job hydrates SQLite from Neon before running, because the runner's
+# working copy is thrown away each time. Without that, article dedupe and
+# clustering would start from an empty database on every run.
 
 on:
   schedule:
     - cron: "0 */6 * * *"   # every 6 hours
   workflow_dispatch:          # manual trigger
+
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -19,10 +31,26 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run pipeline
-        run: python -m jejak.cli run
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-paraphrase-multilingual-MiniLM-L12-v2
 
-      - name: Sync to Neon
-        run: python scripts/sync_to_neon.py
+      - name: Hydrate SQLite from Neon
+        run: python scripts/sync_to_neon.py --pull
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Ingest and cluster
+        run: |
+          python -m jejak.cli ingest
+          python -m jejak.cli fetch
+          python -m jejak.cli cluster
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+
+      - name: Publish to Neon
+        run: python scripts/sync_to_neon.py --push
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
