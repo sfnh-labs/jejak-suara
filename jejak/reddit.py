@@ -13,8 +13,10 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 
 TOKEN_URL = "https://www.reddit.com/api/v1/access_token"
 API_URL = "https://oauth.reddit.com"
@@ -29,7 +31,20 @@ def _get_client_id() -> str | None:
     return os.environ.get("REDDIT_CLIENT_ID")
 
 
+# Cached bearer token: (token, expiry timestamp). Reddit allows 60 requests per
+# minute and a token lasts ~24h, so minting one per request halved the budget
+# for no reason.
+_TOKEN_CACHE: tuple[str, float] | None = None
+_TOKEN_SKEW = 60.0  # renew this many seconds before actual expiry
+
+
 def _token() -> str:
+    global _TOKEN_CACHE
+    if _TOKEN_CACHE is not None:
+        token, expires_at = _TOKEN_CACHE
+        if time.time() < expires_at:
+            return token
+
     cid = _get_client_id()
     secret = os.environ.get("REDDIT_CLIENT_SECRET")
     if not cid or not secret:
@@ -61,10 +76,13 @@ def _token() -> str:
     token = data.get("access_token")
     if not token:
         raise RedditError("Reddit auth returned no access_token")
+    ttl = float(data.get("expires_in", 3600))
+    _TOKEN_CACHE = (token, time.time() + max(ttl - _TOKEN_SKEW, 0.0))
     return token
 
 
-def _get(endpoint: str, params: dict | None = None) -> dict:
+def _get(endpoint: str, params: dict | None = None) -> dict | list:
+    """GET an API endpoint. Listing endpoints return a JSON array, not an object."""
     token = _token()
     ua = os.environ.get("REDDIT_USER_AGENT",
                         "jejak-suara/0.1 (sentiment research)")
@@ -97,6 +115,8 @@ def search_posts(query: str, subreddit: str = "indonesia",
         "limit": limit,
         "raw_json": "1",
     })
+    if not isinstance(data, dict):
+        return []
     posts = []
     for item in data.get("data", {}).get("children", []):
         d = item.get("data", {})
@@ -111,8 +131,12 @@ def search_posts(query: str, subreddit: str = "indonesia",
     return posts
 
 
-def post_comments(permalink: str, limit: int = 50) -> list[str]:
-    """Return top-level comment texts for a Reddit post."""
+def post_comments(permalink: str, limit: int = 50) -> list[dict]:
+    """Return top-level comments for a Reddit post.
+
+    Shape matches `youtube.video_comments` — the sentiment stage consumes both
+    channels through the same code path.
+    """
     # permalink looks like /r/indonesia/comments/abc123/title/
     data = _get(f"{permalink.rstrip('/')}", {
         "limit": limit,
@@ -125,14 +149,28 @@ def post_comments(permalink: str, limit: int = 50) -> list[str]:
     for c in comments:
         if c.get("kind") not in ("t1",):
             continue
-        body = c.get("data", {}).get("body", "")
-        if body and body not in ("[removed]", "[deleted]"):
-            out.append(body)
+        d = c.get("data", {})
+        body = d.get("body", "")
+        if not body or body in ("[removed]", "[deleted]"):
+            continue
+        created = d.get("created_utc")
+        out.append({
+            "comment_id": d.get("id", ""),
+            "video_id": d.get("link_id", ""),
+            "text": body,
+            "author_id": d.get("author_fullname", ""),
+            "author_name": d.get("author", ""),
+            "like_count": d.get("ups", 0),
+            "published_at": (
+                datetime.fromtimestamp(created, tz=timezone.utc).isoformat()
+                if created else ""
+            ),
+        })
     return out
 
 
 def gather_comments(query: str, max_posts: int = 5,
-                    per_post: int = 30, cap: int = 100) -> list[str]:
+                    per_post: int = 30, cap: int = 100) -> list[dict]:
     """Search r/indonesia for posts about `query` and collect up to `cap` comments."""
     if not _get_client_id():
         return []
@@ -140,9 +178,12 @@ def gather_comments(query: str, max_posts: int = 5,
         posts = search_posts(query, limit=max_posts)
     except RedditError:
         return []
-    comments: list[str] = []
+    comments: list[dict] = []
     for post in posts:
         if len(comments) >= cap:
             break
-        comments.extend(post_comments(post["permalink"], limit=per_post))
+        try:
+            comments.extend(post_comments(post["permalink"], limit=per_post))
+        except RedditError:
+            continue
     return comments[:cap]

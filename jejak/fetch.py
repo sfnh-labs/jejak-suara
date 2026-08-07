@@ -105,8 +105,13 @@ def fetch_bodies(conn: sqlite3.Connection, limit: int = 50,
     """
     where = "fetch_status IS NULL" if not retry_failed \
         else "fetch_status IS NULL OR fetch_status LIKE 'error:%'"
+    # Figure articles and anything already clustered come first: general news is
+    # ingested in bulk as peristiwa candidates, and most of it never corroborates
+    # into an event, so it must not crowd out the articles we actually publish.
     rows = conn.execute(
-        f"SELECT id, url FROM articles WHERE {where} ORDER BY fetched_at LIMIT ?",
+        f"""SELECT id, url FROM articles WHERE {where}
+            ORDER BY (figure_id IS NULL AND event_id IS NULL), fetched_at
+            LIMIT ?""",
         (limit,),
     ).fetchall()
 

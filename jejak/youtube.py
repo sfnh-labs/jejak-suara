@@ -63,7 +63,9 @@ def search_videos(query: str, max_results: int = 5,
 def video_comments(video_id: str, max_results: int = 50) -> list[dict]:
     """Return top-level comments for a video with metadata.
 
-    Each dict: {text, author_id, author_name, like_count, published_at}
+    Each dict: {comment_id, video_id, text, author_id, author_name,
+    like_count, published_at}. `comment_id` is stable across collections, so
+    re-running sentiment updates existing rows instead of duplicating them.
     Returns [] if comments are disabled or the video is unavailable.
     """
     try:
@@ -78,11 +80,14 @@ def video_comments(video_id: str, max_results: int = 50) -> list[dict]:
         return []
     out = []
     for item in data.get("items", []):
-        snip = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+        top = item.get("snippet", {}).get("topLevelComment", {})
+        snip = top.get("snippet", {})
         text = snip.get("textDisplay") or snip.get("textOriginal")
         if not text:
             continue
         out.append({
+            "comment_id": top.get("id") or item.get("id", ""),
+            "video_id": video_id,
             "text": text,
             "author_id": snip.get("authorChannelId", {}).get("value", ""),
             "author_name": snip.get("authorDisplayName", ""),

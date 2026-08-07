@@ -55,13 +55,34 @@ def _ollama_chat(messages: list[dict]) -> dict:
         raise RuntimeError(f"Ollama not reachable: {e.reason}") from e
 
 
-def classify_comments(comments: list[str]) -> list[str]:
-    """Return a stance label per comment (best-effort; aligns by order)."""
-    if not comments:
+_BATCH = int(os.environ.get("SENTIMENT_BATCH", "25"))
+
+
+def classify_comments(comments: list[str]) -> list[str | None]:
+    """Return a stance label per comment, aligned by position.
+
+    An entry is None where the model's output could not be aligned to that
+    comment; callers drop those rather than counting them as neutral.
+    """
+    labels: list[str | None] = []
+    for i in range(0, len(comments), _BATCH):
+        labels.extend(_classify_batch(comments[i:i + _BATCH]))
+    return labels
+
+
+def _classify_batch(batch: list[str]) -> list[str | None]:
+    """Classify one batch, halving it when the model miscounts its output."""
+    if not batch:
         return []
-    numbered = "\n".join(f"{i+1}. {c}" for i, c in enumerate(comments))
-    prompt = f"Classify these {len(comments)} comments:\n\n{numbered}"
-    return _classify_ollama(comments, prompt)
+    numbered = "\n".join(f"{i+1}. {c}" for i, c in enumerate(batch))
+    prompt = f"Classify these {len(batch)} comments:\n\n{numbered}"
+    try:
+        return list(_classify_ollama(batch, prompt))
+    except ValueError:
+        if len(batch) == 1:
+            return [None]
+        mid = len(batch) // 2
+        return _classify_batch(batch[:mid]) + _classify_batch(batch[mid:])
 
 
 def _classify_ollama(comments: list[str], prompt: str) -> list[str]:
@@ -83,7 +104,13 @@ def _classify_ollama(comments: list[str], prompt: str) -> list[str]:
         if word in valid:
             labels.append(word)
 
-    labels = (labels + ["neutral"] * len(comments))[:len(comments)]
+    if len(labels) != len(comments):
+        # Padding a short response with "neutral" would report a full
+        # sample_size built partly from labels the model never produced, and
+        # bias the score toward zero. Refuse the batch instead.
+        raise ValueError(
+            f"model returned {len(labels)} labels for {len(comments)} comments"
+        )
     return labels
 
 
@@ -153,17 +180,27 @@ def _query_for_event(conn: sqlite3.Connection, event_id: int) -> str:
 
 
 def _store_comments(conn: sqlite3.Connection, event_id: int,
-                    comments: list[dict], labels: list[str],
-                    video_id: str | None = None) -> None:
-    """Bulk-insert individual comments with their stance labels."""
+                    comments: list[dict], labels: list[str]) -> None:
+    """Store individual comments with their stance labels.
+
+    Upserts on the platform's own comment id, so re-running sentiment refreshes
+    like counts and stances in place instead of duplicating the event's
+    comment history.
+    """
     now = datetime.now(timezone.utc).isoformat()
     for cmt, label in zip(comments, labels):
         conn.execute(
             """INSERT INTO comments
-               (event_id, video_id, author_id, author_name, text,
+               (event_id, comment_id, video_id, author_id, author_name, text,
                 like_count, published_at, stance, collected_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (event_id, video_id,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(event_id, comment_id) DO UPDATE SET
+                 like_count=excluded.like_count,
+                 stance=excluded.stance,
+                 collected_at=excluded.collected_at""",
+            (event_id,
+             cmt.get("comment_id", ""),
+             cmt.get("video_id", ""),
              cmt.get("author_id", ""),
              cmt.get("author_name", ""),
              cmt.get("text", ""),
@@ -182,26 +219,45 @@ def _run_sentiment(conn: sqlite3.Connection, event_id: int,
         return {"event_id": event_id, "query": query, "sample_size": 0,
                 "channel": channel, "note": "no comments gathered"}
 
-    texts = [c["text"] for c in comments]
-    labels = classify_comments(texts)
+    raw_labels = classify_comments([c["text"] for c in comments])
+
+    # Drop anything the model could not label rather than counting it as
+    # neutral, which would inflate sample_size and pull the score toward zero.
+    pairs = [(c, l) for c, l in zip(comments, raw_labels) if l is not None]
+    unclassified = len(comments) - len(pairs)
+    if not pairs:
+        return {"event_id": event_id, "query": query, "channel": channel,
+                "sample_size": 0, "note": "no comments could be classified"}
+
+    kept = [c for c, _ in pairs]
+    labels = [l for _, l in pairs]
     score, label, dist = _aggregate(labels)
-    samples = _sample_comments(texts, labels)
+    samples = _sample_comments([c["text"] for c in kept], labels)
 
     conn.execute(
         """INSERT INTO sentiment
            (event_id, channel, score, label, sample_size, samples_json, collected_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(event_id, channel) DO UPDATE SET
+             score=excluded.score,
+             label=excluded.label,
+             sample_size=excluded.sample_size,
+             samples_json=excluded.samples_json,
+             collected_at=excluded.collected_at""",
         (event_id, channel, score, label, len(labels),
          json.dumps(samples, ensure_ascii=False),
          datetime.now(timezone.utc).isoformat()),
     )
 
-    _store_comments(conn, event_id, comments, labels)
+    _store_comments(conn, event_id, kept, labels)
 
     conn.commit()
-    return {"event_id": event_id, "query": query, "channel": channel,
-            "sample_size": len(labels), "score": round(score, 3),
-            "label": label, "distribution": dist, "samples": len(samples)}
+    result = {"event_id": event_id, "query": query, "channel": channel,
+              "sample_size": len(labels), "score": round(score, 3),
+              "label": label, "distribution": dist, "samples": len(samples)}
+    if unclassified:
+        result["note"] = f"{unclassified} comment(s) could not be classified"
+    return result
 
 
 def sentiment_event(conn: sqlite3.Connection, event_id: int,
@@ -235,7 +291,10 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
 
 
 _FRESH_DAYS = int(os.environ.get("SENTIMENT_FRESH_DAYS", "3"))
-_STALE_HOURS = int(os.environ.get("SENTIMENT_STALE_HOURS", "6"))
+# Deliberately longer than the 6-hour pipeline cron: at 6 hours every recent
+# event was re-collected on literally every run, spending YouTube quota to
+# re-classify comments that had barely changed.
+_STALE_HOURS = int(os.environ.get("SENTIMENT_STALE_HOURS", "24"))
 
 
 def sentiment_pending(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
@@ -266,8 +325,8 @@ def sentiment_pending(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
     ).fetchall()]
     results: list[dict] = []
     for eid in ids:
-        conn.execute("DELETE FROM sentiment WHERE event_id = ?", (eid,))
-        conn.execute("DELETE FROM comments WHERE event_id = ?", (eid,))
-        conn.commit()
+        # No delete pass: sentiment and comments upsert on their natural keys,
+        # so re-collection refreshes rows and adds newly-posted comments while
+        # keeping the ones that have scrolled out of the platform's response.
         results.extend(sentiment_event(conn, eid))
     return results
