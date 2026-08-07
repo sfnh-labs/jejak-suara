@@ -1,5 +1,11 @@
-# Vercel deployment
-# vercel.json  # tracked — contains build/output config for CI
+# Cloudflare Workers build output (wrangler.jsonc IS tracked)
+web/.open-next/
+web/.wrangler/
+web/cloudflare-env.d.ts
+web/.dev.vars
+
+# Local dev Postgres (PGlite data directory)
+web/.pglite/
 
 # Environment
 .env
@@ -19,10 +25,18 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.pytest_cache/
 
 # Database (dev SQLite stays local)
 jejak.db
 smoke*.db
 
+# Design source (Claude design exports + zips) — kept local, not versioned
+.design/
+
 # Editor
 .claude/settings.local.json
+
+# Build/log artifacts
+scripts/*.log
+web/tsconfig.tsbuildinfo
