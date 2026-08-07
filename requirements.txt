@@ -6,5 +6,11 @@ flask>=3.0.0           # web UI: public timeline + reviewer queue (server-render
 youtube-transcript-api>=1.2.3  # YouTube transcript fetching for video news ingestion
 langdetect>=1.0.9             # language detection for auto-translate
 rapidfuzz>=3.9.0             # fuzzy string matching for copypasta detection (buzzer)
-sentence-transformers>=3.0.0 # semantic embeddings for clustering
-numpy>=1.24.0                # required by sentence-transformers
+# Embeddings for clustering. transformers + torch directly, NOT
+# sentence-transformers: that imports `datasets`, which loads pyarrow's native
+# compute DLL — heavy, and blocked outright by Windows Application Control on
+# locked-down machines. The model is a plain transformer with mean pooling.
+transformers>=4.40.0
+torch>=2.2.0
+numpy>=1.24.0
+psycopg2-binary>=2.9.9       # Neon Postgres sync (scripts/sync_to_neon.py)
