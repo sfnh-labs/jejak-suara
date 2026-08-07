@@ -1,0 +1,155 @@
+/**
+ * Download each outlet's own icon into public/outlets/ and write a manifest.
+ *
+ * Bundling rather than hotlinking: the site runs on Cloudflare Workers, and a
+ * per-card request to eight news domains would leak every reader's IP to those
+ * outlets and break whenever one of them changes a path. These are fetched once
+ * at build time and served from our own origin.
+ *
+ *   node scripts/fetch-outlet-logos.mjs
+ *
+ * Re-run when sources.toml gains an outlet. Existing files are kept unless
+ * --force is passed.
+ */
+import { mkdir, writeFile, readdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const OUT_DIR = join(ROOT, "public", "outlets");
+const MANIFEST = join(ROOT, "src", "lib", "outlet-logos.generated.ts");
+
+// Source name as stored in articles.source -> the outlet's own site.
+const OUTLETS = {
+  Detik: "https://news.detik.com/",
+  detikcom: "https://news.detik.com/",
+  Kompas: "https://www.kompas.com/",
+  Antara: "https://www.antaranews.com/",
+  Tempo: "https://www.tempo.co/",
+  "CNN Indonesia": "https://www.cnnindonesia.com/",
+  Republika: "https://www.republika.co.id/",
+  "Al Jazeera": "https://www.aljazeera.com/",
+  "The Guardian": "https://www.theguardian.com/",
+  "BBC News": "https://www.bbc.com/",
+  CNBC: "https://www.cnbcindonesia.com/",
+  Bisnis: "https://www.bisnis.com/",
+  Kontan: "https://www.kontan.co.id/",
+};
+
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+const slug = (name) =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+const EXT = {
+  "image/png": "png",
+  "image/x-icon": "ico",
+  "image/vnd.microsoft.icon": "ico",
+  "image/jpeg": "jpg",
+  "image/svg+xml": "svg",
+  "image/webp": "webp",
+};
+
+async function get(url, timeoutMs = 12000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { headers: { "User-Agent": UA }, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * Icon URLs declared by the page, largest first.
+ *
+ * Sites advertise several sizes; the card renders at ~22px but a retina display
+ * doubles that, and an oversized source downsamples cleanly while a 16px
+ * favicon upscaled looks like mush.
+ */
+async function declaredIcons(homepage) {
+  const res = await get(homepage);
+  if (!res.ok) return [];
+  const html = (await res.text()).slice(0, 400_000);
+  const found = [];
+  const linkRe = /<link\b[^>]*>/gi;
+  for (const [tag] of html.matchAll(linkRe)) {
+    const rel = /\brel\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]?.toLowerCase();
+    if (!rel || !/\b(apple-touch-icon|icon|shortcut icon)\b/.test(rel)) continue;
+    const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1];
+    if (!href) continue;
+    const size = Number(
+      /\bsizes\s*=\s*["'](\d+)/i.exec(tag)?.[1] ??
+        (rel.includes("apple-touch-icon") ? 180 : 32)
+    );
+    try {
+      found.push({ url: new URL(href, homepage).href, size });
+    } catch {
+      /* malformed href in the page — skip it */
+    }
+  }
+  found.push({ url: new URL("/favicon.ico", homepage).href, size: 0 });
+  return found.sort((a, b) => b.size - a.size);
+}
+
+async function download(name, homepage, existing, force) {
+  const id = slug(name);
+  if (!force && existing.some((f) => f.startsWith(`${id}.`))) {
+    const file = existing.find((f) => f.startsWith(`${id}.`));
+    return { id, file, bytes: 0, cached: true };
+  }
+  for (const { url } of await declaredIcons(homepage)) {
+    let res;
+    try {
+      res = await get(url);
+    } catch {
+      continue;
+    }
+    if (!res.ok) continue;
+    const type = (res.headers.get("content-type") || "").split(";")[0].trim();
+    const ext = EXT[type];
+    if (!ext) continue;
+    const buf = Buffer.from(await res.arrayBuffer());
+    // Under ~200 bytes it is a placeholder or an error page mislabelled as an
+    // image, not a usable mark.
+    if (buf.length < 200) continue;
+    const file = `${id}.${ext}`;
+    await writeFile(join(OUT_DIR, file), buf);
+    return { id, file, bytes: buf.length, url };
+  }
+  return null;
+}
+
+async function main() {
+  const force = process.argv.includes("--force");
+  await mkdir(OUT_DIR, { recursive: true });
+  const existing = await readdir(OUT_DIR).catch(() => []);
+
+  const manifest = {};
+  for (const [name, homepage] of Object.entries(OUTLETS)) {
+    const got = await download(name, homepage, existing, force);
+    if (got) {
+      manifest[name] = `/outlets/${got.file}`;
+      const note = got.cached ? "cached" : `${(got.bytes / 1024).toFixed(1)} kB`;
+      console.log(`  ${name.padEnd(15)} ${got.file.padEnd(22)} ${note}`);
+    } else {
+      console.log(`  ${name.padEnd(15)} (no icon found — monogram fallback)`);
+    }
+  }
+
+  const body =
+    "// Generated by scripts/fetch-outlet-logos.mjs — do not edit by hand.\n" +
+    "// Maps articles.source to a bundled icon in public/outlets/.\n" +
+    "export const OUTLET_LOGO_FILES: Record<string, string> = " +
+    JSON.stringify(manifest, null, 2) +
+    ";\n";
+  await writeFile(MANIFEST, body);
+  console.log(`\nwrote ${Object.keys(manifest).length} logos + manifest`);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
