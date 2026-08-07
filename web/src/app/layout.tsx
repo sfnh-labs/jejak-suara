@@ -1,22 +1,32 @@
 import type { Metadata } from "next";
+import { Newsreader, Public_Sans } from "next/font/google";
 import "./globals.css";
+
+// Self-hosted at build time: no render-blocking request to fonts.googleapis.com,
+// and the CSS variables here are what globals.css's --font-* tokens resolve to.
+const newsreader = Newsreader({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+  variable: "--font-newsreader",
+  display: "swap",
+});
+
+const publicSans = Public_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-public-sans",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Jejak Suara",
-  description: "Portal Rekam Jejak Tokoh Publik",
+  description: "Portal rekam jejak tokoh publik, dirangkum dari pemberitaan bersumber.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="id">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500&family=Public+Sans:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html lang="id" className={`${newsreader.variable} ${publicSans.variable}`}>
       <body>{children}</body>
     </html>
   );

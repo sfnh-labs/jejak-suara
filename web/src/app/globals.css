@@ -5,7 +5,9 @@
   --color-cream-dark: #efe9dc;
   --color-ink: #16130f;
   --color-mud: #4a443d;
+  --color-body: #3e382f;
   --color-stone: #7a7264;
+  --color-stone-light: #9b9285;
   --color-parchment: #d8cfba;
   --color-parchment-light: #ddd3bf;
   --color-parchment-dark: #bcb3a0;
@@ -24,8 +26,8 @@
   --color-score-neg: #c0392b;
   --color-score-neu: #9b7b3f;
   --color-score-pos: #2e7a52;
-  --font-serif: "Newsreader", serif;
-  --font-sans: "Public Sans", system-ui, sans-serif;
+  --font-serif: var(--font-newsreader), Georgia, serif;
+  --font-sans: var(--font-public-sans), system-ui, sans-serif;
 }
 
 @layer base {
@@ -35,8 +37,112 @@
     background: var(--color-cream);
     color: var(--color-ink);
     font-family: var(--font-sans);
+    /* Fixed-width children (tables, rails) must scroll inside their own box
+       rather than pushing the page sideways on a phone. */
+    overflow-x: hidden;
   }
-  .fig-link:hover {
-    color: var(--color-clay) !important;
+
+  :focus-visible {
+    outline: 2px solid var(--color-clay);
+    outline-offset: 2px;
+  }
+
+  .fig-link:hover { color: var(--color-clay) !important; }
+
+  /* Stretches the headline link across its card so the whole card is
+     clickable, without nesting the sources disclosure inside an anchor. */
+  .card-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+  }
+  .card-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* The default marker would sit beside our own ▸ affordance. */
+  summary::-webkit-details-marker { display: none; }
+  details > summary { list-style: none; }
+  details > summary::before { content: "▸ "; }
+  details[open] > summary::before { content: "▾ "; }
+}
+
+@layer components {
+  .container-page {
+    margin: 0 auto;
+    padding: 0 clamp(16px, 5vw, 48px) 80px;
+  }
+  .rule-heavy { border-bottom: 3px double var(--color-ink); }
+
+  /* Two columns on desktop; the profile card stops sticking once it stacks. */
+  .tokoh-grid {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+    gap: 52px;
+    padding-top: 24px;
+  }
+  .tokoh-profile {
+    position: sticky;
+    top: 72px;
+    align-self: start;
+  }
+  @media (max-width: 900px) {
+    .tokoh-grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+    .tokoh-profile { position: static; }
+  }
+
+  /* Home rail: peristiwa on the left of the line, figure records on the right,
+     at 1:2. The line sits on the column boundary, so it tracks the ratio. */
+  .rail { position: relative; }
+  .rail::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 33.3333%;
+    width: 1.5px;
+    background: #d8cfba;
+  }
+  .rail-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    padding-bottom: 30px;
+  }
+  .rail-row > .rail-event { grid-column: 1; padding-right: 32px; min-width: 0; }
+  .rail-row > .rail-record { grid-column: 2; padding-left: 32px; min-width: 0; }
+  .rail-dot {
+    position: absolute;
+    left: 33.3333%;
+    top: 5px;
+    transform: translateX(-50%);
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px #f6f2e9;
+    z-index: 1;
+  }
+
+  /* Below 760px the two columns cannot coexist: the rail moves to the far left
+     and both kinds stack in one stream. */
+  @media (max-width: 760px) {
+    .rail::before { left: 0; }
+    .rail-row { display: block; padding-left: 30px; }
+    .rail-row > .rail-event,
+    .rail-row > .rail-record { padding-left: 0; padding-right: 0; }
+    .rail-dot { left: 0; transform: none; box-shadow: 0 0 0 3px #f6f2e9; }
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-clay);
+  }
+  .section-label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink);
   }
 }
