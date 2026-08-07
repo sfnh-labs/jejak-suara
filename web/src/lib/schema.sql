@@ -1,18 +1,43 @@
+-- Tracked public figures. Mirrored from figures.toml by scripts/sync_to_neon.py
+-- so the web app does not have to hardcode names/roles.
+CREATE TABLE IF NOT EXISTS figures (
+    id       TEXT PRIMARY KEY,
+    name     TEXT NOT NULL,
+    role     TEXT,
+    aliases  TEXT,              -- JSON array
+    active   BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- 'record' = one tracked figure's activity (figure_id set).
+-- 'peristiwa' = an event belonging to no figure (figure_id NULL); any figures
+-- appearing in its coverage are related, via event_figures.
 CREATE TABLE IF NOT EXISTS events (
     id          SERIAL PRIMARY KEY,
-    figure_id   TEXT NOT NULL,
+    figure_id   TEXT,
+    kind        TEXT NOT NULL DEFAULT 'record',
     title       TEXT,
     event_date  TEXT,
     event_type  TEXT DEFAULT 'other',
+    scope       TEXT,
+    impact      TEXT,
     status      TEXT NOT NULL DEFAULT 'new',
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_figure ON events(figure_id);
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
+-- idx_events_kind is created by sync_to_neon's MIGRATIONS, after the ALTER that
+-- adds `kind` to databases predating it.
+
+CREATE TABLE IF NOT EXISTS event_figures (
+    event_id   INTEGER NOT NULL REFERENCES events(id),
+    figure_id  TEXT NOT NULL,
+    PRIMARY KEY (event_id, figure_id)
+);
+CREATE INDEX IF NOT EXISTS idx_event_figures_figure ON event_figures(figure_id);
 
 CREATE TABLE IF NOT EXISTS articles (
     id           TEXT PRIMARY KEY,
-    figure_id    TEXT NOT NULL,
+    figure_id    TEXT,               -- NULL = general news, peristiwa material
     source       TEXT NOT NULL,
     url          TEXT NOT NULL,
     title        TEXT NOT NULL,
@@ -48,6 +73,22 @@ CREATE TABLE IF NOT EXISTS sentiment (
     samples_json TEXT,
     collected_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS comments (
+    id           SERIAL PRIMARY KEY,
+    event_id     INTEGER NOT NULL REFERENCES events(id),
+    comment_id   TEXT,              -- platform's own id; stable across collections
+    video_id     TEXT,
+    author_id    TEXT,
+    author_name  TEXT,
+    text         TEXT NOT NULL,
+    like_count   INTEGER DEFAULT 0,
+    published_at TEXT,
+    stance       TEXT,
+    collected_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_comments_event  ON comments(event_id);
+CREATE INDEX IF NOT EXISTS idx_comments_author ON comments(author_id);
 
 CREATE TABLE IF NOT EXISTS corrections (
     id           SERIAL PRIMARY KEY,
