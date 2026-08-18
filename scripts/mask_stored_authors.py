@@ -1,20 +1,30 @@
-"""Strip commenters' identities from rows already in storage.
+"""Bring stored commenter identities into the form the pipeline now writes.
 
-`sentiment._store_comments` does this at write time, so nothing collected from
-now on carries either field in the clear. This is the one-off for rows written
-before that: their `author_name` is still the display name YouTube handed back,
-and their `author_id` is still a channel id that resolves to the person. See
-jejak/anonymize.py for why neither should be there.
+`sentiment._store_comments` redacts at write time, so nothing collected from
+now on carries a full display name or a raw channel id. This is the one-off for
+rows written before that, and the way to roll out a change to the redaction
+format across rows already stored: it recomputes rather than skipping anything
+that merely looks done.
 
     python scripts/mask_stored_authors.py           # dry run - reports only
     python scripts/mask_stored_authors.py --apply   # rewrite, after a backup
 
-Both fields derive from `author_id`, and both helpers give the same answer
-whether handed the raw id or their own output - so this converges on the same
-values the pipeline would have written, and re-running it is a no-op. It is
-also the way to roll out a change to the pseudonym format across rows already
-stored, since it recomputes rather than skipping anything that merely looks
-done.
+    # recover names an earlier format destroyed, then redact those
+    python scripts/mask_stored_authors.py --names-from jejak.db.bak.20260818125949
+
+`--names-from` exists because the redaction format changed after rows were
+already scrubbed. The first format replaced the whole name with a pseudonym
+derived from the id, so the name itself is not in the live database any more
+and a partial redaction cannot be computed from what is there. A pre-scrub
+SQLite backup still has it. Rows whose name cannot be recovered are reported
+and left alone: masking a pseudonym would produce something that reads like a
+redacted name but is not one.
+
+Names are matched across stores on `comment_id`, the platform's own id for the
+comment, and never on the row id. `comments` syncs with serial=True against a
+conflict target of (event_id, comment_id), so its id is omitted from the push
+and Postgres mints its own; the two id spaces do not correspond, and updating
+one store by the other's ids rewrites the wrong rows.
 """
 from __future__ import annotations
 
@@ -22,6 +32,7 @@ import argparse
 import os
 import re
 import shutil
+import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +43,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from jejak import anonymize  # noqa: E402
 from jejak import db as jejak_db  # noqa: E402
+
+# The retired format: "Akun" plus a prefix of the id's digest. Nothing of the
+# display name survives in it, so a row still wearing one is unrecoverable
+# unless --names-from supplies the original.
+_RETIRED = re.compile(r"^Akun\s+[0-9a-f]{4,}$", re.I)
 
 
 def _load_env() -> None:
@@ -44,10 +60,50 @@ def _load_env() -> None:
             os.environ.setdefault(m.group(1), m.group(2).strip().strip('"'))
 
 
+def recovered_names(path: Path) -> dict[str, str]:
+    """comment_id -> the display name as it was stored before any redaction.
+
+    Only names that predate redaction are taken. A backup can hold a mix, and
+    a value already in a mask's shape is no better a source than what is live.
+    """
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT comment_id, author_name FROM comments").fetchall()
+    finally:
+        conn.close()
+    return {cid: name for cid, name in rows
+            if cid and name and not _RETIRED.match(name)
+            and not anonymize.is_masked(name)}
+
+
+def plan(rows, names: dict[str, str]):
+    """Rows whose stored form differs from what it should be.
+
+    Returns (updates, unrecoverable), where updates is ready for executemany as
+    (author_name, author_id, row_id).
+    """
+    updates, stuck = [], 0
+    for row_id, comment_id, author_id, name in rows:
+        source = names.get(comment_id)
+        if source is None:
+            if _RETIRED.match(name or ""):
+                stuck += 1
+                continue
+            source = name
+        want_id = anonymize.hash_author_id(author_id)
+        want_name = anonymize.mask_author(source)
+        if (want_id, want_name) != (author_id, name):
+            updates.append((want_name, want_id, row_id))
+    return updates, stuck
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mask_stored_authors")
     parser.add_argument("--apply", action="store_true",
                         help="actually rewrite (default is a dry run)")
+    parser.add_argument("--names-from", type=Path, default=None,
+                        help="SQLite file holding the pre-redaction names")
     args = parser.parse_args(argv)
 
     _load_env()
@@ -61,6 +117,14 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
+    names: dict[str, str] = {}
+    if args.names_from:
+        if not args.names_from.exists():
+            print(f"no such file: {args.names_from}", file=sys.stderr)
+            return 1
+        names = recovered_names(args.names_from)
+        print(f"recovered {len(names)} names from {args.names_from.name}")
+
     import sync_to_neon  # noqa: E402
 
     sqlite = jejak_db.connect()
@@ -68,47 +132,27 @@ def main(argv: list[str] | None = None) -> int:
     cur = pg.cursor()
 
     try:
-        # Each store is scrubbed from its own rows. They cannot be matched on
-        # comments.id: that table syncs with serial=True against a conflict
-        # target of (event_id, comment_id), so its id is omitted from the push
-        # and Postgres mints its own. The two id spaces do not correspond, and
-        # updating one store by the other's ids rewrites the wrong rows.
-        sq_rows = sqlite.execute(
-            "SELECT id, author_id, author_name FROM comments").fetchall()
-        cur.execute("SELECT id, author_id, author_name FROM comments")
+        sq_rows = [(r["id"], r["comment_id"], r["author_id"], r["author_name"])
+                   for r in sqlite.execute(
+                       "SELECT id, comment_id, author_id, author_name "
+                       "FROM comments")]
+        cur.execute(
+            "SELECT id, comment_id, author_id, author_name FROM comments")
         pg_rows = cur.fetchall()
 
-        def plan(rows):
-            """Rows whose stored form differs from what it should be.
+        sq_updates, sq_stuck = plan(sq_rows, names)
+        pg_updates, pg_stuck = plan(pg_rows, names)
 
-            Recomputed rather than skipped-if-it-looks-masked: a row can
-            already hold a pseudonym and still be wrong, which is exactly what
-            happened when the label widened from four hex digits to six. Both
-            helpers are idempotent on their own output, so this converges.
-            """
-            out = []
-            for row_id, author_id, name in rows:
-                want_id = anonymize.hash_author_id(author_id)
-                want_name = anonymize.mask_author(author_id, name)
-                if (want_id, want_name) != (author_id, name):
-                    out.append((want_name, want_id, row_id))
-            return out
-
-        sq_updates = plan([(r["id"], r["author_id"], r["author_name"])
-                           for r in sq_rows])
-        pg_updates = plan(pg_rows)
-
-        for label, rows, updates in (("SQLite", sq_rows, sq_updates),
-                                     ("Neon", pg_rows, pg_updates)):
-            print(f"{label:<7}: {len(rows)} comments, {len(updates)} to rewrite")
-        people = len({m for m, _, _ in sq_updates} | {m for m, _, _ in pg_updates})
-        print(f"  distinct people behind them: {people}")
+        for label, rows, updates, stuck in (
+                ("SQLite", sq_rows, sq_updates, sq_stuck),
+                ("Neon", pg_rows, pg_updates, pg_stuck)):
+            print(f"{label:<7}: {len(rows)} comments, {len(updates)} to "
+                  f"rewrite, {stuck} unrecoverable")
 
         if not args.apply:
-            for (mask, hashed, row_id) in sq_updates[:5]:
-                before = next(r for r in sq_rows if r["id"] == row_id)
-                print(f"    {before['author_name']!r} -> {mask!r}")
-                print(f"      id {before['author_id']!r} -> {hashed[:16]!r}...")
+            for (mask, _, row_id) in sq_updates[:5]:
+                before = next(r for r in sq_rows if r[0] == row_id)
+                print(f"    {before[3]!r} -> {mask!r}")
             print("\nDry run. Re-run with --apply to rewrite.")
             return 0
 
@@ -131,13 +175,13 @@ def main(argv: list[str] | None = None) -> int:
                 " WHERE id = %s", pg_updates)
         pg.commit()
 
-        remaining = (
-            "SELECT count(*) FROM comments WHERE "
-            "(author_name NOT LIKE 'Akun {p}' AND author_name <> 'Anonim') "
-            "OR (author_id <> '' AND length(author_id) <> 64)"
-        )
-        left_sq = sqlite.execute(remaining.format(p="%")).fetchone()[0]
-        cur.execute(remaining.format(p="%%"))
+        # What is left in the clear afterwards, counted from the rows
+        # themselves rather than from what we believed we were writing.
+        left = ("SELECT count(*) FROM comments WHERE "
+                "(author_name <> 'Anonim' AND author_name NOT LIKE '{p}*{p}') "
+                "OR (author_id <> '' AND length(author_id) <> 64)")
+        left_sq = sqlite.execute(left.format(p="%")).fetchone()[0]
+        cur.execute(left.format(p="%%"))
         print(f"SQLite : rewrote {len(sq_updates)}, {left_sq} still exposed")
         print(f"Neon   : rewrote {len(pg_updates)}, {cur.fetchone()[0]} "
               f"still exposed")

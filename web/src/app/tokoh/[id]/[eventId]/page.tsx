@@ -283,13 +283,16 @@ function Badge({ tone, text }: { tone: "ok" | "warn" | "quiet"; text: string }) 
 }
 
 /**
- * Commenters are pseudonymous ("Akun 4f2a" — see jejak/anonymize.py), so the
- * usual first-letter initials would render "A4" for every one of them. The
- * distinguishing half is the hash, so the avatar shows that instead.
+ * Commenters' names are redacted, not replaced ("@Gu**sih" — see
+ * jejak/anonymize.py). Plain initials would read "@" for every YouTube handle
+ * and "*" for a name short enough to be hidden outright, so the avatar takes
+ * the first letters that actually survived the redaction.
  */
 function avatarToken(name: string): string {
-  const hashed = /^Akun\s+([0-9a-f]+)$/i.exec(name);
-  return hashed ? hashed[1] : initials(name);
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length > 1) return initials(name);
+  const legible = name.replace(/[^\p{L}\p{N}]/gu, "");
+  return legible.slice(0, 2).toUpperCase() || "?";
 }
 
 function Comment({ comment }: { comment: PublicComment }) {

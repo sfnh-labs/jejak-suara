@@ -692,34 +692,53 @@ class TestLateArrivingCoverage:
 
 
 class TestAnonymize:
-    """Commenters are private individuals; their display name is never stored."""
+    """Commenters are private individuals; their name is never stored whole."""
+
+    def test_the_middle_of_the_name_is_replaced(self):
+        assert anonymize.mask_author("sleepy-cat") == "sle****cat"
+
+    def test_the_ends_stay_legible(self):
+        mask = anonymize.mask_author("Budi Santoso")
+        assert mask.startswith("Bud") and mask.endswith("oso")
+
+    def test_the_length_is_preserved(self):
+        """Which is also what makes a second pass a no-op."""
+        for name in ("sleepy-cat", "@Makhsus", "Budi", "@GunartiPurwaningsih"):
+            assert len(anonymize.mask_author(name)) == len(name)
+
+    def test_masking_twice_changes_nothing(self):
+        """The raw name is discarded at write time and cannot be recomputed."""
+        for name in ("sleepy-cat", "@Makhsus", "Budi", "Ab", "x", "Anonim"):
+            once = anonymize.mask_author(name)
+            assert anonymize.mask_author(once) == once
+
+    def test_something_is_always_hidden(self):
+        for name in ("sleepy-cat", "@Makhsus", "Budi", "Abc", "Ab", "x"):
+            assert anonymize.HIDDEN in anonymize.mask_author(name)
+
+    def test_a_name_too_short_to_split_is_hidden_outright(self):
+        """Keeping three at each end of a four-character name shows all four."""
+        assert anonymize.mask_author("Abc") == "***"
+        assert anonymize.mask_author("Budi") == "B**i"
 
     def test_the_same_account_masks_the_same_everywhere(self):
         """Buzzer's 'one account, many events' finding has to stay legible."""
-        a = anonymize.mask_author("UC123", "Budi Santoso")
-        b = anonymize.mask_author("UC123", "Budi Santoso")
-        assert a == b
-
-    def test_different_accounts_mask_differently(self):
-        assert anonymize.mask_author("UC123") != anonymize.mask_author("UC999")
-
-    def test_the_mask_does_not_carry_the_display_name(self):
-        mask = anonymize.mask_author("UC123", "Budi Santoso")
-        assert "Budi" not in mask and "Santoso" not in mask
-
-    def test_the_id_decides_the_mask_not_the_name(self):
-        """A commenter who renames themselves stays the same person."""
-        assert (anonymize.mask_author("UC123", "Budi Santoso")
-                == anonymize.mask_author("UC123", "Nama Baru"))
-
-    def test_a_missing_id_still_does_not_leak_the_name(self):
-        mask = anonymize.mask_author("", "Budi Santoso")
-        assert mask.startswith(anonymize.PREFIX)
-        assert "Budi" not in mask
+        assert (anonymize.mask_author("Budi Santoso")
+                == anonymize.mask_author("Budi Santoso"))
 
     def test_nothing_to_go_on_is_anonymous(self):
-        assert anonymize.mask_author("", "") == "Anonim"
-        assert anonymize.mask_author(None, None) == "Anonim"
+        assert anonymize.mask_author("") == "Anonim"
+        assert anonymize.mask_author(None) == "Anonim"
+        assert anonymize.mask_author("   ") == "Anonim"
+
+    def test_the_fallback_is_not_itself_redacted(self):
+        """Or "An**im" would read like a real commenter's redacted handle."""
+        assert anonymize.mask_author("Anonim") == "Anonim"
+
+    def test_is_masked_recognises_the_stored_form(self):
+        assert anonymize.is_masked(anonymize.mask_author("sleepy-cat"))
+        assert not anonymize.is_masked("sleepy-cat")
+        assert not anonymize.is_masked("")
 
     def test_stored_comments_carry_the_mask_not_the_name(self, tmp_path):
         conn = _fresh(tmp_path)
@@ -738,8 +757,8 @@ class TestAnonymize:
         row = conn.execute(
             "SELECT author_name, author_id, channel FROM comments"
         ).fetchone()
-        assert row["author_name"] == anonymize.mask_author("UC123")
-        assert "Budi" not in row["author_name"]
+        assert row["author_name"] == anonymize.mask_author("Budi Santoso")
+        assert "Budi Santoso" not in row["author_name"]
         # Kept, but hashed: buzzer needs a stable identity and only compares
         # it, while the raw value resolves straight back to the account.
         assert row["author_id"] == anonymize.hash_author_id("UC123")
@@ -822,21 +841,17 @@ class TestAuthorIdHashing:
             "SELECT author_id, author_name FROM comments").fetchone()
         assert row["author_id"] == anonymize.hash_author_id(self.RAW)
         assert self.RAW not in row["author_id"]
-        assert "Budi" not in row["author_name"]
+        assert "Budi Santoso" not in row["author_name"]
 
-    def test_the_mask_survives_the_id_being_hashed(self):
-        """The raw id is gone after the first write, so the mask cannot need it.
+    def test_the_id_never_reaches_the_name(self):
+        """The two fields are redacted independently and must stay that way.
 
-        Masking a prefix of the digest is what makes the two agree: rows
-        written before ids were hashed keep the pseudonym they already had.
+        A name built from the id would have to be recomputed from a value that
+        is gone after the first write.
         """
-        assert (anonymize.mask_author(self.RAW)
-                == anonymize.mask_author(anonymize.hash_author_id(self.RAW)))
-
-    def test_a_pseudonym_is_wide_enough_to_stay_unique(self):
-        """Four hex digits collided for 54 pairs across a real 2592 accounts."""
-        masks = {anonymize.mask_author(f"UC{i}") for i in range(3000)}
-        assert len(masks) > 2995
+        row_name = anonymize.mask_author("Budi Santoso")
+        assert self.RAW not in row_name
+        assert anonymize.hash_author_id(self.RAW)[:6] not in row_name
 
     def test_buzzer_still_groups_an_account_across_events(self, tmp_path):
         """Hashing must be invisible to the signal it feeds."""

@@ -1,72 +1,90 @@
-"""Pseudonyms for the people whose comments are collected.
+"""Redaction for the people whose comments are collected.
 
 Commenters are private individuals. They are not the subject of this site — a
 named public official is — and they never opted into appearing next to one.
-Publishing their real display name adds nothing a reader can use: what matters
-is that a comment came from a distinct person, and which audience it came from.
-The name itself is pure exposure.
 
 It is also the sharper edge of the same UU ITE risk the project's design
 principles are built around, pointed the other way. `buzzer` labels some of
-these accounts as coordinated, and a coordination claim printed beside a real,
-searchable name is an accusation against a private individual.
+these accounts as coordinated, and a coordination claim printed beside a
+resolvable identity is an accusation against a private individual.
 
-So the display name is never stored. `mask_author` runs at write time, in
-`sentiment._store_comments`, and the raw name is discarded before it reaches
-the database.
+So the display name is never stored in full. `mask_author` runs at write time,
+in `sentiment._store_comments`, and only the redacted form reaches the
+database.
 
-`author_id` is kept, because buzzer's cross-event and burst signals need a
-stable identity — but it is hashed first. The raw value is a YouTube channel
-id, which resolves straight back to the person at youtube.com/channel/<id>, so
-storing it verbatim means the database holds a working link to every commenter.
-Buzzer only ever compares the field for equality, so a digest serves it exactly
-as well.
+What partial redaction does and does not buy. It keeps the name recognisable
+as a name — a reader sees distinct people rather than a wall of hashes — and it
+costs a casual reader the ability to copy a name straight into a search box.
+It is *not* de-identification. These are YouTube handles, which resolve
+publicly, and the first and last characters plus the exact length usually
+narrow a handle to one account: `@Makhsus` shows as `@Ma**sus`, which is six of
+its eight characters. Anyone who sets out to identify a specific commenter
+will succeed. This is a deliberate trade of privacy for legibility, chosen
+knowing that; it is not a security control and must not be described as one.
 
-What that does and does not buy: it removes the direct lookup, so a leak of the
-data (or anyone browsing it) no longer hands over the account. It is not
-anonymity against a targeted check — someone who already suspects a specific
-person can hash that person's channel id and search for it. Defeating that
-needs a secret salt, and a salt kept in this same database would fall with it,
-so it is deliberately not attempted here.
+`author_id` is the part that is genuinely removed. buzzer's cross-event and
+burst signals need a stable identity, so the field is kept — but hashed. The
+raw value is a channel id that resolves straight back to the person at
+youtube.com/channel/<id>, so storing it verbatim means the database holds a
+working link to every commenter. buzzer only ever compares the field for
+equality, so a digest serves it exactly as well.
+
+That hash is not anonymity against a targeted check either — someone who
+already suspects a specific person can hash that person's channel id and search
+for it. Defeating that needs a secret salt, and a salt kept in this same
+database would fall with it, so it is deliberately not attempted here.
 """
 from __future__ import annotations
 
 import hashlib
 
-# Short enough to read as a label rather than a checksum, long enough that two
-# people never share one. Four digits is plenty within a single event's ~100
-# comments but not across the site: at 65536 values and a few thousand
-# commenters the birthday bound bites, and a measured 2592 accounts collapsed
-# into 2538 labels - 54 pairs of strangers rendering as the same person. Six
-# digits puts the expected number of collisions under one.
-_DIGITS = 6
+# How many characters stay legible at each end. Three is enough to recognise a
+# name you already know without printing it whole.
+_VISIBLE = 3
 
-PREFIX = "Akun"
+# Never redact so little that the mask is pointless. A name short enough that
+# keeping three at each end would hide fewer than this many characters keeps
+# proportionally less instead, and a very short one is hidden outright.
+_MIN_HIDDEN = 2
+
+HIDDEN = "*"
+
+FALLBACK = "Anonim"
 
 
-def mask_author(author_id: str | None, author_name: str | None = None) -> str:
-    """A stable, opaque label for one commenter.
+def mask_author(author_name: str | None) -> str:
+    """A display name with its middle replaced by `*`.
 
-    Derived from `author_id` so the same person reads the same across every
-    event they appear in — which is what makes buzzer's "same account, many
-    events" finding legible to a reader rather than an unexplained badge.
+    `sleepy-cat` reads as `sle****cat`: the ends stay, the middle goes, and the
+    length is preserved so the result still looks like the name it came from.
 
-    Accepts the id either raw or already hashed and gives the same answer for
-    both, because it masks a prefix of `hash_author_id`. That is what lets the
-    stored id be hashed without every pseudonym shifting underneath it — the
-    raw value is gone after the first write, so a mask that depended on it
-    could never be recomputed.
-
-    Falls back to the display name only when the platform gave no id, so that a
-    row still gets a pseudonym instead of leaking the name by default.
+    Idempotent, which is what makes it safe to run over stored rows. The
+    characters it keeps are the ones it would keep on a second pass, and the
+    run of `*` it writes is exactly as long as the run it would hide, so
+    masking an already-masked name returns it unchanged — including the
+    no-name fallback, which is a word and would otherwise be redacted into
+    something that reads like a real commenter. That matters because
+    the raw name is discarded at write time — a mask that shifted on re-run
+    could never be recomputed from what is actually in the database.
     """
-    digest = hash_author_id(author_id)
-    if not digest:
-        name = (author_name or "").strip()
-        if not name:
-            return "Anonim"
-        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()
-    return f"{PREFIX} {digest[:_DIGITS]}"
+    name = (author_name or "").strip()
+    if not name or name == FALLBACK:
+        return FALLBACK
+
+    keep = min(_VISIBLE, max(0, (len(name) - _MIN_HIDDEN) // 2))
+    if keep == 0:
+        return HIDDEN * len(name)
+    return name[:keep] + HIDDEN * (len(name) - 2 * keep) + name[-keep:]
+
+
+def is_masked(value: str | None) -> bool:
+    """Whether `value` has already been through `mask_author`.
+
+    Only a guess — a real display name is allowed to contain `*` — so this is
+    for reporting and for refusing to re-mask, never for deciding that a row is
+    safe to publish.
+    """
+    return bool(value) and HIDDEN in value
 
 
 def hash_author_id(author_id: str | None) -> str:
@@ -77,7 +95,7 @@ def hash_author_id(author_id: str | None) -> str:
     coordination signal out of nothing.
 
     Idempotent — a value that is already a digest is returned unchanged, so
-    re-running the pipeline or the backfill scrub cannot hash twice and break
+    re-running the pipeline or the stored-row scrub cannot hash twice and break
     the identity that buzzer matches on.
     """
     raw = (author_id or "").strip()

@@ -187,8 +187,8 @@ def _store_comments(conn: sqlite3.Connection, event_id: int,
     like counts and stances in place instead of duplicating the event's
     comment history.
 
-    The commenter's real display name is replaced by a pseudonym here and never
-    written — see jejak/anonymize.py for why.
+    The commenter's display name is redacted here and never written in full —
+    see jejak/anonymize.py for why.
     """
     now = datetime.now(timezone.utc).isoformat()
     for cmt, label in zip(comments, labels):
@@ -207,11 +207,12 @@ def _store_comments(conn: sqlite3.Connection, event_id: int,
              cmt.get("comment_id", ""),
              cmt.get("video_id", ""),
              cmt.get("channel", ""),
-             # Both derived from the raw id, which is discarded here and never
-             # written. Order matters only in that the mask must see the raw
-             # value, not the digest, or it would not match rows already stored.
+             # Neither raw value is written. The id becomes a digest, which
+             # buzzer can still match on; the name keeps its ends and loses its
+             # middle. See jejak/anonymize.py for what that does and does not
+             # protect.
              anonymize.hash_author_id(cmt.get("author_id")),
-             anonymize.mask_author(cmt.get("author_id"), cmt.get("author_name")),
+             anonymize.mask_author(cmt.get("author_name")),
              cmt.get("text", ""),
              cmt.get("like_count", 0),
              cmt.get("published_at", ""),
