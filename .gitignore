@@ -40,3 +40,14 @@ smoke*.db
 # Build/log artifacts
 scripts/*.log
 web/tsconfig.tsbuildinfo
+
+# Database backups taken by the repair scripts (scripts/prune_orphan_events.py,
+# scripts/mask_stored_authors.py) before they rewrite rows. Local safety nets,
+# not history.
+jejak.db.bak.*
+scripts/jejak.db.bak.*
+jejak.db-journal
+
+# Runtime state of the scheduled pipeline run.
+scripts/.publish_local.lock
+scripts/*.log.prev
