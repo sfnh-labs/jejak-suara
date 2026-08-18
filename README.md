@@ -78,17 +78,30 @@ Environment variables live in `.env.example`.
 
 ### Where each stage runs
 
-GitHub's runners have no Ollama, so the work is split:
+Every stage runs on one workstation, on a 6-hourly Windows scheduled task. The
+model stages need a local Ollama, and keeping collection on a separate cloud
+cron meant a second set of secrets and a second schedule to hold in sync — so
+the whole pipeline lives in one place instead.
 
-| | Collection (ingest, fetch, cluster) | Model stages (translate, summarize, sentiment, buzzer) |
-|---|---|---|
-| **Where** | GitHub Actions, every 6h | Your workstation, on demand |
-| **Workflow** | `.github/workflows/pipeline.yml` | manual |
+```powershell
+powershell -File scripts\register_publish_task.ps1   # register the 6h task
+powershell -File scripts\publish_local.ps1           # or run a cycle now
+```
 
-To publish new events, run the model stages locally and push:
+`publish_local.ps1` pulls from Neon, runs every stage in order, and pushes back.
+It takes a lock so overlapping cycles can't race the same SQLite file, starts
+Ollama if it isn't already up, and logs to `scripts/publish_local.log`. The task
+is registered with `-StartWhenAvailable`, so a cycle missed while the machine
+was off runs once it's back.
+
+The equivalent by hand:
 
 ```bash
-python scripts/sync_to_neon.py --pull      # get what CI has collected
+python scripts/sync_to_neon.py --pull
+python -m jejak.cli ingest
+python -m jejak.cli backfill --days 6
+python -m jejak.cli fetch --limit 200
+python -m jejak.cli cluster
 python -m jejak.cli translate
 python -m jejak.cli summarize
 python -m jejak.cli sentiment
@@ -154,7 +167,7 @@ python scripts/sync_to_neon.py --push    # publish SQLite to Neon
 python scripts/sync_to_neon.py --reset   # TRUNCATE Neon, rebuild from SQLite
 ```
 
-Pulling first matters: CI throws its working copy away each run, so without hydration
+Pulling first matters: `jejak.db` is disposable and gitignored, so without hydration
 article dedupe and clustering would restart from an empty database every time.
 
 `--reset` is destructive and exists to repair a Neon database corrupted by the older

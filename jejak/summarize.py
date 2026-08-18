@@ -442,4 +442,14 @@ def summarize_pending(conn: sqlite3.Connection,
         sql += " LIMIT ?"
         params = (limit,)
     ids = [r["id"] for r in conn.execute(sql, params).fetchall()]
-    return [summarize_event(conn, eid) for eid in ids]
+    results = []
+    for eid in ids:
+        try:
+            results.append(summarize_event(conn, eid))
+        except ValueError as e:
+            # A handful of events on old syncs carry no linked articles (a
+            # scar from a since-fixed sync bug that once minted mismatched
+            # Postgres ids). One bad row shouldn't block every event behind
+            # it in the queue.
+            print(f"skip event {eid}: {e}")
+    return results
