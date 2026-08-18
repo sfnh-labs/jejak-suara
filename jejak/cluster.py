@@ -202,7 +202,14 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
             # widens with every merge, so matching on it alone lets a cluster
             # drift: each loosely-related article pulls the centroid further out
             # and admits the next one. The seed does not move.
-            if is_general and cosine_similarity(vec, seed_vec) < threshold:
+            #
+            # This was once applied to peristiwa only, on the reasoning that a
+            # record is already anchored by its figure. It is not: the figure
+            # only decides *whose* event it is, not which one, and a tracked
+            # figure appears in everything an outlet writes about the
+            # government. Left unguarded, one record grew to 131 articles
+            # spanning every story of the week the figure was named in.
+            if cosine_similarity(vec, seed_vec) < threshold:
                 continue
             best, match_id = sim, eid
 

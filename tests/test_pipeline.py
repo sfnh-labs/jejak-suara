@@ -266,6 +266,72 @@ class TestClustering:
         assert cluster._parse("not-a-date").tzinfo is not None
 
 
+class TestClusterDrift:
+    """A cluster must not walk away from the article it started as.
+
+    The mean embedding moves with every merge, so an article can be far from
+    what an event is about and still be close to the average of what it has
+    accumulated. Geometry here rather than real headlines: the failure needs a
+    specific arrangement of three articles, and asserting on live embeddings
+    would make the test a measurement of the model instead of the guard.
+    """
+
+    # Angles chosen so the third article is inside the widened mean but
+    # outside the seed. cos(70deg - 25deg) = 0.71 >= THRESHOLD, while
+    # cos(70deg - 0deg) = 0.34 < THRESHOLD.
+    ANGLES = {"seed": 0.0, "near": 50.0, "far": 70.0}
+
+    def _stub_embed(self, monkeypatch):
+        import math
+
+        import numpy as np
+
+        def fake(text: str):
+            for key, deg in self.ANGLES.items():
+                if key in text:
+                    rad = math.radians(deg)
+                    return np.array([math.cos(rad), math.sin(rad)])
+            raise AssertionError(f"unexpected text: {text!r}")
+
+        monkeypatch.setattr(cluster, "embed", fake)
+
+    def _articles(self, conn):
+        # Four shared content words clear MIN_SHARED without the figure's name,
+        # which _tokens strips: the lexical guard is not what is under test.
+        shared = "rapat kabinet anggaran negara"
+        for i, key in enumerate(("seed", "near", "far")):
+            conn.execute(
+                "INSERT INTO articles (id, figure_id, source, url, title, "
+                "published_at, fetched_at) VALUES (?, 'p', 'Detik', ?, ?, ?, ?)",
+                (f"a{i}", f"http://x/{i}", f"{key} {shared}",
+                 f"2026-01-0{i + 1}T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+            )
+        conn.commit()
+
+    def test_an_article_unlike_the_seed_starts_its_own_event(self, tmp_path,
+                                                             monkeypatch):
+        conn = _fresh(tmp_path)
+        self._stub_embed(monkeypatch)
+        self._articles(conn)
+
+        cluster.cluster(conn)
+
+        events = {r["id"]: r["n"] for r in conn.execute(
+            "SELECT event_id AS id, count(*) AS n FROM articles "
+            "GROUP BY event_id")}
+        assert len(events) == 2, f"expected a split, got {events}"
+
+        far = conn.execute(
+            "SELECT event_id FROM articles WHERE id = 'a2'").fetchone()[0]
+        seed = conn.execute(
+            "SELECT event_id FROM articles WHERE id = 'a0'").fetchone()[0]
+        assert far != seed
+
+    def test_the_guard_is_not_limited_to_peristiwa(self):
+        """It was, and one record grew to 131 articles because of it."""
+        source = (ROOT / "jejak" / "cluster.py").read_text(encoding="utf-8")
+        assert "if is_general and cosine_similarity(vec, seed_vec)" not in source
+
 class TestLedgerHeading:
     """A record is headed by what the figure did, not by an outlet's headline.
 
