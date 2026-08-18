@@ -21,10 +21,19 @@ CREATE TABLE IF NOT EXISTS events (
     scope       TEXT,
     impact      TEXT,
     status      TEXT NOT NULL DEFAULT 'new',
+    -- Curator verdict, Postgres-only and deliberately absent from the pipeline.
+    -- `status` is owned by the pipeline and overwritten wholesale by
+    -- sync_to_neon's push, so a verdict stored there would be undone by the
+    -- next crawl. This column is never in that script's column list, so push
+    -- and pull both leave it untouched and the curator's decision survives.
+    -- NULL = untouched, 'rejected' = pulled from the site, 'kept' = checked.
+    curated     TEXT,
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_figure ON events(figure_id);
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
+-- idx_events_curated is created by sync_to_neon's MIGRATIONS, after the ALTER
+-- that adds `curated` to databases predating it — same reason as idx_events_kind.
 -- idx_events_kind is created by sync_to_neon's MIGRATIONS, after the ALTER that
 -- adds `kind` to databases predating it.
 

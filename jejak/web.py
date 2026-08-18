@@ -1,26 +1,28 @@
-"""Web UI — public timeline + reviewer queue.
+"""Web UI — local operator timeline.
 
-Two faces of the same small Flask app:
-  * Public timeline  (GET /, /figure/<id>) — APPROVED events only, with grounded
-    citations and the public-reaction line.
-  * Reviewer queue   (GET /review, POST approve/reject) — the human-in-the-loop
-    gate where drafts become publishable.
+A small read-only Flask app over the SQLite working copy: a figure index at
+`/` and a per-figure timeline at `/figure/<id>`, showing approved events with
+their grounded citations and the public-reaction line.
 
-Server-rendered (Jinja), read-mostly. The DB path comes from $JEJAK_DB so tests
-can point at a temp database.
+Curation is NOT here. It lives in the deployed Next.js app at `/kurasi`, which
+writes `events.curated` directly to Postgres — the one column the pipeline sync
+never touches (see scripts/sync_to_neon.py). This app has no writes at all.
 
-SECURITY: the reviewer routes mutate state and have NO auth — this is a localhost
-dev tool. Put it behind authentication before exposing it anywhere.
+Server-rendered (Jinja). The DB path comes from $JEJAK_DB so tests can point at
+a temp database.
+
+SECURITY: no auth. Read-only, but it renders unpublished rows — keep it on
+localhost.
 """
 from __future__ import annotations
 
 import os
 import re
 
-from flask import Flask, g, redirect, render_template, request, url_for
+from flask import Flask, g, render_template
 from markupsafe import Markup, escape
 
-from . import db, review
+from . import db, timeline
 from .config import Figure, load_figures
 from .embed import cosine_similarity, embed
 
@@ -110,15 +112,8 @@ def create_app() -> Flask:
                 "SELECT count(*) FROM events WHERE figure_id=? AND status='approved'",
                 (f.id,),
             ).fetchone()[0]
-            flagged = conn.execute(
-                "SELECT count(*) FROM events WHERE figure_id=? AND status='summarized'",
-                (f.id,),
-            ).fetchone()[0]
-            rows.append({"figure": f, "approved": approved, "flagged": flagged})
-        review_count = conn.execute(
-            "SELECT count(*) FROM events WHERE status='summarized'"
-        ).fetchone()[0]
-        return render_template("index.html", rows=rows, review_count=review_count)
+            rows.append({"figure": f, "approved": approved})
+        return render_template("index.html", rows=rows)
 
     @app.route("/figure/<figure_id>")
     def figure(figure_id):
@@ -127,7 +122,7 @@ def create_app() -> Flask:
         fig_map = _figure_map()
         name = fig_map.get(figure_id, figure_id)
 
-        events = review.timeline(conn, figure_id)
+        events = timeline.for_figure(conn, figure_id)
 
         # Build prev/next links between events with similar embeddings
         event_ids = [ev["event_id"] for ev in events]
@@ -184,27 +179,6 @@ def create_app() -> Flask:
                                all_figures=figs,
                                related_events=related_events,
                                follow_links=follow_links)
-
-    @app.route("/review")
-    def review_queue():
-        conn = get_conn()
-        return render_template("review.html", rows=review.queue(conn),
-                               figures=_figure_map())
-
-    @app.route("/figure/<int:event_id>/laporkan", methods=["POST"])
-    def laporkan(event_id):
-        conn = get_conn()
-        review.set_status(conn, event_id, "summarized")
-        return redirect(url_for("review_queue"))
-
-    @app.route("/review/<int:event_id>/<action>", methods=["POST"])
-    def review_action(event_id, action):
-        conn = get_conn()
-        if action == "approve":
-            review.approve(conn, event_id)
-        elif action == "reject":
-            review.reject(conn, event_id)
-        return redirect(url_for("review_queue"))
 
     return app
 

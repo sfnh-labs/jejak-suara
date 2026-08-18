@@ -10,6 +10,22 @@ import type {
 } from "./types";
 
 /**
+ * What "published" means, in one place.
+ *
+ * Two independent gates. `status` is the pipeline's own progress marker, and
+ * everything from clustering onward is public — see the note on RECORD_SELECT
+ * for why this is not `= 'approved'`. `curated` is the human override written
+ * by /kurasi; it is a Postgres-only column the pipeline never touches, so a
+ * rejection survives the next crawl's sync (scripts/sync_to_neon.py).
+ *
+ * IS DISTINCT FROM, not `<>`: a plain inequality is NULL for the untouched
+ * rows, which is every event nobody has curated yet, and would hide the site.
+ */
+const LIVE = (alias: string) =>
+  `${alias}.status IN ('new', 'summarized', 'approved')
+   AND ${alias}.curated IS DISTINCT FROM 'rejected'`;
+
+/**
  * Everything a record card needs, aggregated per event.
  *
  * Source articles and comment stances are folded up in LATERAL subqueries
@@ -80,7 +96,7 @@ const RECORD_SELECT = `
        LIMIT 1
     ) s ON TRUE
    WHERE e.kind = 'record'
-     AND e.status IN ('new', 'summarized', 'approved')
+     AND ${LIVE("e")}
 `;
 
 export async function getFigures(): Promise<FigureSummary[]> {
@@ -105,7 +121,7 @@ export async function getFigures(): Promise<FigureSummary[]> {
            LEFT JOIN sentiment s ON s.event_id = e.id
           WHERE e.figure_id = f.id
             AND e.kind = 'record'
-            AND e.status IN ('new', 'summarized', 'approved')
+            AND ${LIVE("e")}
        ) st ON TRUE
       WHERE f.active
       ORDER BY st.event_count DESC NULLS LAST, f.name`
@@ -149,14 +165,14 @@ export async function getEventNeighbours(
     queryOne<{ id: number; title: string | null }>(
       `SELECT id, title FROM events
         WHERE figure_id = $1 AND kind = 'record'
-          AND status IN ('new', 'summarized', 'approved') AND event_date < $2
+          AND ${LIVE("events")} AND event_date < $2
         ORDER BY event_date DESC LIMIT 1`,
       [figureId, eventDate]
     ),
     queryOne<{ id: number; title: string | null }>(
       `SELECT id, title FROM events
         WHERE figure_id = $1 AND kind = 'record'
-          AND status IN ('new', 'summarized', 'approved') AND event_date > $2
+          AND ${LIVE("events")} AND event_date > $2
         ORDER BY event_date ASC LIMIT 1`,
       [figureId, eventDate]
     ),
@@ -203,7 +219,7 @@ export async function getPeristiwa(limit = 60): Promise<Peristiwa[]> {
           WHERE ef.event_id = e.id
        ) rel ON TRUE
       WHERE e.kind = 'peristiwa'
-        AND e.status IN ('new', 'summarized', 'approved')
+        AND ${LIVE("e")}
       ORDER BY e.event_date DESC
       LIMIT $1`,
     [limit]

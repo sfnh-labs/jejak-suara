@@ -5,12 +5,12 @@
     python -m jejak.cli fetch                # backfill full article bodies
     python -m jejak.cli cluster              # articles -> events
     python -m jejak.cli summarize            # grounded drafts for new events
-    python -m jejak.cli review               # list events awaiting approval
     python -m jejak.cli sentiment            # public-reaction scores for approved events
     python -m jejak.cli buzzer               # coordinated-engagement detection
-    python -m jejak.cli approve <event_id>
-    python -m jejak.cli reject  <event_id>
     python -m jejak.cli timeline <figure_id> # approved, publishable events
+
+Taking an event off the public site is not done here — that is `/kurasi` in the
+deployed web app, which writes `events.curated` straight to Postgres.
     python -m jejak.cli youtube-ingest       # search YouTube + fetch transcripts
     python -m jejak.cli translate            # auto-translate non-ID articles
     python -m jejak.cli run                  # ingest + fetch + translate + cluster + summarize [+ sentiment + buzzer]
@@ -25,7 +25,8 @@ import re
 
 from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
-from . import db, fetch, ingest, review, sentiment, summarize, translate
+from . import db, fetch, ingest, sentiment, summarize, timeline as timeline_mod
+from . import translate
 from . import youtube_ingest
 
 _BULAN = [
@@ -50,13 +51,6 @@ def _fmt_date(raw: str | None) -> str:
     return label
 
 
-def _print_review_row(r: dict) -> None:
-    flag = "  ⚠ SINGLE SOURCE" if r["single_source"] else ""
-    print(f"[{r['event_id']}] {_fmt_date(r['event_date'])}  "
-          f"corroboration={r['corroboration']} citations={r['n_citations']}{flag}")
-    print(f"    {r['summary'][:200]}{'…' if len(r['summary']) > 200 else ''}")
-
-
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -70,14 +64,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("fetch")
     sub.add_parser("cluster")
     sub.add_parser("summarize")
-    sub.add_parser("review")
     sub.add_parser("sentiment")
     sub.add_parser("buzzer")
     sub.add_parser("translate")
     sub.add_parser("run")
     sub.add_parser("youtube-ingest")
-    p_app = sub.add_parser("approve"); p_app.add_argument("event_id", type=int)
-    p_rej = sub.add_parser("reject");  p_rej.add_argument("event_id", type=int)
     p_tl = sub.add_parser("timeline"); p_tl.add_argument("figure_id")
 
     args = parser.parse_args(argv)
@@ -110,12 +101,6 @@ def main(argv: list[str] | None = None) -> int:
                     print("summarized:", res)
             except RuntimeError as e:
                 print(f"skip summarize: {e}")
-        if args.cmd == "review":
-            rows = review.queue(conn)
-            if not rows:
-                print("review queue empty.")
-            for r in rows:
-                _print_review_row(r)
         if args.cmd in ("sentiment", "run"):
             results = sentiment.sentiment_pending(conn)
             if not results:
@@ -141,14 +126,8 @@ def main(argv: list[str] | None = None) -> int:
                       f"score={r['anomaly_score']:.3f} "
                       f"anomaly={r['anomaly_pct']:.1f}% "
                       f"signals=[{sig_str}]")
-        if args.cmd == "approve":
-            review.approve(conn, args.event_id)
-            print(f"event {args.event_id} approved")
-        if args.cmd == "reject":
-            review.reject(conn, args.event_id)
-            print(f"event {args.event_id} rejected")
         if args.cmd == "timeline":
-            for ev in review.timeline(conn, args.figure_id):
+            for ev in timeline_mod.for_figure(conn, args.figure_id):
                 print(f"\n● {_fmt_date(ev['date'])}  (corroborated by {ev['corroboration']} outlet/s)")
                 print(f"  {ev['summary']}")
                 if ev["sentiment"]:

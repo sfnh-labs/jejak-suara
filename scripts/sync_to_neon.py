@@ -14,6 +14,7 @@ unrelated events.
     python scripts/sync_to_neon.py            # pull, then push
     python scripts/sync_to_neon.py --pull     # hydrate SQLite only
     python scripts/sync_to_neon.py --push     # publish to Neon only
+    python scripts/sync_to_neon.py --schema   # apply DDL only, touch no rows
     python scripts/sync_to_neon.py --reset    # rebuild Neon from SQLite
 
 Requires DATABASE_URL. Run pull BEFORE the pipeline and push after; pulling
@@ -79,6 +80,10 @@ class Table:
 
 # Foreign-key safe order: parents first.
 TABLES: tuple[Table, ...] = (
+    # `curated` is deliberately NOT listed. Push overwrites every column named
+    # here from the disposable SQLite copy, so listing the curator's verdict
+    # would undo it on the next crawl; leaving it out means push and pull both
+    # skip it and Postgres stays its only home. The web app writes it directly.
     Table("events", "id", (
         "id", "figure_id", "kind", "title", "event_date", "event_type",
         "scope", "impact", "status", "created_at",
@@ -136,6 +141,9 @@ MIGRATIONS = (
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'record'",
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS scope TEXT",
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS impact TEXT",
+    # Curator verdict. Postgres-only on purpose — see the events Table entry.
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS curated TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_events_curated ON events(curated)",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS comment_id TEXT",
     # figure_id became nullable when peristiwa were introduced: an event that
     # belongs to no tracked figure has none.
@@ -166,16 +174,42 @@ def apply_schema(pg) -> None:
     pg.commit()
 
 
-def reset(pg) -> None:
+def reset(pg) -> list[tuple[int, str]]:
     """Drop all synced rows so a clean push can rebuild them.
 
     Destructive, and only correct because SQLite is the authoritative copy:
     the pipeline writes there and Neon is a read replica for the web app.
+
+    The one exception is `events.curated`, which has no SQLite counterpart to
+    rebuild from — a truncate would erase the curator's decisions for good. It
+    is read out here and handed back so `restore_curation` can reapply it once
+    the push has recreated the rows.
     """
+    with pg.cursor() as cur:
+        cur.execute("SELECT id, curated FROM events WHERE curated IS NOT NULL")
+        saved = [(r[0], r[1]) for r in cur.fetchall()]
     names = ", ".join(t.name for t in TABLES)
     with pg.cursor() as cur:
         cur.execute(f"TRUNCATE {names} RESTART IDENTITY CASCADE")
     pg.commit()
+    return saved
+
+
+def restore_curation(pg, saved: list[tuple[int, str]]) -> int:
+    """Reapply curator verdicts saved across a --reset.
+
+    Row identity survives the rebuild because push carries `events.id`
+    explicitly, so the pre-truncate ids still address the same events.
+    """
+    if not saved:
+        return 0
+    with pg.cursor() as cur:
+        cur.executemany(
+            "UPDATE events SET curated = %s WHERE id = %s",
+            [(verdict, event_id) for event_id, verdict in saved],
+        )
+    pg.commit()
+    return len(saved)
 
 
 def sync_figures(pg) -> int:
@@ -273,6 +307,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="hydrate SQLite from Neon and stop")
     parser.add_argument("--push", action="store_true",
                         help="publish SQLite to Neon and stop")
+    parser.add_argument("--schema", action="store_true",
+                        help="apply the schema + migrations to Neon and stop "
+                             "(run this before deploying a web change that "
+                             "reads a newly added column)")
     parser.add_argument("--reset", action="store_true",
                         help="TRUNCATE every synced table in Neon, then push "
                              "the local copy over it (repairs a Neon database "
@@ -281,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.reset and args.pull:
         parser.error("--reset rebuilds Neon from SQLite; --pull is meaningless with it")
+    if args.schema and (args.pull or args.push or args.reset):
+        parser.error("--schema applies DDL only; combine it with nothing")
 
     do_pull = not args.reset and (args.pull or not args.push)
     do_push = args.reset or args.push or not args.pull
@@ -293,6 +333,11 @@ def main(argv: list[str] | None = None) -> int:
     pg = _connect_pg(db_url)
     apply_schema(pg)
 
+    if args.schema:
+        print("schema + migrations applied")
+        pg.close()
+        return 0
+
     jejak_db.init_db()
     sqlite = jejak_db.connect()
 
@@ -300,9 +345,11 @@ def main(argv: list[str] | None = None) -> int:
         n = sync_figures(pg)
         print(f"figures: {n} rows")
 
+        saved_curation: list[tuple[int, str]] = []
         if args.reset:
             print("reset: truncating all synced tables in Neon")
-            reset(pg)
+            saved_curation = reset(pg)
+            print(f"  held {len(saved_curation)} curator verdicts for restore")
 
         if do_pull:
             print("pull (Neon -> SQLite)")
@@ -313,6 +360,10 @@ def main(argv: list[str] | None = None) -> int:
             print("push (SQLite -> Neon)")
             for table, count in push(pg, sqlite).items():
                 print(f"  {table}: {count} rows")
+
+        if saved_curation:
+            n = restore_curation(pg, saved_curation)
+            print(f"restored {n} curator verdicts")
     except Exception:
         pg.rollback()
         raise

@@ -57,10 +57,9 @@ Summaries **publish automatically** — `summarize` writes the event straight to
 
 That is a deliberate tradeoff and it is the project's main standing risk: a 7B local
 model's text about a named public official reaches the site without a person reading
-it first. What mitigates it is the grounding prompt, the corroboration count, and the
-single-source badge — not review. If you want the gate back, have
-`summarize.summarize_event` write `summarized` instead of `approved`; `jejak/review.py`
-and the Flask reviewer queue already expect exactly that state and need no other change.
+it first. What mitigates it is the grounding prompt, the corroboration count, the
+single-source badge, and `/kurasi` — a kill switch after the fact, not a gate before
+it. See [Curation](#curation-kurasi).
 
 ## Setup
 
@@ -160,8 +159,40 @@ they compete for the connection.
 CV content is static reference material — add entries to `web/src/lib/cv.ts`, keyed by
 the figure id from `figures.toml`. A figure without an entry simply shows no CV tab.
 
-There is also a local Flask UI (`jejak/web.py`, `flask --app jejak.web run`) used as an
-operator tool against SQLite. It has **no auth** — keep it on localhost.
+There is also a local Flask UI (`jejak/web.py`, `flask --app jejak.web run`) used as a
+read-only operator view over SQLite. It has **no auth** and renders unpublished rows —
+keep it on localhost. It has no curation controls; those live at `/kurasi` below.
+
+### Curation (`/kurasi`)
+
+Curation is a **kill switch over an already-live feed**, not a gate a record has to
+pass before it appears. Everything the pipeline produces is published from the moment
+it clusters; `/kurasi` is where a human takes something back down.
+
+The verdict lives in `events.curated` (`NULL` = untouched and live, `'rejected'` =
+pulled, `'kept'` = checked and left up), and the site filters on it via the `LIVE`
+predicate in `web/src/lib/data.ts`.
+
+That column is **Postgres-only and absent from `scripts/sync_to_neon.py`'s column
+list**, which is the whole point. `events.status` is owned by the pipeline and
+overwritten wholesale by every push, so a verdict stored there would be undone by
+the next crawl. Push and pull both skip `curated`, and `--reset` saves it across the
+truncate and reapplies it afterwards.
+
+Rejecting takes effect on the public site immediately — the pages are
+`force-dynamic` and read Neon directly, so no sync step is involved.
+
+**Adding the column to an existing Neon database must happen before deploying a web
+build that reads it**, or every page query fails on the missing column:
+
+```bash
+python scripts/sync_to_neon.py --schema    # DDL only, touches no rows
+```
+
+Access control is Cloudflare Access (see below). Without it configured, `/kurasi`
+returns 503 in production and is open in `next dev` — so local curation needs no
+Cloudflare account, and a deploy that forgets the config fails closed rather than
+publishing an unauthenticated write endpoint.
 
 ### Deploying to Cloudflare
 

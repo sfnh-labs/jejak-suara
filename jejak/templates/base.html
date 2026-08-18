@@ -26,8 +26,6 @@
             font-size:.85rem; color:var(--muted); }
     button { font:inherit; padding:.35rem .8rem; border:1px solid var(--line);
              border-radius:6px; cursor:pointer; background:#fff; }
-    button.approve { background:var(--pos); color:#fff; border-color:var(--pos); }
-    button.reject { background:var(--neg); color:#fff; border-color:var(--neg); }
     form.inline { display:inline; }
     h1 { font-size:1.4rem; } h2 { font-size:1.1rem; margin:.2rem 0; }
     .summary { white-space:pre-line; line-height:1.7; }
@@ -39,9 +37,6 @@
                    text-decoration:none; border:1px solid var(--accent);
                    border-radius:4px; padding:.1rem .5rem; }
     .follow-link:hover { background:var(--accent); color:#fff; }
-    .flag-btn { font-size:.75rem; padding:.1rem .5rem; border:1px solid var(--neg);
-                color:var(--neg); border-radius:4px; background:transparent; cursor:pointer; }
-    .flag-btn:hover { background:var(--neg); color:#fff; }
     .related-card { border-left:3px solid var(--accent); }
     .related-card a { color:var(--accent); font-weight:600; text-decoration:none; }
     .related-card a:hover { text-decoration:underline; }
@@ -54,7 +49,6 @@
   <header>
     <a class="brand" href="{{ url_for('index') }}">Jejak Suara</a>
     <a href="{{ url_for('index') }}">Beranda</a>
-    <a href="{{ url_for('review_queue') }}">Antrean Tinjauan</a>
   </header>
   <main>
     {% block content %}{% endblock %}

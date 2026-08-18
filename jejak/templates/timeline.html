@@ -30,9 +30,6 @@
             ({{ '%+.2f'|format(ev.sentiment.score) }}, n={{ ev.sentiment.sample_size }})
           </span>
         {% endif %}
-        <form class="inline" method="post" action="{{ url_for('laporkan', event_id=ev.event_id) }}" style="margin-left:.5rem">
-          <button class="flag-btn" type="submit" title="Tarik kembali ke antrean tinjauan">Laporkan</button>
-        </form>
       </p>
 
       {% if ev.sentiment and ev.sentiment.samples %}
