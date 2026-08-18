@@ -80,6 +80,10 @@ class Table:
 
 # Foreign-key safe order: parents first.
 TABLES: tuple[Table, ...] = (
+    # Pipeline bookkeeping, not published data. It syncs because the local
+    # working copy is disposable: without it the backfill cursor would reset to
+    # today every time jejak.db is rebuilt, and the walk would never progress.
+    Table("pipeline_state", "key", ("key", "value", "updated_at")),
     # `curated` is deliberately NOT listed. Push overwrites every column named
     # here from the disposable SQLite copy, so listing the curator's verdict
     # would undo it on the next crawl; leaving it out means push and pull both

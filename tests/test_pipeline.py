@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from jejak import cluster, db, ingest, mentions, sentiment, summarize  # noqa: E402
+from jejak import (  # noqa: E402
+    backfill, cluster, db, ingest, mentions, sentiment, summarize,
+)
 from jejak.config import Figure  # noqa: E402
 
 
@@ -43,7 +46,7 @@ class TestSchema:
         }
         assert {
             "articles", "events", "event_summaries", "sentiment",
-            "comments", "buzzer_signals", "corrections",
+            "comments", "buzzer_signals", "corrections", "pipeline_state",
         } <= names
 
     def test_init_is_idempotent(self, tmp_path):
@@ -432,6 +435,15 @@ class TestAttribution:
             "Pimpinan MPR Temui Prabowo di Istana Kepresidenan", self.FIGS
         ) is None
 
+    def test_an_abbreviated_title_still_names_the_actor(self):
+        """Headlines contract every title; the long form alone misses them."""
+        assert ingest._attribute(
+            "Jubir PCO Sebut Prabowo Tekankan Kolaborasi Dukung MBG", self.FIGS
+        ) is None
+        assert ingest._attribute(
+            "Waketum PSI Andy Budiman Tegaskan Dukungan ke Prabowo", self.FIGS
+        ) is None
+
     def test_mention_outside_the_headline_does_not_attribute(self):
         """A name in the summary is context, not authorship of the article."""
         assert ingest._attribute(
@@ -508,3 +520,171 @@ class TestNeonSync:
         for table in sync_to_neon.TABLES:
             names = ", ".join(table.cols)
             conn.execute(f"SELECT {names} FROM {table.name}")  # raises if wrong
+
+
+class TestBackfill:
+    """The archive walk that fills in history behind the live RSS feed."""
+
+    def _page(self, href: str, title: str) -> str:
+        """The markup shape all three archives share: link, then thumbnail."""
+        return (
+            f'<article><a class="media__link" href="{href}">'
+            f'<img src="x.jpg" alt="{title}" /></a></article>'
+        )
+
+    def test_listing_pairs_each_url_with_its_headline(self):
+        arc = next(a for a in backfill.ARCHIVES if a.name == "Kompas")
+        url = ("https://nasional.kompas.com/read/2025/03/01/23231201/"
+               "prabowo-buka-rapat-terbatas")
+        page = self._page(url, "Prabowo Buka Rapat Terbatas di Istana")
+        assert backfill._listing(page, arc) == {
+            url: "Prabowo Buka Rapat Terbatas di Istana"
+        }
+
+    def test_listing_skips_links_with_no_recoverable_headline(self):
+        arc = next(a for a in backfill.ARCHIVES if a.name == "Kompas")
+        url = ("https://nasional.kompas.com/read/2025/03/01/23231201/"
+               "prabowo-buka-rapat-terbatas")
+        assert backfill._listing(f'<a href="{url}"></a>', arc) == {}
+
+    def test_detik_headline_comes_from_the_tracking_handler(self):
+        arc = next(a for a in backfill.ARCHIVES if a.name == "Detik")
+        url = "https://news.detik.com/berita/d-7802125/prabowo-bertemu-menteri"
+        onclick = "_pt(this, \"newsfeed\", \"Prabowo Bertemu Menteri\", \"artikel 16\")"
+        page = f"<a href=\"{url}\" onclick='{onclick}'>"
+        assert backfill._listing(page, arc) == {url: "Prabowo Bertemu Menteri"}
+
+    def test_publication_time_is_recovered_from_the_url(self):
+        arc = next(a for a in backfill.ARCHIVES if a.name == "CNN Indonesia")
+        url = ("https://www.cnnindonesia.com/ekonomi/20250301133535-92-1203857/"
+               "badan-gizi-sebut-pemda")
+        assert backfill._published(arc, url, date(2025, 3, 1)) == \
+            "2025-03-01T13:35:35+07:00"
+
+    def test_time_falls_back_to_local_midnight(self):
+        """Detik's archive pins the date but not the hour."""
+        arc = next(a for a in backfill.ARCHIVES if a.name == "Detik")
+        url = "https://news.detik.com/berita/d-7802125/prabowo-bertemu-menteri"
+        assert backfill._published(arc, url, date(2025, 3, 1)) == \
+            "2025-03-01T00:00:00+07:00"
+
+    def _walk(self, conn, monkeypatch, **kw):
+        seen = []
+
+        def fake_day(_conn, day, _figures=None, general=False):
+            seen.append(day)
+            return {"seen": 0, "matched": 0, "inserted": 0,
+                    "skipped_existing": 0, "pages": 0}
+
+        monkeypatch.setattr(backfill, "backfill_day", fake_day)
+        return seen, backfill.backfill(conn, **kw)
+
+    def test_the_cursor_resumes_where_the_last_run_stopped(self, tmp_path,
+                                                           monkeypatch):
+        conn = _fresh(tmp_path)
+        backfill._set_state(conn, backfill.CURSOR_KEY, "2025-03-10")
+        conn.commit()
+
+        seen, stats = self._walk(conn, monkeypatch, days=3,
+                                 floor=date(2024, 1, 1))
+        assert seen == [date(2025, 3, 9), date(2025, 3, 8), date(2025, 3, 7)]
+        assert stats["reached"] == "2025-03-07"
+        assert backfill._get_state(conn, backfill.CURSOR_KEY) == "2025-03-07"
+
+    def test_the_walk_stops_at_the_floor(self, tmp_path, monkeypatch):
+        """Left in the scheduled pipeline, this stage has to go quiet."""
+        conn = _fresh(tmp_path)
+        backfill._set_state(conn, backfill.CURSOR_KEY, "2025-03-02")
+        conn.commit()
+
+        seen, stats = self._walk(conn, monkeypatch, days=5,
+                                 floor=date(2025, 3, 1))
+        assert seen == [date(2025, 3, 1)]
+        assert stats.get("done") == 1
+
+    def _one_page_archive(self, monkeypatch, page: str):
+        arc = next(a for a in backfill.ARCHIVES if a.name == "Kompas")
+        monkeypatch.setattr(backfill, "ARCHIVES", (arc,))
+        monkeypatch.setattr(backfill, "_download",
+                            lambda u: page if u.endswith("page=1") else None)
+        monkeypatch.setattr(backfill.time, "sleep", lambda _s: None)
+
+    def test_backfilled_articles_are_attributed_like_ingested_ones(
+            self, tmp_path, monkeypatch):
+        conn = _fresh(tmp_path)
+        url = ("https://nasional.kompas.com/read/2025/03/01/23231201/"
+               "prabowo-buka-rapat")
+        self._one_page_archive(
+            monkeypatch, self._page(url, "Prabowo Buka Rapat Terbatas di Istana"))
+
+        figures = [Figure(id="prabowo", name="Prabowo Subianto",
+                          role="Presiden", aliases=["Prabowo"])]
+        stats = backfill.backfill_day(conn, date(2025, 3, 1), figures)
+
+        assert stats["inserted"] == 1
+        row = conn.execute("SELECT figure_id, source, published_at "
+                           "FROM articles").fetchone()
+        assert row["figure_id"] == "prabowo"
+        assert row["source"] == "Kompas"
+        assert row["published_at"].startswith("2025-03-01T23:23:12")
+
+    def test_unattributed_headlines_are_dropped_unless_asked_for(
+            self, tmp_path, monkeypatch):
+        """Archives carry every section an outlet publishes, not just politics."""
+        conn = _fresh(tmp_path)
+        url = ("https://bola.kompas.com/read/2025/03/01/23231201/"
+               "hasil-liga-1-persebaya")
+        self._one_page_archive(
+            monkeypatch, self._page(url, "Hasil Liga 1: Persebaya Taklukkan Persib"))
+        figures = [Figure(id="prabowo", name="Prabowo Subianto",
+                          role="Presiden", aliases=["Prabowo"])]
+
+        assert backfill.backfill_day(conn, date(2025, 3, 1),
+                                     figures)["inserted"] == 0
+        assert backfill.backfill_day(conn, date(2025, 3, 1), figures,
+                                     general=True)["inserted"] == 1
+        assert conn.execute(
+            "SELECT figure_id FROM articles").fetchone()["figure_id"] is None
+
+
+class TestLateArrivingCoverage:
+    """Backfill means an article can land long after its event was summarized."""
+
+    def test_a_new_article_reopens_a_summarized_event(self, tmp_path):
+        conn = _fresh(tmp_path)
+        conn.execute(
+            "INSERT INTO events (id, figure_id, title, event_date, status, "
+            "created_at) VALUES (1, 'prabowo', 'Rapat', '2025-03-01', "
+            "'approved', '2025-03-01')"
+        )
+        conn.execute(
+            "INSERT INTO event_summaries (event_id, summary_text, "
+            "citations_json, corroboration_count, single_source_flag, model, "
+            "generated_at) VALUES (1, 'ringkasan', '[]', 1, 1, 'qwen', "
+            "'2025-03-01')"
+        )
+        cluster._reopen_if_summarized(conn, 1)
+
+        assert conn.execute(
+            "SELECT status FROM events WHERE id = 1"
+        ).fetchone()["status"] == "new"
+        assert conn.execute(
+            "SELECT count(*) FROM event_summaries").fetchone()[0] == 0
+
+    def test_a_candidate_is_left_alone(self, tmp_path):
+        """It has no summary to invalidate, and the outlet gate owns its status."""
+        conn = _fresh(tmp_path)
+        conn.execute(
+            "INSERT INTO events (id, kind, title, event_date, status, "
+            "created_at) VALUES (1, 'peristiwa', 'Banjir', '2025-03-01', "
+            "'candidate', '2025-03-01')"
+        )
+        cluster._reopen_if_summarized(conn, 1)
+        assert conn.execute(
+            "SELECT status FROM events WHERE id = 1"
+        ).fetchone()["status"] == "candidate"
+
+    def test_summarized_events_stay_open_for_matching(self):
+        """The status filter clustering uses to decide what an article can join."""
+        source = (ROOT / "jejak" / "cluster.py").read_text(encoding="utf-8")
+        assert "'new','summarized','candidate','approved'" in source

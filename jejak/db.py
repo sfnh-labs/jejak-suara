@@ -168,6 +168,16 @@ CREATE TABLE IF NOT EXISTS article_scans (
     FOREIGN KEY (article_id) REFERENCES articles(id)
 );
 
+-- Pipeline bookkeeping that has to outlive the working copy. `jejak.db` is
+-- rebuilt from Neon on every run, so anything the pipeline needs to remember
+-- between runs -- the archive backfill cursor, for one -- has to be a synced
+-- row rather than a local file.
+CREATE TABLE IF NOT EXISTS pipeline_state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Correction / right-of-reply requests (legal safety valve).
 CREATE TABLE IF NOT EXISTS corrections (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

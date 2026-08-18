@@ -2,6 +2,7 @@
 
     python -m jejak.cli init                 # create the database
     python -m jejak.cli ingest               # pull RSS -> articles
+    python -m jejak.cli backfill             # walk outlet archives backwards
     python -m jejak.cli fetch                # backfill full article bodies
     python -m jejak.cli cluster              # articles -> events
     python -m jejak.cli summarize            # grounded drafts for new events
@@ -13,7 +14,7 @@ Taking an event off the public site is not done here — that is `/kurasi` in th
 deployed web app, which writes `events.curated` straight to Postgres.
     python -m jejak.cli youtube-ingest       # search YouTube + fetch transcripts
     python -m jejak.cli translate            # auto-translate non-ID articles
-    python -m jejak.cli run                  # ingest + fetch + translate + cluster + summarize [+ sentiment + buzzer]
+    python -m jejak.cli run                  # ingest + backfill + fetch + translate + cluster + summarize [+ sentiment + buzzer]
 """
 from __future__ import annotations
 
@@ -23,6 +24,9 @@ import sys
 
 import re
 
+from datetime import date
+
+from . import backfill as backfill_mod
 from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
 from . import db, fetch, ingest, sentiment, summarize, timeline as timeline_mod
@@ -61,13 +65,26 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
     sub.add_parser("ingest")
-    sub.add_parser("fetch")
+    p_fetch = sub.add_parser("fetch")
+    p_fetch.add_argument("--limit", type=int, default=50,
+                         help="how many article bodies to fetch (default 50). "
+                              "Raise it when backfill is adding history faster "
+                              "than the default drains the queue.")
     sub.add_parser("cluster")
     sub.add_parser("summarize")
     sub.add_parser("sentiment")
     sub.add_parser("buzzer")
     sub.add_parser("translate")
     sub.add_parser("run")
+    p_bf = sub.add_parser("backfill")
+    p_bf.add_argument("--days", type=int, default=1,
+                      help="how many further days of archive to walk (default 1)")
+    p_bf.add_argument("--until", type=date.fromisoformat,
+                      default=backfill_mod.DEFAULT_FLOOR,
+                      help="oldest date to walk back to, YYYY-MM-DD")
+    p_bf.add_argument("--general", action="store_true",
+                      help="also keep articles that name no tracked figure "
+                           "(peristiwa material; far more rows)")
     sub.add_parser("youtube-ingest")
     p_tl = sub.add_parser("timeline"); p_tl.add_argument("figure_id")
 
@@ -84,11 +101,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd in ("ingest", "run"):
             print("ingest:", ingest.ingest(conn))
+        if args.cmd in ("backfill", "run"):
+            print("backfill:", backfill_mod.backfill(
+                conn,
+                days=getattr(args, "days", 1),
+                floor=getattr(args, "until", backfill_mod.DEFAULT_FLOOR),
+                general=getattr(args, "general", False),
+            ))
         if args.cmd == "youtube-ingest":
             print("youtube-ingest:", youtube_ingest.ingest_youtube(conn))
             print("ingest:", ingest.ingest(conn))
         if args.cmd in ("fetch", "run"):
-            print("fetch:", fetch.fetch_bodies(conn))
+            print("fetch:", fetch.fetch_bodies(conn, limit=getattr(args, "limit", 50)))
         if args.cmd in ("translate", "run"):
             print("translate:", translate.translate_articles(conn))
         if args.cmd == "run" and os.environ.get("YOUTUBE_API_KEY"):

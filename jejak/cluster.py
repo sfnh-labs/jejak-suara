@@ -144,10 +144,15 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
 
     # Cache: (event_id, figure_id, when, mean-embedding, seed-embedding, tokens)
     open_events: list[tuple[int, str, datetime, np.ndarray, np.ndarray, set[str]]] = []
+    # 'approved' events are open for matching too. Coverage no longer arrives
+    # in order: the archive backfill walks history backwards, so an article
+    # about an event that was summarized last week can land today. Excluding
+    # summarized events made every late arrival mint a duplicate of an event
+    # already on the timeline.
     for ev in conn.execute(
         """SELECT e.id, e.figure_id, e.event_date
            FROM events e
-           WHERE e.status IN ('new','summarized','candidate')
+           WHERE e.status IN ('new','summarized','candidate','approved')
            ORDER BY e.event_date"""
     ).fetchall():
         arts = conn.execute(
@@ -239,6 +244,7 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
                     ).fetchall()] + [txt]
                     etype = _infer_event_type(art_texts)
                     conn.execute("UPDATE events SET event_type = ? WHERE id = ?", (etype, eid))
+                    _reopen_if_summarized(conn, eid)
                     break
 
         conn.execute("UPDATE articles SET event_id = ? WHERE id = ?", (match_id, art["id"]))
@@ -249,6 +255,27 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
     stats.update(promote_peristiwa(conn))
     stats["pruned"] = prune_candidates(conn)
     return stats
+
+
+def _reopen_if_summarized(conn: sqlite3.Connection, event_id: int) -> None:
+    """Send an event back through summarize after it gains a new article.
+
+    A summary is grounded in the articles the event held when it was written,
+    and its corroboration count is taken from them. Once backfill adds an
+    outlet that was missing, both are stale — and the corroboration count is
+    what the single-source badge is derived from, so leaving it is worse than
+    the extra model call.
+
+    Candidates are left alone: they have no summary to invalidate, and the
+    corroboration gate in promote_peristiwa decides when they get one.
+    """
+    row = conn.execute(
+        "SELECT status FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    if row is None or row["status"] not in ("summarized", "approved"):
+        return
+    conn.execute("DELETE FROM event_summaries WHERE event_id = ?", (event_id,))
+    conn.execute("UPDATE events SET status = 'new' WHERE id = ?", (event_id,))
 
 
 def retitle_events(conn: sqlite3.Connection) -> int:

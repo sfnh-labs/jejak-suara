@@ -11,16 +11,17 @@ between them.
 ## Pipeline
 
 ```
-RSS ──▶ ingest ──▶ fetch ──▶ translate ──▶ cluster ──▶ summarize ──▶ timeline
-        articles   bodies    to Indonesian  events     drafts        (published)
-                                                          │
-                                              sentiment + buzzer ───┘
+RSS ──────▶ ingest ──▶ fetch ──▶ translate ──▶ cluster ──▶ summarize ──▶ timeline
+archives ─▶ backfill   bodies    to Indonesian  events     drafts        (published)
+                                                              │
+                                                  sentiment + buzzer ───┘
 ```
 
 | Stage | Module | What it does |
 |-------|--------|--------------|
 | 1. Ingest | `jejak/ingest.py` | Pull RSS, attribute articles to tracked figures, dedupe by URL hash. No AI. |
-| 1b. YouTube | `jejak/youtube_ingest.py` | Search news videos, pull transcripts as additional articles. |
+| 1b. Backfill | `jejak/backfill.py` | Walk outlets' date-indexed archives backwards to recover history RSS never carried. |
+| 1c. YouTube | `jejak/youtube_ingest.py` | Search news videos, pull transcripts as additional articles. |
 | 1.5 Fetch | `jejak/fetch.py` | Backfill full article text (trafilatura, stdlib fallback). Fail-soft, rate-limited. |
 | 1.7 Translate | `jejak/translate.py` | Translate non-Indonesian sources to Indonesian; original kept in `body_original`. |
 | 2. Cluster | `jejak/cluster.py` | Group articles about one activity into a single **event** (embedding similarity + a shared-content-word guard). |
@@ -94,6 +95,51 @@ python -m jejak.cli sentiment
 python -m jejak.cli buzzer
 python scripts/sync_to_neon.py --push      # publish
 ```
+
+### Filling in history
+
+RSS carries about a day of headlines, so ingestion alone can only ever record
+what happens from the moment it is switched on. `backfill` walks the outlets'
+date-indexed archive pages backwards instead — Detik, Kompas and CNN Indonesia,
+the three that both honour a date parameter and paginate a full day. Articles
+land in the same table, with the same URL-hash dedupe and the same attribution
+rule, so everything downstream treats a year-old article like this morning's.
+
+```bash
+python -m jejak.cli backfill --days 30                 # walk a month further back
+python -m jejak.cli backfill --days 1 --until 2019-10-20
+python -m jejak.cli backfill --days 1 --general        # also keep peristiwa material
+```
+
+A cursor in `pipeline_state` records how far back the walk has reached, so
+each scheduled run continues from the last one; the default floor is
+2024-10-20 and the stage goes quiet once it is reached. That table syncs to
+Neon along with everything else, because `jejak.db` is disposable — a
+file-based cursor would reset to today on every run and the walk would never
+move.
+
+A day costs roughly a minute (about 40 archive pages at one request per
+second) and yields on the order of 500 headlines, of which the ones naming a
+tracked figure are kept — 15 to 25 a day. `--general` keeps the rest as
+peristiwa material, which is a far larger volume for the few that ever reach
+the three-outlet corroboration gate — and with only three archive outlets,
+that gate is exactly met, never exceeded.
+
+**The crawl rate and `fetch --limit` move together.** An article whose body was
+never fetched is summarized from its headline alone — backfilled rows carry no
+RSS lead to fall back on — and `fetch` runs before `cluster` in the same cycle,
+so anything left in the queue is summarized bodyless that same run and nothing
+re-summarizes it when the body lands later. Budget the fetch limit at roughly
+25 × `--days`, plus the RSS intake. The scheduled task runs `--days 6` against
+`--limit 200`, which puts a cycle at about 25 minutes.
+
+YouTube quota is not a constraint here: `sentiment_pending` takes 20 events a
+run whatever the backlog, so the crawl rate does not change it.
+
+Backfill is why clustering keeps summarized events open for matching: coverage
+no longer arrives in date order, and an article landing on an event already
+written up sends it back through `summarize` so the summary and its
+corroboration count reflect the fuller source set.
 
 ## Storage and sync
 

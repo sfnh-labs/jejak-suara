@@ -44,6 +44,15 @@ TITLES: tuple[str, ...] = (
     # business / civil society / other
     "Direktur", "Direktur Utama", "Komisaris", "Komisaris Utama", "CEO",
     "Pendiri", "Kepala", "Koordinator", "Manajer", "Pelatih", "Kapten",
+    # Newsroom abbreviations. Indonesian headlines contract almost every title
+    # to save characters, and the long form above never matches them. Missing
+    # them is not merely a lost discovery: attribution treats a headline with
+    # no preceding title as being *about* the first tracked figure named, so
+    # "Jubir PCO Sebut Prabowo..." landed on Prabowo's own timeline when it is
+    # the spokesman speaking about him.
+    "Jubir", "Waketum", "Wamen", "Wagub", "Wabup", "Wawali", "Wakapolri",
+    "Wakapolda", "Kapolsek", "Kabareskrim", "Kadiv", "Kadis", "Kabid",
+    "Kabag", "Kasat", "Karo", "Dirut", "Wadir", "Plt", "Plh",
 )
 
 # Longest first so multi-word titles are not shadowed by their prefix.

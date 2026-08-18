@@ -108,6 +108,15 @@ CREATE TABLE IF NOT EXISTS corrections (
     created_at   TEXT NOT NULL
 );
 
+-- Pipeline bookkeeping that survives the disposable SQLite working copy: the
+-- archive backfill cursor lives here, so a rebuilt jejak.db resumes the walk
+-- instead of restarting it.
+CREATE TABLE IF NOT EXISTS pipeline_state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS buzzer_signals (
     id                  SERIAL PRIMARY KEY,
     event_id            INTEGER NOT NULL UNIQUE REFERENCES events(id),
