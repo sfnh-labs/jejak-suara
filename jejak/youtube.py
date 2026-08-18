@@ -45,8 +45,14 @@ def _get(endpoint: str, params: dict) -> dict:
 
 
 def search_videos(query: str, max_results: int = 5,
-                  region: str = "ID", language: str = "id") -> list[str]:
-    """Return video IDs matching the query (most relevant first)."""
+                  region: str = "ID", language: str = "id") -> list[dict]:
+    """Return {id, channel} for videos matching the query (most relevant first).
+
+    The channel title rides along free: it is already in the snippet of the
+    search response this call pays 100 quota units for, and a comment means
+    little without knowing whose audience it came from — reaction under a
+    partisan channel is not the same signal as reaction under a wire service.
+    """
     data = _get("search", {
         "part": "snippet",
         "q": query,
@@ -56,14 +62,22 @@ def search_videos(query: str, max_results: int = 5,
         "regionCode": region,
         "order": "relevance",
     })
-    return [item["id"]["videoId"] for item in data.get("items", [])
-            if item.get("id", {}).get("videoId")]
+    out = []
+    for item in data.get("items", []):
+        vid = item.get("id", {}).get("videoId")
+        if vid:
+            out.append({
+                "id": vid,
+                "channel": item.get("snippet", {}).get("channelTitle", ""),
+            })
+    return out
 
 
-def video_comments(video_id: str, max_results: int = 50) -> list[dict]:
+def video_comments(video_id: str, max_results: int = 50,
+                   channel: str = "") -> list[dict]:
     """Return top-level comments for a video with metadata.
 
-    Each dict: {comment_id, video_id, text, author_id, author_name,
+    Each dict: {comment_id, video_id, channel, text, author_id, author_name,
     like_count, published_at}. `comment_id` is stable across collections, so
     re-running sentiment updates existing rows instead of duplicating them.
     Returns [] if comments are disabled or the video is unavailable.
@@ -88,6 +102,7 @@ def video_comments(video_id: str, max_results: int = 50) -> list[dict]:
         out.append({
             "comment_id": top.get("id") or item.get("id", ""),
             "video_id": video_id,
+            "channel": channel,
             "text": text,
             "author_id": snip.get("authorChannelId", {}).get("value", ""),
             "author_name": snip.get("authorDisplayName", ""),
@@ -105,7 +120,8 @@ def gather_comments(query: str, max_videos: int = 5,
     """
     comments: list[dict] = []
     for vid in search_videos(query, max_results=max_videos):
-        comments.extend(video_comments(vid, max_results=per_video))
+        comments.extend(video_comments(vid["id"], max_results=per_video,
+                                       channel=vid["channel"]))
         if len(comments) >= cap:
             break
     return comments[:cap]

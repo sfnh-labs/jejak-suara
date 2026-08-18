@@ -110,8 +110,9 @@ TABLES: tuple[Table, ...] = (
         "samples_json", "collected_at",
     ), serial=True, conflict=("event_id", "channel")),
     Table("comments", "id", (
-        "id", "event_id", "comment_id", "video_id", "author_id", "author_name",
-        "text", "like_count", "published_at", "stance", "collected_at",
+        "id", "event_id", "comment_id", "video_id", "channel", "author_id",
+        "author_name", "text", "like_count", "published_at", "stance",
+        "collected_at",
     ), serial=True, conflict=("event_id", "comment_id")),
     Table("buzzer_signals", "id", (
         "id", "event_id", "anomaly_score", "anomaly_pct",
@@ -150,6 +151,7 @@ MIGRATIONS = (
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS curated TEXT",
     "CREATE INDEX IF NOT EXISTS idx_events_curated ON events(curated)",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS comment_id TEXT",
+    "ALTER TABLE comments ADD COLUMN IF NOT EXISTS channel TEXT",
     "ALTER TABLE articles ADD COLUMN IF NOT EXISTS body_original TEXT",
     "ALTER TABLE articles ADD COLUMN IF NOT EXISTS body_lang TEXT DEFAULT 'id'",
     # figure_id became nullable when peristiwa were introduced: an event that

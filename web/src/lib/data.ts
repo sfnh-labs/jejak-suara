@@ -262,7 +262,7 @@ export async function getEventComments(
   limit = 50
 ): Promise<PublicComment[]> {
   return query<PublicComment>(
-    `SELECT id, author_name, text, like_count, published_at, stance
+    `SELECT id, author_name, channel, text, like_count, published_at, stance
        FROM comments
       WHERE event_id = $1
       ORDER BY like_count DESC NULLS LAST, published_at DESC

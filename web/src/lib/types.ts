@@ -136,7 +136,10 @@ export type FeedItem =
 
 export interface PublicComment {
   id: number;
+  /** A pseudonym, not a real display name — see jejak/anonymize.py. */
   author_name: string | null;
+  /** YouTube channel or subreddit the comment sits under. */
+  channel: string | null;
   text: string;
   like_count: number | null;
   published_at: string | null;

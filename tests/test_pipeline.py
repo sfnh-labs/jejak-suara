@@ -13,7 +13,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from jejak import (  # noqa: E402
-    backfill, cluster, db, ingest, mentions, sentiment, summarize,
+    anonymize, backfill, cluster, db, ingest, mentions, sentiment, summarize,
+    youtube,
 )
 from jejak.config import Figure  # noqa: E402
 
@@ -688,3 +689,170 @@ class TestLateArrivingCoverage:
         """The status filter clustering uses to decide what an article can join."""
         source = (ROOT / "jejak" / "cluster.py").read_text(encoding="utf-8")
         assert "'new','summarized','candidate','approved'" in source
+
+
+class TestAnonymize:
+    """Commenters are private individuals; their display name is never stored."""
+
+    def test_the_same_account_masks_the_same_everywhere(self):
+        """Buzzer's 'one account, many events' finding has to stay legible."""
+        a = anonymize.mask_author("UC123", "Budi Santoso")
+        b = anonymize.mask_author("UC123", "Budi Santoso")
+        assert a == b
+
+    def test_different_accounts_mask_differently(self):
+        assert anonymize.mask_author("UC123") != anonymize.mask_author("UC999")
+
+    def test_the_mask_does_not_carry_the_display_name(self):
+        mask = anonymize.mask_author("UC123", "Budi Santoso")
+        assert "Budi" not in mask and "Santoso" not in mask
+
+    def test_the_id_decides_the_mask_not_the_name(self):
+        """A commenter who renames themselves stays the same person."""
+        assert (anonymize.mask_author("UC123", "Budi Santoso")
+                == anonymize.mask_author("UC123", "Nama Baru"))
+
+    def test_a_missing_id_still_does_not_leak_the_name(self):
+        mask = anonymize.mask_author("", "Budi Santoso")
+        assert mask.startswith(anonymize.PREFIX)
+        assert "Budi" not in mask
+
+    def test_nothing_to_go_on_is_anonymous(self):
+        assert anonymize.mask_author("", "") == "Anonim"
+        assert anonymize.mask_author(None, None) == "Anonim"
+
+    def test_stored_comments_carry_the_mask_not_the_name(self, tmp_path):
+        conn = _fresh(tmp_path)
+        conn.execute(
+            "INSERT INTO events (id, figure_id, title, event_date, status, "
+            "created_at) VALUES (1, 'p', 'T', '2026-01-01', 'approved', "
+            "'2026-01-01')"
+        )
+        comments = [{
+            "comment_id": "c1", "video_id": "v1", "channel": "Kompas TV",
+            "author_id": "UC123", "author_name": "Budi Santoso",
+            "text": "setuju", "like_count": 3, "published_at": "2026-01-01",
+        }]
+        sentiment._store_comments(conn, 1, comments, ["positive"])
+
+        row = conn.execute(
+            "SELECT author_name, author_id, channel FROM comments"
+        ).fetchone()
+        assert row["author_name"] == anonymize.mask_author("UC123")
+        assert "Budi" not in row["author_name"]
+        # Kept, but hashed: buzzer needs a stable identity and only compares
+        # it, while the raw value resolves straight back to the account.
+        assert row["author_id"] == anonymize.hash_author_id("UC123")
+        assert row["channel"] == "Kompas TV"
+
+
+class TestCommentChannel:
+    """Which audience a comment came from is part of reading the reaction."""
+
+    def test_search_results_carry_the_channel(self, monkeypatch):
+        monkeypatch.setattr(youtube, "_get", lambda endpoint, params: {
+            "items": [
+                {"id": {"videoId": "v1"},
+                 "snippet": {"channelTitle": "Kompas TV"}},
+                {"id": {"kind": "channel"}, "snippet": {}},
+            ]
+        })
+        assert youtube.search_videos("prabowo") == [
+            {"id": "v1", "channel": "Kompas TV"}
+        ]
+
+    def test_the_channel_reaches_each_comment(self, monkeypatch):
+        monkeypatch.setattr(youtube, "search_videos",
+                            lambda *a, **k: [{"id": "v1", "channel": "Metro TV"}])
+        monkeypatch.setattr(youtube, "_get", lambda endpoint, params: {
+            "items": [{
+                "snippet": {"topLevelComment": {
+                    "id": "c1",
+                    "snippet": {"textDisplay": "halo", "likeCount": 1},
+                }}
+            }]
+        })
+        [comment] = youtube.gather_comments("prabowo")
+        assert comment["channel"] == "Metro TV"
+
+
+class TestAuthorIdHashing:
+    """The raw id resolves to the person at youtube.com/channel/<id>."""
+
+    RAW = "UCTYkjXS2uvfqpyZqpzjxjqg"
+
+    def test_the_channel_id_does_not_survive(self):
+        assert self.RAW not in anonymize.hash_author_id(self.RAW)
+
+    def test_hashing_is_stable(self):
+        """Buzzer matches accounts across events by equality alone."""
+        assert (anonymize.hash_author_id(self.RAW)
+                == anonymize.hash_author_id(self.RAW))
+
+    def test_distinct_accounts_stay_distinct(self):
+        assert anonymize.hash_author_id("UC1") != anonymize.hash_author_id("UC2")
+
+    def test_hashing_twice_changes_nothing(self):
+        """A second pipeline run must not re-hash and break the identity."""
+        once = anonymize.hash_author_id(self.RAW)
+        assert anonymize.hash_author_id(once) == once
+
+    def test_empty_stays_empty(self):
+        assert anonymize.hash_author_id("") == ""
+        assert anonymize.hash_author_id(None) == ""
+
+    def test_is_hashed_rejects_a_raw_channel_id(self):
+        assert not anonymize.is_hashed(self.RAW)
+        assert anonymize.is_hashed(anonymize.hash_author_id(self.RAW))
+
+    def test_stored_rows_carry_neither_identity(self, tmp_path):
+        conn = _fresh(tmp_path)
+        conn.execute(
+            "INSERT INTO events (id, figure_id, title, event_date, status, "
+            "created_at) VALUES (1, 'p', 'T', '2026-01-01', 'approved', "
+            "'2026-01-01')"
+        )
+        sentiment._store_comments(conn, 1, [{
+            "comment_id": "c1", "video_id": "v1", "channel": "Kompas TV",
+            "author_id": self.RAW, "author_name": "Budi Santoso",
+            "text": "setuju", "like_count": 1, "published_at": "2026-01-01",
+        }], ["positive"])
+
+        row = conn.execute(
+            "SELECT author_id, author_name FROM comments").fetchone()
+        assert row["author_id"] == anonymize.hash_author_id(self.RAW)
+        assert self.RAW not in row["author_id"]
+        assert "Budi" not in row["author_name"]
+
+    def test_the_mask_survives_the_id_being_hashed(self):
+        """The raw id is gone after the first write, so the mask cannot need it.
+
+        Masking a prefix of the digest is what makes the two agree: rows
+        written before ids were hashed keep the pseudonym they already had.
+        """
+        assert (anonymize.mask_author(self.RAW)
+                == anonymize.mask_author(anonymize.hash_author_id(self.RAW)))
+
+    def test_a_pseudonym_is_wide_enough_to_stay_unique(self):
+        """Four hex digits collided for 54 pairs across a real 2592 accounts."""
+        masks = {anonymize.mask_author(f"UC{i}") for i in range(3000)}
+        assert len(masks) > 2995
+
+    def test_buzzer_still_groups_an_account_across_events(self, tmp_path):
+        """Hashing must be invisible to the signal it feeds."""
+        conn = _fresh(tmp_path)
+        for eid in (1, 2, 3):
+            conn.execute(
+                "INSERT INTO events (id, figure_id, title, event_date, status, "
+                "created_at) VALUES (?, 'p', 'T', '2026-01-01', 'approved', "
+                "'2026-01-01')", (eid,)
+            )
+            sentiment._store_comments(conn, eid, [{
+                "comment_id": f"c{eid}", "video_id": "v", "channel": "TV",
+                "author_id": self.RAW, "author_name": "Budi",
+                "text": "sama", "like_count": 0, "published_at": "2026-01-01",
+            }], ["positive"])
+
+        ids = {r["author_id"] for r in
+               conn.execute("SELECT author_id FROM comments")}
+        assert len(ids) == 1, "one account must remain one identity"

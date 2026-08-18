@@ -157,6 +157,9 @@ def post_comments(permalink: str, limit: int = 50) -> list[dict]:
         out.append({
             "comment_id": d.get("id", ""),
             "video_id": d.get("link_id", ""),
+            # The subreddit is this platform's answer to "whose audience is
+            # this", so it fills the same display slot as a YouTube channel.
+            "channel": f"r/{d['subreddit']}" if d.get("subreddit") else "",
             "text": body,
             "author_id": d.get("author_fullname", ""),
             "author_name": d.get("author", ""),

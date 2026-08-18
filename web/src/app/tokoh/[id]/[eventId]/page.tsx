@@ -282,9 +282,20 @@ function Badge({ tone, text }: { tone: "ok" | "warn" | "quiet"; text: string }) 
   );
 }
 
+/**
+ * Commenters are pseudonymous ("Akun 4f2a" — see jejak/anonymize.py), so the
+ * usual first-letter initials would render "A4" for every one of them. The
+ * distinguishing half is the hash, so the avatar shows that instead.
+ */
+function avatarToken(name: string): string {
+  const hashed = /^Akun\s+([0-9a-f]+)$/i.exec(name);
+  return hashed ? hashed[1] : initials(name);
+}
+
 function Comment({ comment }: { comment: PublicComment }) {
   const stance = STANCE_STYLE[comment.stance ?? "neutral"] ?? STANCE_STYLE.neutral;
   const name = comment.author_name || "Anonim";
+  const token = avatarToken(name);
   return (
     <li style={{ display: "flex", gap: 12, padding: "16px 0", borderBottom: "1px solid #e4dcc9" }}>
       <div
@@ -299,16 +310,22 @@ function Comment({ comment }: { comment: PublicComment }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontFamily: "var(--font-serif)",
-          fontSize: 15,
+          fontFamily: token.length > 2 ? "var(--font-mono, monospace)" : "var(--font-serif)",
+          fontSize: token.length > 2 ? 11 : 15,
+          letterSpacing: token.length > 2 ? "0.02em" : undefined,
           color: "#9b8f7d",
         }}
       >
-        {initials(name)}
+        {token}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>{name}</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>
+            {name}
+            {comment.channel ? (
+              <span style={{ fontWeight: 400, color: "#9b9285" }}> di {comment.channel}</span>
+            ) : null}
+          </span>
           <span
             style={{
               fontSize: 10.5,

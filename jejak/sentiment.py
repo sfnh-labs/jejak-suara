@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-from . import reddit, youtube
+from . import anonymize, reddit, youtube
 
 CHANNEL = "social"
 
@@ -186,23 +186,32 @@ def _store_comments(conn: sqlite3.Connection, event_id: int,
     Upserts on the platform's own comment id, so re-running sentiment refreshes
     like counts and stances in place instead of duplicating the event's
     comment history.
+
+    The commenter's real display name is replaced by a pseudonym here and never
+    written — see jejak/anonymize.py for why.
     """
     now = datetime.now(timezone.utc).isoformat()
     for cmt, label in zip(comments, labels):
         conn.execute(
             """INSERT INTO comments
-               (event_id, comment_id, video_id, author_id, author_name, text,
+               (event_id, comment_id, video_id, channel, author_id,
+                author_name, text,
                 like_count, published_at, stance, collected_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(event_id, comment_id) DO UPDATE SET
                  like_count=excluded.like_count,
                  stance=excluded.stance,
+                 channel=excluded.channel,
                  collected_at=excluded.collected_at""",
             (event_id,
              cmt.get("comment_id", ""),
              cmt.get("video_id", ""),
-             cmt.get("author_id", ""),
-             cmt.get("author_name", ""),
+             cmt.get("channel", ""),
+             # Both derived from the raw id, which is discarded here and never
+             # written. Order matters only in that the mask must see the raw
+             # value, not the digest, or it would not match rows already stored.
+             anonymize.hash_author_id(cmt.get("author_id")),
+             anonymize.mask_author(cmt.get("author_id"), cmt.get("author_name")),
              cmt.get("text", ""),
              cmt.get("like_count", 0),
              cmt.get("published_at", ""),

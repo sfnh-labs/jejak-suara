@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS comments (
     event_id     INTEGER NOT NULL,
     comment_id   TEXT,                     -- platform's own id; stable across collections
     video_id     TEXT,
+    channel      TEXT,                     -- YouTube channel / subreddit the comment sits under
     author_id    TEXT,
     author_name  TEXT,
     text         TEXT NOT NULL,
@@ -216,6 +217,7 @@ _MIGRATIONS = {
     ],
     "comments": [
         ("comment_id", "TEXT"),
+        ("channel", "TEXT"),
     ],
 }
 
