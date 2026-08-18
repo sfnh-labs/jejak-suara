@@ -1,52 +1,135 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-const AUTH_CREDENTIALS = process.env.BASIC_AUTH_CREDENTIALS;
-const CLOSED_LAUNCH = process.env.CLOSED_LAUNCH === "true";
+/**
+ * Gate for /kurasi.
+ *
+ * Cloudflare Access authenticates in front of the Worker, so an unauthorised
+ * request should never arrive here at all. This verifies the JWT it mints
+ * anyway, because Access is bound to a hostname: anything that reaches the
+ * Worker by another route — a workers.dev subdomain, a second custom domain,
+ * a Cloudflare misconfiguration — arrives with the edge check skipped. The
+ * signature check does not care how the request got here.
+ *
+ * Required Worker vars (wrangler secret put / dashboard):
+ *   CF_ACCESS_TEAM_DOMAIN   e.g. yourteam.cloudflareaccess.com
+ *   CF_ACCESS_AUD           the Application Audience tag from the Access app
+ *
+ * With them unset the gate fails closed in production and opens in `next dev`,
+ * so local curation needs no Cloudflare account.
+ */
 
-function decodeBase64(str: string): string {
-  return atob(str);
+interface Jwk {
+  kid: string;
+  kty: string;
+  n: string;
+  e: string;
+  alg?: string;
 }
 
-/** Compares in time independent of where the first difference falls. */
-function safeEqual(a: string, b: string): boolean {
-  const encoder = new TextEncoder();
-  const left = encoder.encode(a);
-  const right = encoder.encode(b);
-  // Length is not secret here (it leaks through the comparison either way),
-  // but bail early so the loop below always compares equal-length buffers.
-  if (left.length !== right.length) return false;
-  let diff = 0;
-  for (let i = 0; i < left.length; i++) diff |= left[i] ^ right[i];
-  return diff === 0;
+let jwksCache: { keys: Jwk[]; fetchedAt: number } | null = null;
+const JWKS_TTL_MS = 60 * 60 * 1000;
+
+function b64urlToBytes(input: string): Uint8Array<ArrayBuffer> {
+  const b64 = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+  const binary = atob(padded);
+  const out = new Uint8Array(new ArrayBuffer(binary.length));
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
 }
 
-export function middleware(request: NextRequest) {
-  if (!CLOSED_LAUNCH || !AUTH_CREDENTIALS) {
-    return NextResponse.next();
+function b64urlToJson(input: string): Record<string, unknown> {
+  return JSON.parse(new TextDecoder().decode(b64urlToBytes(input)));
+}
+
+async function getJwks(teamDomain: string): Promise<Jwk[]> {
+  const fresh = jwksCache && Date.now() - jwksCache.fetchedAt < JWKS_TTL_MS;
+  if (jwksCache && fresh) return jwksCache.keys;
+
+  const res = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`);
+  if (!res.ok) throw new Error(`JWKS fetch failed: ${res.status}`);
+  const body = (await res.json()) as { keys: Jwk[] };
+  jwksCache = { keys: body.keys ?? [], fetchedAt: Date.now() };
+  return jwksCache.keys;
+}
+
+async function verifyAccessJwt(
+  token: string,
+  teamDomain: string,
+  aud: string
+): Promise<boolean> {
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [rawHeader, rawPayload, rawSignature] = parts;
+
+  const header = b64urlToJson(rawHeader) as { kid?: string; alg?: string };
+  // Access signs RS256. Pinning it rejects the `alg: none` downgrade outright.
+  if (header.alg !== "RS256" || !header.kid) return false;
+
+  const jwk = (await getJwks(teamDomain)).find((k) => k.kid === header.kid);
+  if (!jwk) return false;
+
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: "RS256", ext: true },
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+
+  const signed = new TextEncoder().encode(`${rawHeader}.${rawPayload}`);
+  const ok = await crypto.subtle.verify(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    b64urlToBytes(rawSignature),
+    signed
+  );
+  if (!ok) return false;
+
+  const payload = b64urlToJson(rawPayload) as {
+    aud?: string | string[];
+    exp?: number;
+    iss?: string;
+  };
+
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof payload.exp !== "number" || payload.exp <= now) return false;
+  if (payload.iss !== `https://${teamDomain}`) return false;
+
+  // The audience tag is what binds this token to THIS Access application — a
+  // valid token for any other app in the same team would otherwise pass.
+  const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  return audiences.includes(aud);
+}
+
+export async function middleware(req: NextRequest) {
+  const teamDomain = process.env.CF_ACCESS_TEAM_DOMAIN;
+  const aud = process.env.CF_ACCESS_AUD;
+
+  if (!teamDomain || !aud) {
+    if (process.env.NODE_ENV !== "production") return NextResponse.next();
+    return new NextResponse("Kurasi is not configured for this deployment.", {
+      status: 503,
+    });
   }
 
-  const authHeader = request.headers.get("authorization");
+  const token =
+    req.headers.get("Cf-Access-Jwt-Assertion") ??
+    req.cookies.get("CF_Authorization")?.value;
+  if (!token) return new NextResponse("Unauthorized", { status: 401 });
 
-  if (authHeader?.startsWith("Basic ")) {
-    const encoded = authHeader.slice(6);
-    try {
-      const decoded = decodeBase64(encoded);
-      if (safeEqual(decoded, AUTH_CREDENTIALS)) {
-        return NextResponse.next();
-      }
-    } catch {
-      // Invalid base64, fall through to 401
+  try {
+    if (!(await verifyAccessJwt(token, teamDomain, aud))) {
+      return new NextResponse("Unauthorized", { status: 401 });
     }
+  } catch {
+    // A JWKS fetch failure must not become an open door.
+    return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  return new NextResponse(null, {
-    status: 401,
-    headers: {
-      "WWW-Authenticate": `Basic realm="Jejak Suara (Closed Launch)", charset="UTF-8"`,
-    },
-  });
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: "/((?!_next/static|_next/image|favicon.ico).*)",
+  matcher: ["/kurasi", "/kurasi/:path*"],
 };

@@ -274,6 +274,29 @@ npx wrangler secret put BASIC_AUTH_CREDENTIALS   # only if CLOSED_LAUNCH=true
 
 For local Worker runs, put the same values in `web/.dev.vars` (gitignored).
 
+#### Protecting `/kurasi` with Cloudflare Access
+
+Access authenticates at the edge, before the request reaches the Worker. It binds to
+a hostname, so it needs a **custom domain** in your Cloudflare zone — a plain
+`*.workers.dev` subdomain cannot be put behind it.
+
+1. Route the Worker at a custom domain (Workers → Settings → Domains & Routes).
+2. Zero Trust → Access → Applications → *Add a self-hosted application*, path
+   `/kurasi`, with a policy allowing your email.
+3. Copy the **Application Audience (AUD) tag** and set both vars on the Worker:
+
+```bash
+npx wrangler secret put CF_ACCESS_TEAM_DOMAIN   # yourteam.cloudflareaccess.com
+npx wrangler secret put CF_ACCESS_AUD           # the AUD tag
+```
+
+`web/src/middleware.ts` re-verifies the Access JWT (signature against the team JWKS,
+plus `exp`, `iss` and `aud`) rather than trusting that the edge check ran. Access is
+bound to one hostname, so anything reaching the Worker by another route — the
+`workers.dev` subdomain, a second custom domain, a misrouted rule — skips the edge
+check entirely; the signature check does not care how the request arrived. Disabling
+the `workers.dev` route once the custom domain is live is still worth doing.
+
 ## Testing
 
 ```bash
