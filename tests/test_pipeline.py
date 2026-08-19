@@ -13,8 +13,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from jejak import (  # noqa: E402
-    anonymize, backfill, cluster, db, ingest, mentions, sentiment, summarize,
-    youtube,
+    anonymize, backfill, cluster, db, embed, ingest, mentions, reddit,
+    relevance, sentiment, summarize, youtube,
 )
 from jejak.config import Figure  # noqa: E402
 
@@ -859,6 +859,191 @@ class TestCommentChannel:
         })
         [comment] = youtube.gather_comments("prabowo")
         assert comment["channel"] == "Metro TV"
+
+
+class TestRelevanceGate:
+    """Comments under an unrelated video are not reaction to the event.
+
+    Geometry rather than real text, for the same reason as TestClusterDrift:
+    the model's own numbers would make this a measurement of the model. What is
+    under test is that a thread is judged as a thread, and that a failing one
+    reaches neither the classifier nor the store.
+    """
+
+    ANGLES = {"event": 0.0, "about": 20.0, "unrelated": 80.0}
+
+    def _stub_embed(self, monkeypatch):
+        import math
+
+        import numpy as np
+
+        def fake(text: str):
+            for key, deg in self.ANGLES.items():
+                if key in text:
+                    rad = math.radians(deg)
+                    return np.array([math.cos(rad), math.sin(rad)])
+            raise AssertionError(f"unexpected text: {text!r}")
+
+        monkeypatch.setattr(embed, "embed", fake)
+
+    def _event(self, conn):
+        conn.execute(
+            "INSERT INTO events (id, figure_id, title, event_date, status, "
+            "created_at) VALUES (1, 'p', 'event headline', '2026-01-01', "
+            "'approved', '2026-01-01')")
+        conn.commit()
+
+    def _thread(self, video, word, n):
+        return [{"comment_id": f"{video}-{i}", "video_id": video,
+                 "text": f"{word} {i}"} for i in range(n)]
+
+    def test_a_thread_about_something_else_is_dropped(self, tmp_path,
+                                                      monkeypatch):
+        conn = _fresh(tmp_path)
+        self._stub_embed(monkeypatch)
+        self._event(conn)
+
+        kept, dropped = relevance.filter_comments(
+            conn, 1, self._thread("v1", "unrelated", 5))
+
+        assert kept == []
+        assert [d["video_id"] for d in dropped] == ["v1"]
+        assert dropped[0]["count"] == 5
+
+    def test_a_thread_about_the_event_survives(self, tmp_path, monkeypatch):
+        conn = _fresh(tmp_path)
+        self._stub_embed(monkeypatch)
+        self._event(conn)
+
+        kept, dropped = relevance.filter_comments(
+            conn, 1, self._thread("v1", "about", 5))
+
+        assert len(kept) == 5 and dropped == []
+
+    def test_each_video_is_judged_on_its_own(self, tmp_path, monkeypatch):
+        """A search returns five videos; some being wrong is the normal case."""
+        conn = _fresh(tmp_path)
+        self._stub_embed(monkeypatch)
+        self._event(conn)
+        comments = (self._thread("good", "about", 4)
+                    + self._thread("bad", "unrelated", 4))
+
+        kept, dropped = relevance.filter_comments(conn, 1, comments)
+
+        assert {c["video_id"] for c in kept} == {"good"}
+        assert [d["video_id"] for d in dropped] == ["bad"]
+
+    def test_a_thread_too_short_to_judge_is_left_alone(self, tmp_path,
+                                                       monkeypatch):
+        """A centroid over two comments is those two comments."""
+        conn = _fresh(tmp_path)
+        self._stub_embed(monkeypatch)
+        self._event(conn)
+
+        kept, dropped = relevance.filter_comments(
+            conn, 1, self._thread("v1", "unrelated", relevance.MIN_JUDGED - 1))
+
+        assert len(kept) == relevance.MIN_JUDGED - 1 and dropped == []
+
+    def test_the_event_is_described_by_its_own_coverage(self, tmp_path):
+        conn = _fresh(tmp_path)
+        self._event(conn)
+        conn.execute(
+            "INSERT INTO articles (id, figure_id, source, url, title, "
+            "published_at, fetched_at, event_id) VALUES ('a1', 'p', 'Detik', "
+            "'http://x/1', 'what the outlets actually wrote', "
+            "'2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', 1)")
+        conn.commit()
+
+        text = relevance.event_text(conn, 1)
+
+        assert "event headline" in text
+        assert "what the outlets actually wrote" in text
+
+    def test_rejected_comments_are_never_classified_or_stored(self, tmp_path,
+                                                              monkeypatch):
+        """The gate runs before Ollama: wrong data costs nothing to reject."""
+        conn = _fresh(tmp_path)
+        self._stub_embed(monkeypatch)
+        self._event(conn)
+        monkeypatch.setattr(sentiment, "_query_for_event", lambda *a: "q")
+        monkeypatch.setattr(youtube, "gather_comments",
+                            lambda *a, **k: self._thread("v1", "unrelated", 5))
+        monkeypatch.setattr(reddit, "gather_comments", lambda *a, **k: [])
+
+        def refuse(_comments):
+            raise AssertionError("classifier reached with off-topic comments")
+
+        monkeypatch.setattr(sentiment, "classify_comments", refuse)
+
+        [yt, _] = sentiment.sentiment_event(conn, 1)
+
+        assert yt["sample_size"] == 0
+        assert yt["off_topic"][0]["video_id"] == "v1"
+        assert conn.execute("SELECT count(*) FROM comments").fetchone()[0] == 0
+
+
+class TestSearchWindow:
+    """A video posted years before the event is not coverage of the event."""
+
+    def _event(self, conn, when="2026-08-14T11:41:22+07:00"):
+        conn.execute(
+            "INSERT INTO events (id, figure_id, title, event_date, status, "
+            "created_at) VALUES (1, 'p', 't', ?, 'approved', '2026-01-01')",
+            (when,))
+        conn.commit()
+
+    def test_the_window_brackets_the_event_date(self, tmp_path):
+        conn = _fresh(tmp_path)
+        self._event(conn)
+
+        after, before = sentiment._search_window(conn, 1)
+
+        # +07:00 converted to UTC before the margin is applied.
+        assert after == "2026-08-13T04:41:22Z"
+        assert before == "2026-08-28T04:41:22Z"
+
+    def test_a_naive_event_date_is_read_as_utc(self, tmp_path):
+        conn = _fresh(tmp_path)
+        self._event(conn, "2026-08-14T00:00:00")
+
+        after, _ = sentiment._search_window(conn, 1)
+
+        assert after == "2026-08-13T00:00:00Z"
+
+    def test_an_unparseable_date_leaves_the_search_unbounded(self, tmp_path):
+        """Losing the bound is a worse search, not a broken run."""
+        conn = _fresh(tmp_path)
+        self._event(conn, "kemarin")
+
+        assert sentiment._search_window(conn, 1) == ("", "")
+
+    def test_the_bounds_reach_the_api(self, monkeypatch):
+        seen = {}
+
+        def capture(endpoint, params):
+            seen.update(params)
+            return {"items": []}
+
+        monkeypatch.setattr(youtube, "_get", capture)
+        youtube.search_videos("prabowo", published_after="2026-08-13T00:00:00Z",
+                              published_before="2026-08-28T00:00:00Z")
+
+        assert seen["publishedAfter"] == "2026-08-13T00:00:00Z"
+        assert seen["publishedBefore"] == "2026-08-28T00:00:00Z"
+
+    def test_no_bound_is_sent_when_there_is_none(self, monkeypatch):
+        """The API rejects an empty publishedAfter rather than ignoring it."""
+        seen = {}
+
+        def capture(endpoint, params):
+            seen.update(params)
+            return {"items": []}
+
+        monkeypatch.setattr(youtube, "_get", capture)
+        youtube.search_videos("prabowo")
+
+        assert "publishedAfter" not in seen and "publishedBefore" not in seen
 
 
 class TestAuthorIdHashing:

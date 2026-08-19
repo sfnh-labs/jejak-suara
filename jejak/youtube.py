@@ -45,15 +45,23 @@ def _get(endpoint: str, params: dict) -> dict:
 
 
 def search_videos(query: str, max_results: int = 5,
-                  region: str = "ID", language: str = "id") -> list[dict]:
+                  region: str = "ID", language: str = "id",
+                  published_after: str = "",
+                  published_before: str = "") -> list[dict]:
     """Return {id, channel} for videos matching the query (most relevant first).
 
     The channel title rides along free: it is already in the snippet of the
     search response this call pays 100 quota units for, and a comment means
     little without knowing whose audience it came from — reaction under a
     partisan channel is not the same signal as reaction under a wire service.
+
+    `published_after`/`published_before` are RFC-3339 timestamps bounding when
+    the video was uploaded. Unbounded, a search for an event's keywords ranks a
+    years-old video about the same subject above this week's coverage of it,
+    and its comments then get stored as reaction to something that had not
+    happened when they were written.
     """
-    data = _get("search", {
+    params = {
         "part": "snippet",
         "q": query,
         "type": "video",
@@ -61,7 +69,12 @@ def search_videos(query: str, max_results: int = 5,
         "relevanceLanguage": language,
         "regionCode": region,
         "order": "relevance",
-    })
+    }
+    if published_after:
+        params["publishedAfter"] = published_after
+    if published_before:
+        params["publishedBefore"] = published_before
+    data = _get("search", params)
     out = []
     for item in data.get("items", []):
         vid = item.get("id", {}).get("videoId")
@@ -113,13 +126,17 @@ def video_comments(video_id: str, max_results: int = 50,
 
 
 def gather_comments(query: str, max_videos: int = 5,
-                    per_video: int = 30, cap: int = 100) -> list[dict]:
+                    per_video: int = 30, cap: int = 100,
+                    published_after: str = "",
+                    published_before: str = "") -> list[dict]:
     """Search for videos about `query` and collect up to `cap` comments total.
 
     Returns list of dicts with {text, author_id, author_name, like_count, published_at}.
     """
     comments: list[dict] = []
-    for vid in search_videos(query, max_results=max_videos):
+    for vid in search_videos(query, max_results=max_videos,
+                             published_after=published_after,
+                             published_before=published_before):
         comments.extend(video_comments(vid["id"], max_results=per_video,
                                        channel=vid["channel"]))
         if len(comments) >= cap:

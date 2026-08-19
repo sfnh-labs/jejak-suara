@@ -15,9 +15,9 @@ import re
 import sqlite3
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from . import anonymize, reddit, youtube
+from . import anonymize, reddit, relevance, youtube
 
 CHANNEL = "social"
 
@@ -34,6 +34,11 @@ Judge stance toward the figure/event only — not the comment's general mood.
 Return labels in the SAME ORDER as the numbered comments."""
 
 _SCORE = {"negative": -1.0, "neutral": 0.0, "positive": 1.0}
+
+# How far either side of an event to look for videos about it. See
+# _search_window.
+SEARCH_BEFORE_DAYS = 1
+SEARCH_AFTER_DAYS = 14
 
 
 def _ollama_chat(messages: list[dict]) -> dict:
@@ -270,6 +275,30 @@ def _run_sentiment(conn: sqlite3.Connection, event_id: int,
     return result
 
 
+def _search_window(conn: sqlite3.Connection, event_id: int) -> tuple[str, str]:
+    """RFC-3339 bounds on when a video about this event could have been posted.
+
+    Coverage of an event does not precede it by more than a day — the margin is
+    for timezone slop in the event date — and reaction to it has run its course
+    well inside a fortnight. Anything outside is a video about some other time
+    the same words were in the news.
+    """
+    row = conn.execute("SELECT event_date FROM events WHERE id = ?",
+                       (event_id,)).fetchone()
+    if not row or not row["event_date"]:
+        return "", ""
+    try:
+        when = datetime.fromisoformat(row["event_date"].replace("Z", "+00:00"))
+    except ValueError:
+        return "", ""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    when = when.astimezone(timezone.utc)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    return ((when - timedelta(days=SEARCH_BEFORE_DAYS)).strftime(fmt),
+            (when + timedelta(days=SEARCH_AFTER_DAYS)).strftime(fmt))
+
+
 def sentiment_event(conn: sqlite3.Connection, event_id: int,
                     cap: int = 100) -> list[dict]:
     """Gather + classify public reaction for one event across channels.
@@ -277,22 +306,34 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
     Runs YouTube (if YOUTUBE_API_KEY is set) and Reddit (always, best-effort).
     Each channel is stored as a separate row.
     Returns a list of result dicts (one per channel).
+
+    Both channels pass through `relevance.filter_comments` before anything is
+    classified or stored. A search returns what matches the words, not what is
+    about the event, and a thread that is not about the event is not reaction
+    to it — see jejak/relevance.py for what that check can and cannot catch.
     """
     query = _query_for_event(conn, event_id)
+    after, before = _search_window(conn, event_id)
     results: list[dict] = []
 
+    def gated(comments: list[dict], channel: str) -> dict:
+        kept, dropped = relevance.filter_comments(conn, event_id, comments)
+        result = _run_sentiment(conn, event_id, query, kept, channel)
+        if dropped:
+            result["off_topic"] = dropped
+        return result
+
     try:
-        yt_comments = youtube.gather_comments(query, cap=cap)
-        results.append(_run_sentiment(
-            conn, event_id, query, yt_comments, "youtube"))
+        yt_comments = youtube.gather_comments(
+            query, cap=cap, published_after=after, published_before=before)
+        results.append(gated(yt_comments, "youtube"))
     except Exception as e:
         results.append({"event_id": event_id, "query": query,
                         "channel": "youtube", "note": str(e)})
 
     try:
         reddit_comments = reddit.gather_comments(query, cap=cap)
-        results.append(_run_sentiment(
-            conn, event_id, query, reddit_comments, "reddit"))
+        results.append(gated(reddit_comments, "reddit"))
     except Exception as e:
         results.append({"event_id": event_id, "query": query,
                         "channel": "reddit", "note": str(e)})
