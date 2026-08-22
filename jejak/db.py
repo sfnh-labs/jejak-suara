@@ -50,6 +50,12 @@ CREATE TABLE IF NOT EXISTS events (
     kind        TEXT NOT NULL DEFAULT 'record',  -- record|peristiwa
     title       TEXT,                       -- working title until summarized
     event_date  TEXT,                       -- earliest article date in cluster
+    -- Latest article date in the cluster. event_date says when the thing
+    -- happened and must not move, but coverage keeps arriving for days: a
+    -- record whose summary was rewritten this morning was still sorted by a
+    -- date from last week, so nothing new ever appeared at the top of the
+    -- timeline. This is what the feed orders by.
+    last_seen   TEXT,
     event_type  TEXT DEFAULT 'other',       -- Pidato, Debat, Demonstrasi, Kebijakan, dll.
     scope       TEXT,                       -- Nasional, Parlemen, a province...
     impact      TEXT,                       -- tinggi|sedang|rendah
@@ -211,6 +217,7 @@ _MIGRATIONS = {
         ("kind", "TEXT NOT NULL DEFAULT 'record'"),
         ("scope", "TEXT"),
         ("impact", "TEXT"),
+        ("last_seen", "TEXT"),
     ],
     "sentiment": [
         ("samples_json", "TEXT"),
@@ -234,6 +241,8 @@ _INDEXES = (
     # than deleting an event's comment history and refetching it.
     """CREATE UNIQUE INDEX IF NOT EXISTS uq_comments_event_comment
        ON comments(event_id, comment_id)""",
+    # The feed's sort key.
+    "CREATE INDEX IF NOT EXISTS idx_events_last_seen ON events(last_seen)",
 )
 
 
@@ -343,7 +352,23 @@ def migrate(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     for stmt in _INDEXES:
         conn.execute(stmt)
+    _backfill_last_seen(conn)
     conn.commit()
+
+
+def _backfill_last_seen(conn: sqlite3.Connection) -> None:
+    """Fill last_seen for events that predate the column.
+
+    Only ever fills NULLs: after this runs once, clustering owns the value.
+    An event whose articles all lack a published_at falls back to event_date so
+    the feed's sort key is never NULL.
+    """
+    conn.execute(
+        """UPDATE events SET last_seen = COALESCE(
+               (SELECT max(published_at) FROM articles WHERE event_id = events.id),
+               event_date)
+           WHERE last_seen IS NULL"""
+    )
 
 
 def init_db(path: Path | str = DEFAULT_DB) -> None:

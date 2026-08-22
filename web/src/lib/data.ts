@@ -44,11 +44,20 @@ const LIVE = (alias: string) =>
  * Corroboration therefore has to be counted from the articles rather than read
  * off the summary, which does not exist yet for a freshly clustered record.
  */
+// The feed is ordered by when an event was last reported, not by when it
+// happened. Clustering keeps adding articles to an event for days and rewrites
+// its summary as it goes, but event_date stays at the first article — so a
+// record whose text changed this morning sorted below untouched older ones and
+// the timeline looked frozen. COALESCE keeps rows synced before the column
+// existed from sorting last.
+const FEED_ORDER = "COALESCE(e.last_seen, e.event_date)";
+
 const RECORD_SELECT = `
   SELECT e.id                         AS event_id,
          e.figure_id,
          COALESCE(f.name, e.figure_id) AS figure_name,
          e.event_date,
+         e.last_seen,
          e.title,
          e.event_type,
          es.summary_text              AS summary,
@@ -143,7 +152,7 @@ export async function getFigureEvents(figureId: string): Promise<EventRecord[]> 
 /** Cross-figure feed for the home page and Linimasa. */
 export async function getRecentEvents(limit = 60): Promise<EventRecord[]> {
   return query<EventRecord>(
-    `${RECORD_SELECT} ORDER BY e.event_date DESC LIMIT $1`,
+    `${RECORD_SELECT} ORDER BY ${FEED_ORDER} DESC LIMIT $1`,
     [limit]
   );
 }
@@ -190,7 +199,7 @@ export async function getEventNeighbours(
 export async function getPeristiwa(limit = 60): Promise<Peristiwa[]> {
   const rows = await query<Peristiwa>(
     `SELECT e.id AS event_id,
-            e.event_date, e.title, e.event_type, e.scope, e.impact,
+            e.event_date, e.last_seen, e.title, e.event_type, e.scope, e.impact,
             es.summary_text AS summary,
             COALESCE(src.outlet_count, 0)  AS outlet_count,
             COALESCE(src.article_count, 0) AS article_count,
@@ -220,7 +229,7 @@ export async function getPeristiwa(limit = 60): Promise<Peristiwa[]> {
        ) rel ON TRUE
       WHERE e.kind = 'peristiwa'
         AND ${LIVE("e")}
-      ORDER BY e.event_date DESC
+      ORDER BY ${FEED_ORDER} DESC
       LIMIT $1`,
     [limit]
   );
@@ -244,12 +253,12 @@ export async function getFeed(limit = 40): Promise<FeedItem[]> {
   return [
     ...records.map((record) => ({
       kind: "record" as const,
-      date: record.event_date,
+      date: record.last_seen ?? record.event_date,
       record,
     })),
     ...peristiwa.map((p) => ({
       kind: "peristiwa" as const,
-      date: p.event_date,
+      date: p.last_seen ?? p.event_date,
       peristiwa: p,
     })),
   ]
