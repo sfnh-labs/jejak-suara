@@ -14,13 +14,59 @@
 /** Leading list markers the model emits: "- ", "* ", "• ", "1. ", "1) ". */
 const MARKER = /^\s*(?:[-*•–—]|\d+[.)])\s+/;
 
-export function toBullets(summary: string): string[] {
-  const lines = summary
+// The prompt asks for a JUDUL/KATEGORI header above a "---" line, and the
+// summarize stage cuts the body at that line. When the model omits the divider
+// — or glues it to the category, "KATEGORI: Penyelidikan---" — the cut misses
+// and the header survives into the stored text. It is not a fact about the
+// event, and the category is already shown as a chip, so drop it here instead
+// of rendering it as the first bullet.
+const HEADER = /^(?:\*\*)?(?:JUDUL|KATEGORI)(?:\*\*)?\s*:/i;
+const RULE = /^-{3,}$/;
+
+function contentLines(summary: string): string[] {
+  return summary
     .split("\n")
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter((l) => l && !HEADER.test(l) && !RULE.test(l));
+}
+
+export function toBullets(summary: string): string[] {
+  const lines = contentLines(summary);
   if (!lines.some((l) => MARKER.test(l))) return [];
   return lines.map((l) => l.replace(MARKER, "").trim()).filter(Boolean);
+}
+
+// The model cites as "[Sumber 1], [Sumber 2]", which at three citations is
+// longer than the fact it is attached to. The word carries no information the
+// bracket does not, so only the number is kept: "[1][2]".
+const CITE = /\[\s*Sumber\s*(\d+)\s*\]/gi;
+const CITE_SPLIT = /(\[\d+\])/;
+
+function shortenCitations(text: string): string {
+  return text
+    .replace(CITE, "[$1]")
+    // The model punctuates between citations; runs of them read as one group.
+    .replace(/\]\s*[,;]?\s*\[/g, "][")
+    // A trailing "." after the last citation, and the space before the first.
+    .replace(/\s+\[/g, " [")
+    .replace(/\]\s*\.\s*$/, "]")
+    .trim();
+}
+
+/** Text with the citation markers rendered as their own muted spans. */
+function withCitations(text: string, size: number) {
+  return shortenCitations(text)
+    .split(CITE_SPLIT)
+    .filter(Boolean)
+    .map((part, i) =>
+      CITE_SPLIT.test(part) ? (
+        <span key={i} style={{ color: "#9b9285", fontSize: size - 2 }}>
+          {part}
+        </span>
+      ) : (
+        part
+      )
+    );
 }
 
 export default function SummaryList({
@@ -37,7 +83,7 @@ export default function SummaryList({
   if (bullets.length === 0) {
     return (
       <p style={{ fontSize: size, lineHeight: 1.62, color, margin: "0 0 14px", whiteSpace: "pre-line" }}>
-        {summary}
+        {withCitations(contentLines(summary).join("\n"), size)}
       </p>
     );
   }
@@ -76,7 +122,7 @@ export default function SummaryList({
               background: "#b9ab93",
             }}
           />
-          {text}
+          {withCitations(text, size)}
         </li>
       ))}
     </ul>
