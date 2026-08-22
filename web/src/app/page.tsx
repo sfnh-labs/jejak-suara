@@ -1,13 +1,12 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import EventCard from "@/components/EventCard";
+import FigurePortrait from "@/components/FigurePortrait";
 import RecordCard from "@/components/RecordCard";
 import { getFeed, getFigures, getSentimentHistory } from "@/lib/data";
 import {
   formatCount,
   formatDate,
-  hatch,
-  initials,
   monthGroupLabel,
   sentimentRing,
   toDisplayScore,
@@ -182,22 +181,15 @@ function StoryBubbles({ figures, history }: { figures: FigureSummary[]; history:
                   padding: 3,
                 }}
               >
-                <div
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    borderRadius: "50%",
-                    background: hatch(5),
-                    border: "1px solid #16130f",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <span style={{ fontFamily: "var(--font-serif)", fontSize: 18, color: "#b9ab93" }}>
-                    {initials(fig.name)}
-                  </span>
-                </div>
+                <FigurePortrait
+                  figureId={fig.id}
+                  name={fig.name}
+                  width="100%"
+                  height="100%"
+                  round
+                  fontSize={18}
+                  hatchStep={5}
+                />
               </div>
               <div style={{ fontSize: 12, fontWeight: 600, marginTop: 7, lineHeight: 1.25 }}>
                 {fig.name.split(/\s+/)[0]}

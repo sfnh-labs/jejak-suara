@@ -1,4 +1,5 @@
 import Link from "next/link";
+import FigurePortrait from "./FigurePortrait";
 import OutletTile from "./OutletTile";
 import SentimentTrack from "./SentimentTrack";
 import SummaryList from "./SummaryList";
@@ -7,8 +8,6 @@ import {
   eventTypeChip,
   formatCount,
   formatDateShort,
-  hatch,
-  initials,
   percent,
   toDisplayScore,
 } from "@/lib/design";
@@ -76,24 +75,14 @@ export default function RecordCard({
 
       {showFigure ? (
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10, flexWrap: "wrap" }}>
-          <div
-            aria-hidden
-            style={{
-              flex: "none",
-              width: 24,
-              height: 24,
-              borderRadius: "50%",
-              background: hatch(4),
-              border: "1px solid #16130f",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <span style={{ fontFamily: "var(--font-serif)", fontSize: 9, color: "#b9ab93" }}>
-              {initials(record.figure_name)}
-            </span>
-          </div>
+          <FigurePortrait
+            figureId={record.figure_id}
+            name={record.figure_name}
+            width={24}
+            round
+            fontSize={9}
+            hatchStep={4}
+          />
           <Link
             href={`/tokoh/${record.figure_id}`}
             className="fig-link"
