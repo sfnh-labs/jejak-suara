@@ -11,10 +11,10 @@ between them.
 ## Pipeline
 
 ```
-RSS ──────▶ ingest ──▶ fetch ──▶ translate ──▶ cluster ──▶ summarize ──▶ timeline
-archives ─▶ backfill   bodies    to Indonesian  events     drafts        (published)
-                                                              │
-                                                  sentiment + buzzer ───┘
+RSS ──────▶ ingest ──▶ fetch ──▶ translate ──▶ mentions ──▶ cluster ──▶ summarize ──▶ timeline
+archives ─▶ backfill   bodies    to Indonesian  who to      events      drafts        (published)
+                                                track                      │
+                                                               sentiment + buzzer ───┘
 ```
 
 | Stage | Module | What it does |
@@ -24,6 +24,7 @@ archives ─▶ backfill   bodies    to Indonesian  events     drafts        (pu
 | 1c. YouTube | `jejak/youtube_ingest.py` | Search news videos, pull transcripts as additional articles. |
 | 1.5 Fetch | `jejak/fetch.py` | Backfill full article text (trafilatura, stdlib fallback). Fail-soft, rate-limited. |
 | 1.7 Translate | `jejak/translate.py` | Translate non-Indonesian sources to Indonesian; original kept in `body_original`. |
+| 1.8 Mentions | `jejak/mentions.py` | Mine `<office> <name>` mentions out of the coverage; promote anyone named by 3+ distinct outlets to a tracked figure. This is what grows the roster — records can only be written about figures it holds. |
 | 2. Cluster | `jejak/cluster.py` | Group articles about one activity into a single **event** (embedding similarity + a shared-content-word guard). |
 | 3. Summarize | `jejak/summarize.py` | Neutral, attributed summary grounded in the event's articles, with `[Sumber N]` citation markers. |
 | 4. Sentiment | `jejak/sentiment.py` | Public reaction per event: YouTube and Reddit comments classified by stance, aggregated. |
@@ -70,7 +71,7 @@ ollama serve &                      # summarize / translate / sentiment need thi
 
 python -m jejak.cli init            # create jejak.db
 # edit figures.toml — add the officials to track (with aliases)
-python -m jejak.cli run             # ingest + fetch + translate + cluster + summarize + sentiment + buzzer
+python -m jejak.cli run             # ingest + fetch + translate + mentions + cluster + summarize + sentiment + buzzer
 ```
 
 Configuration is TOML: `sources.toml` (news feeds) and `figures.toml` (tracked people).
@@ -101,6 +102,7 @@ python scripts/sync_to_neon.py --pull
 python -m jejak.cli ingest
 python -m jejak.cli backfill --days 6
 python -m jejak.cli fetch --limit 200
+python -m jejak.cli mentions --limit 1000
 python -m jejak.cli cluster
 python -m jejak.cli translate
 python -m jejak.cli summarize
