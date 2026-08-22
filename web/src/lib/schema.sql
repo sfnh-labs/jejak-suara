@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS events (
     kind        TEXT NOT NULL DEFAULT 'record',
     title       TEXT,
     event_date  TEXT,
+    -- Newest article in the cluster. event_date says when the event happened
+    -- and never moves; coverage keeps arriving for days afterwards, so the
+    -- feed sorts by this instead and an event still being written about stays
+    -- near the top.
+    last_seen   TEXT,
     event_type  TEXT DEFAULT 'other',
     scope       TEXT,
     impact      TEXT,

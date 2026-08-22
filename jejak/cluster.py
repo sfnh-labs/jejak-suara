@@ -26,6 +26,13 @@ _STOP = {
 _TOKEN_RE = re.compile(r"[a-zA-ZÀ-ɏ]+")
 
 WINDOW_DAYS = 7
+# Records get a tighter window than peristiwa. A tracked figure acts most days,
+# and over seven days their coverage is similar enough — same person, same
+# office, same beat vocabulary — that a fresh action kept landing in a week-old
+# cluster instead of starting its own: for four straight days every attributed
+# article merged and not one new record was created. A national event's coverage
+# genuinely runs for a week; one person's Tuesday is not their Saturday.
+RECORD_WINDOW_DAYS = 3
 THRESHOLD = 0.58
 MIN_SHARED = 3
 
@@ -131,7 +138,8 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
     """
     stats = {"clustered": 0, "new_events": 0, "promoted": 0, "pruned": 0}
     now_iso = datetime.now(timezone.utc).isoformat()
-    window = timedelta(days=WINDOW_DAYS)
+    peristiwa_window = timedelta(days=WINDOW_DAYS)
+    record_window = timedelta(days=RECORD_WINDOW_DAYS)
 
     rows = conn.execute(
         """SELECT id, figure_id, title, summary, body, published_at
@@ -186,6 +194,7 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
         is_general = art["figure_id"] is None
         threshold = PERISTIWA_THRESHOLD if is_general else THRESHOLD
         min_shared = PERISTIWA_MIN_SHARED if is_general else MIN_SHARED
+        window = peristiwa_window if is_general else record_window
 
         match_id = None
         best = threshold
@@ -221,11 +230,13 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
             is_peristiwa = art["figure_id"] is None
             cur = conn.execute(
                 "INSERT INTO events "
-                "(figure_id, kind, title, event_date, event_type, status, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(figure_id, kind, title, event_date, last_seen, event_type, "
+                " status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (art["figure_id"],
                  "peristiwa" if is_peristiwa else "record",
-                 art["title"], art["published_at"] or now_iso, etype,
+                 art["title"], art["published_at"] or now_iso,
+                 art["published_at"] or now_iso, etype,
                  "candidate" if is_peristiwa else "new",
                  now_iso),
             )
@@ -250,7 +261,14 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
                         "SELECT title, body FROM articles WHERE event_id = ?", (eid,)
                     ).fetchall()] + [txt]
                     etype = _infer_event_type(art_texts)
-                    conn.execute("UPDATE events SET event_type = ? WHERE id = ?", (etype, eid))
+                    # event_date stays put — it is when the thing happened —
+                    # while last_seen follows the coverage, so an event that is
+                    # still being written about resurfaces on the timeline.
+                    conn.execute(
+                        "UPDATE events SET event_type = ?, "
+                        "last_seen = max(coalesce(last_seen, ''), ?) WHERE id = ?",
+                        (etype, art["published_at"] or now_iso, eid),
+                    )
                     _reopen_if_summarized(conn, eid)
                     break
 

@@ -89,8 +89,8 @@ TABLES: tuple[Table, ...] = (
     # would undo it on the next crawl; leaving it out means push and pull both
     # skip it and Postgres stays its only home. The web app writes it directly.
     Table("events", "id", (
-        "id", "figure_id", "kind", "title", "event_date", "event_type",
-        "scope", "impact", "status", "created_at",
+        "id", "figure_id", "kind", "title", "event_date", "last_seen",
+        "event_type", "scope", "impact", "status", "created_at",
     ), serial=True),
     Table("event_figures", "event_id", ("event_id", "figure_id"),
           conflict=("event_id", "figure_id")),
@@ -147,6 +147,15 @@ MIGRATIONS = (
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS scope TEXT",
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS event_type TEXT DEFAULT 'other'",
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS impact TEXT",
+    # Newest article in the cluster — what the feed sorts by, so that an event
+    # still gathering coverage resurfaces instead of staying frozen at the date
+    # it happened. Backfilled from articles for rows synced before it existed.
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS last_seen TEXT",
+    """UPDATE events SET last_seen = COALESCE(
+           (SELECT max(published_at) FROM articles WHERE event_id = events.id),
+           event_date)
+       WHERE last_seen IS NULL""",
+    "CREATE INDEX IF NOT EXISTS idx_events_last_seen ON events(last_seen)",
     # Curator verdict. Postgres-only on purpose — see the events Table entry.
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS curated TEXT",
     "CREATE INDEX IF NOT EXISTS idx_events_curated ON events(curated)",
@@ -222,7 +231,12 @@ def restore_curation(pg, saved: list[tuple[int, str]]) -> int:
 
 
 def sync_figures(pg) -> int:
-    """Mirror figures.toml into Postgres so the web app stops hardcoding names."""
+    """Mirror the tracked roster into Postgres so the web app has real names.
+
+    Reads the roster from SQLite, not from figures.toml: the TOML only seeds it,
+    and most figures arrive from the mentions stage, which promotes anyone named
+    by enough distinct outlets.
+    """
     figures = load_figures()
     rows = [
         (f.id, f.name, f.role, json.dumps(f.aliases, ensure_ascii=False), True)

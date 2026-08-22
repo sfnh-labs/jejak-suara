@@ -89,6 +89,11 @@ export interface EventRecord {
   figure_id: string;
   figure_name: string;
   event_date: string | null;
+  /**
+   * Newest article in the cluster. `event_date` is when it happened; this is
+   * how recently it was still being reported, and what the feed sorts by.
+   */
+  last_seen: string | null;
   title: string | null;
   event_type: string | null;
   /** Null until the summarize stage reaches it — the card renders without it. */
@@ -117,6 +122,11 @@ export interface FigureSummary extends Figure {
 export interface Peristiwa {
   event_id: number;
   event_date: string | null;
+  /**
+   * Newest article in the cluster. `event_date` is when it happened; this is
+   * how recently it was still being reported, and what the feed sorts by.
+   */
+  last_seen: string | null;
   title: string | null;
   event_type: string | null;
   scope: string | null;
