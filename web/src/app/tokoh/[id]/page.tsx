@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import FigurePortrait from "@/components/FigurePortrait";
 import Nav from "@/components/Nav";
 import RecordCard from "@/components/RecordCard";
 import SentimentTrack from "@/components/SentimentTrack";
 import { getFigure, getFigureEvents } from "@/lib/data";
 import { getCv } from "@/lib/cv";
+import { figureImage } from "@/lib/tokoh-images";
 import {
-  hatch,
-  initials,
   monthGroupLabel,
   sentimentLabel,
   toDisplayScore,
@@ -53,22 +53,22 @@ export default async function HalamanTokoh({
 
         <div className="tokoh-grid">
           <aside className="tokoh-profile">
-            <div
-              aria-hidden
-              style={{
-                width: 108,
-                height: 132,
-                background: hatch(6),
-                border: "1px solid #16130f",
-                display: "flex",
-                alignItems: "flex-end",
-                justifyContent: "center",
-                marginBottom: 16,
-              }}
-            >
-              <span style={{ fontFamily: "var(--font-serif)", fontSize: 40, color: "#b9ab93", paddingBottom: 8 }}>
-                {initials(figure.name)}
-              </span>
+            <div style={{ marginBottom: 16 }}>
+              <FigurePortrait
+                figureId={id}
+                name={figure.name}
+                width={108}
+                height={132}
+                fontSize={40}
+                align="flex-end"
+              />
+              {figureImage(id) ? (
+                // Said out loud, where the reader can see it: this is a drawing
+                // of a real person, not a photograph of one.
+                <div style={{ fontSize: 11, color: "#7a7264", marginTop: 5 }}>
+                  Ilustrasi
+                </div>
+              ) : null}
             </div>
             <div className="eyebrow" style={{ marginBottom: 6 }}>{figure.role}</div>
             <h1
