@@ -206,7 +206,10 @@ def _extract_category(text: str) -> str | None:
     m = _KATEGORI_RE.search(text)
     if not m:
         return None
-    cat = _TITLE_NOISE_RE.sub("", m.group(1))
+    # The model sometimes writes the separator onto the category line itself
+    # ("KATEGORI: Penyelidikan---"), which otherwise ends up as the stored
+    # event_type and prints on the chip verbatim.
+    cat = _TITLE_NOISE_RE.sub("", m.group(1).rstrip("-–— "))
     if not cat or "<" in cat or ">" in cat or len(cat) > 40:
         return None
     # A single tag, not a list of candidates the model couldn't choose between
@@ -269,6 +272,14 @@ def _split_title(text: str) -> tuple[str | None, str]:
     divider = _SEPARATOR_RE.search(body)
     if divider:
         body = body[divider.end():]
+    # The divider is what normally cuts the header off. When the model omits it,
+    # or writes it glued to the category ("KATEGORI: Penyelidikan---"), the cut
+    # above misses and the header line stays at the top of the summary — where
+    # it reads as the first fact about the event. Drop it either way.
+    # (`lstrip("-")` would eat the first bullet's own marker, so the leftover
+    # separator is matched as a whole line instead.)
+    body = _KATEGORI_RE.sub("", body)
+    body = re.sub(r"\A(?:\s*-{3,}\s*$)+", "", body, flags=re.M)
     # A one- or two-word heading ("Menyatakan:") says nothing; the source
     # headline, teaser voice and all, is at least informative. Reject it and let
     # the caller fall back. Angle brackets mean the model echoed the format
