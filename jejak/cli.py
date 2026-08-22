@@ -4,6 +4,7 @@
     python -m jejak.cli ingest               # pull RSS -> articles
     python -m jejak.cli backfill             # walk outlet archives backwards
     python -m jejak.cli fetch                # backfill full article bodies
+    python -m jejak.cli mentions             # discover figures from coverage
     python -m jejak.cli cluster              # articles -> events
     python -m jejak.cli summarize            # grounded drafts for new events
     python -m jejak.cli sentiment            # public-reaction scores for approved events
@@ -14,7 +15,7 @@ Taking an event off the public site is not done here — that is `/kurasi` in th
 deployed web app, which writes `events.curated` straight to Postgres.
     python -m jejak.cli youtube-ingest       # search YouTube + fetch transcripts
     python -m jejak.cli translate            # auto-translate non-ID articles
-    python -m jejak.cli run                  # ingest + backfill + fetch + translate + cluster + summarize [+ sentiment + buzzer]
+    python -m jejak.cli run                  # ingest + backfill + fetch + translate + mentions + cluster + summarize [+ sentiment + buzzer]
 """
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ from datetime import date
 from . import backfill as backfill_mod
 from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
-from . import db, fetch, ingest, sentiment, summarize, timeline as timeline_mod
+from . import db, fetch, ingest, mentions, sentiment, summarize, timeline as timeline_mod
 from . import translate
 from . import youtube_ingest
 
@@ -70,6 +71,14 @@ def main(argv: list[str] | None = None) -> int:
                          help="how many article bodies to fetch (default 50). "
                               "Raise it when backfill is adding history faster "
                               "than the default drains the queue.")
+    p_ment = sub.add_parser("mentions")
+    p_ment.add_argument("--limit", type=int, default=500,
+                        help="how many unscanned articles to mine (default 500)")
+    p_ment.add_argument("--reattribute", action="store_true",
+                        help="also re-run attribution over EVERY article, not "
+                             "just the unclustered ones. Rebuilds affected "
+                             "events and deletes the summaries of any that end "
+                             "up empty — a repair tool, not part of a run.")
     sub.add_parser("cluster")
     sub.add_parser("summarize")
     sub.add_parser("sentiment")
@@ -117,6 +126,19 @@ def main(argv: list[str] | None = None) -> int:
             print("translate:", translate.translate_articles(conn))
         if args.cmd == "run" and os.environ.get("YOUTUBE_API_KEY"):
             print("youtube-ingest:", youtube_ingest.ingest_youtube(conn))
+        if args.cmd in ("mentions", "run"):
+            # Discovery of new figures from the coverage itself. Runs before
+            # clustering so a figure promoted this run can own articles that
+            # are about to be clustered — attribution happened at ingest time,
+            # under the older roster, so the unclustered ones are re-checked.
+            stats = mentions.record_mentions(
+                conn, limit=getattr(args, "limit", 500))
+            print("mentions:", stats)
+            if stats.get("promoted") or getattr(args, "reattribute", False):
+                print("reattribute:", ingest.reattribute(
+                    conn,
+                    only_unclustered=not getattr(args, "reattribute", False),
+                ))
         if args.cmd in ("cluster", "run"):
             print("cluster:", cluster_mod.cluster(conn))
         if args.cmd in ("summarize", "run"):

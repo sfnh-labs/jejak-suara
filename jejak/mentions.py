@@ -26,6 +26,9 @@ from datetime import datetime, timezone
 TITLES: tuple[str, ...] = (
     # government / state
     "Presiden", "Wakil Presiden", "Menteri", "Wakil Menteri", "Menko",
+    # Longest-first matching makes this win over bare "Menteri", so a foreign
+    # premier keeps their actual office instead of reading as a minister.
+    "Perdana Menteri",
     "Menkeu", "Mendagri", "Menlu", "Menhan", "Menkes", "Mendikbud",
     "Menkumham", "Mensesneg", "Sekjen", "Dirjen", "Direktur Jenderal",
     "Gubernur", "Wakil Gubernur", "Bupati", "Wakil Bupati", "Wali Kota",
@@ -53,7 +56,19 @@ TITLES: tuple[str, ...] = (
     "Jubir", "Waketum", "Wamen", "Wagub", "Wabup", "Wawali", "Wakapolri",
     "Wakapolda", "Kapolsek", "Kabareskrim", "Kadiv", "Kadis", "Kabid",
     "Kabag", "Kasat", "Karo", "Dirut", "Wadir", "Plt", "Plh",
+    "Menpora", "Mensos", "Menag", "Mentan", "Menhub", "Menperin", "Mendag",
+    "Menaker", "Menkominfo", "Menkomdigi", "Menkop", "Menpan", "Menbud",
+    "Seskab", "Kasetpres", "Kasi", "Kanit", "Kasubdit", "Kabidhumas",
+    "Kadispenad", "Kastaf", "Aspri",
 )
+
+# Honorifics written in front of a name. Not offices — they say nothing about
+# who someone is — but they glue onto the front of a captured name and mint
+# "Pak Aburizal Bakrie" as a separate person from Aburizal Bakrie.
+_HONORIFICS = {
+    "pak", "bapak", "bu", "ibu", "prof", "dr", "drs", "ir", "h", "hj", "kh",
+    "tuan", "nyonya", "mas", "mbak", "bang", "kang",
+}
 
 # Longest first so multi-word titles are not shadowed by their prefix.
 _TITLE_ALT = "|".join(
@@ -87,6 +102,14 @@ _PLACES = {
     "bogor", "surakarta", "solo", "malang", "padang", "pekanbaru", "manado",
     "denpasar", "samarinda", "banjarmasin", "pontianak", "jayapura", "kota",
     "kabupaten", "provinsi", "raya",
+    # A foreign office is qualified by its country the same way a local one is
+    # by its province: "Perdana Menteri India Narendra Modi" is Narendra Modi.
+    "india", "china", "tiongkok", "amerika", "serikat", "rusia", "jepang",
+    "korea", "australia", "malaysia", "singapura", "filipina", "thailand",
+    "vietnam", "kamboja", "myanmar", "brunei", "palestina", "israel", "arab",
+    "saudi", "qatar", "turki", "iran", "irak", "mesir", "inggris", "prancis",
+    "jerman", "belanda", "italia", "spanyol", "brasil", "kanada", "meksiko",
+    "pakistan", "bangladesh", "afrika", "uni", "eropa", "emirat",
 }
 
 # Domain words that extend a role ("Menteri Keuangan", "Dosen Teknik").
@@ -104,6 +127,17 @@ _ROLE_WORDS = {
     "pemberdayaan", "perempuan", "perlindungan", "anak", "imigrasi",
     "pemasyarakatan", "reformasi", "birokrasi", "aparatur", "sipil",
     "sekretariat", "kabinet", "kepala", "wakil", "muda", "madya",
+    # Coordinating-ministry domains. Without these, "Menko Perekonomian
+    # Airlangga Hartarto" promoted a figure called "Perekonomian Airlangga".
+    "perekonomian", "kemaritiman", "maritim", "polhukam", "pembangunan",
+    "manusia", "kebudayaan", "pangan", "infrastruktur", "kewilayahan",
+    "penanggulangan", "bencana", "keamanan", "intelijen", "siber", "sandi",
+    "agraria", "tata", "ruang", "pertanahan", "muda", "kamar", "pidana",
+    "perdata", "militer", "khusus", "tinggi", "angkatan", "darat", "laut",
+    "udara", "pengawas", "penerangan", "logistik", "personel", "teritorial",
+    "polkam", "ketenagakerjaan", "pelindungan", "pekerja", "migran",
+    "kepresidenan", "penyidikan", "tindak", "humas", "penindakan",
+    "pencegahan", "pembinaan", "pelayanan", "pengelolaan",
     "universitas", "institut", "politeknik", "akademi", "fakultas", "sekolah",
     "yayasan", "perkumpulan", "asosiasi", "ikatan", "persatuan",
 }
@@ -136,7 +170,23 @@ _NOT_A_NAME = {
     "senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu",
     "januari", "februari", "maret", "april", "mei", "juni", "juli",
     "agustus", "september", "oktober", "november", "desember",
+    # Article furniture and legal-citation words. "Nomor" reached promotion.
+    "nomor", "pasal", "ayat", "tahun", "pukul", "sumber", "foto", "video",
+    "baca", "editor", "reporter", "penulis", "catatan", "sebelumnya",
+    "selanjutnya", "adapun", "sementara", "kemudian", "berikut",
+    # Institutions and event furniture that sit next to a title and get
+    # mistaken for the person holding it.
+    "pemerintah", "panitia", "kabinet", "merah", "putih", "cup", "senior",
+    "director", "sector", "polres", "polda", "polri", "tni", "bulog",
+    "kementerian", "lembaga", "sekretariat", "rakernas", "kongres",
+    "musyawarah", "rapat", "acara", "turnamen", "liga", "piala",
 }
+
+# Indonesian nominalisation: ke-…-an and pe(N)-…-an turn a verb or a noun into
+# an abstract one ("Ketenagakerjaan", "Kepresidenan", "Pelindungan"). Those are
+# always part of an office name, never a personal name, and there are far too
+# many to list one by one.
+_NOMINALISATION_RE = re.compile(r"^(?:Ke|Pe|Per|Pen|Peng|Pem)[a-z]+an$")
 
 # Tokens between title and name that name an organisation rather than a person.
 _ORG_HINT_RE = re.compile(r"^[A-Z]{2,}$")
@@ -158,14 +208,73 @@ def slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", plain.lower()).strip("-")
 
 
+# A sentence boundary inside a captured name. The titled pattern cannot cross
+# one, but the speaker and attribution patterns allow "." inside a word so that
+# initials survive ("M. Qodari") — which also let "kata Prabowo Subianto.
+# Sebelumnya" through as a three-word name.
+_ABBREV_RE = re.compile(r"^[A-Z][a-z]?\.$")
+
+
+def _cut_at_sentence_end(name: str) -> str:
+    """Drop everything after a word that ends a sentence, initials excepted."""
+    kept: list[str] = []
+    for word in name.split():
+        if word.endswith(".") and not _ABBREV_RE.match(word):
+            kept.append(word.rstrip("."))
+            break
+        kept.append(word)
+    return " ".join(kept)
+
+
+def _drop_glued_tail(name: str) -> str:
+    """Cut a word the copy glued onto a name with a hyphen.
+
+    Wire copy runs words together — "Gibran Rakabuming Raka-adalah" — and the
+    lowercase half is never part of the name. A hyphen between two capitals is
+    left alone: those are real ("Jusuf Kalla-Ma'ruf" style double surnames).
+    """
+    return " ".join(re.sub(r"-[a-z].*$", "", word) for word in name.split())
+
+
+def _strip_leading_title(name: str) -> str:
+    """Remove an office written as part of the name.
+
+    "kata Presiden Prabowo Subianto" is Prabowo Subianto with his office
+    attached, not a different person — and promoting it would put a second
+    Prabowo on the site.
+    """
+    words = name.split()
+    changed = True
+    while changed and words:
+        changed = False
+        # Multi-word offices first ("Wali Kota Padang"), then single words.
+        for size in (3, 2):
+            if len(words) > size and " ".join(words[:size]) in TITLES:
+                words, changed = words[size:], True
+                break
+        if changed:
+            continue
+        if (words[0] in TITLES
+                or words[0].lower() in _ROLE_WORDS
+                or words[0].lower().rstrip(".") in _HONORIFICS):
+            words, changed = words[1:], True
+    return " ".join(words)
+
+
 def _plausible_name(name: str) -> bool:
     words = name.split()
     if not words:
         return False
     if any(w.lower() in _NOT_A_NAME for w in words):
         return False
+    if any(_NOMINALISATION_RE.match(w) for w in words):
+        return False
     # All-caps is an organisation, not a person: "PSI", "PBNU", "KPK".
     if all(w.isupper() for w in words):
+        return False
+    # A single letter is an initial, not a name: "I Dave Laksono" and "Eko B"
+    # are both a real name with a stray token attached.
+    if any(len(w.rstrip(".")) == 1 for w in words):
         return False
     # A lone two-letter capital is an acronym, not a person.
     return not (len(words) == 1 and len(words[0]) <= 2)
@@ -191,6 +300,21 @@ NO_ROLE = ""
 # — which is what attribution needs — but must not create a person: "Pengurus
 # Besar Nahdlatul Ulama" is an organisation, not someone called Nahdlatul Ulama.
 _COLLECTIVE_TITLES = {"Pimpinan", "Pengurus", "Sekretariat", "Komisi", "Anggota"}
+
+
+def _is_title_case(sentence: str) -> bool:
+    """A headline pasted into the body, where capitalisation means nothing.
+
+    Every rule here reads a capital letter as "proper noun". In Title Case that
+    is false for every word, so "Ahmad Muzani Tutup Rakernas Gerindra" yields a
+    person called "Ahmad Muzani Tutup". Outlets repeat the headline inside the
+    RSS lead often enough that dropping the title field was not sufficient.
+    """
+    words = [w for w in sentence.split() if w[:1].isalpha() and len(w) > 3]
+    if len(words) < 4:
+        return False
+    capitalised = sum(1 for w in words if w[0].isupper())
+    return capitalised / len(words) >= 0.8
 
 
 def first_title_position(text: str) -> int | None:
@@ -224,9 +348,10 @@ def extract(text: str) -> list[Mention]:
     if not text:
         return []
     found: dict[tuple[str, str], Mention] = {}
+    sentences = [s for s in _SENTENCE_RE.split(text) if not _is_title_case(s)]
     matches = (
         m
-        for sentence in _SENTENCE_RE.split(text)
+        for sentence in sentences
         for m in _MENTION_RE.finditer(sentence)
     )
     for m in matches:
@@ -256,7 +381,7 @@ def extract(text: str) -> list[Mention]:
         if not name_words:
             continue
 
-        name = " ".join(name_words)
+        name = _strip_leading_title(_drop_glued_tail(" ".join(name_words)))
         if not _plausible_name(name):
             continue
         role = " ".join([m.group("title"), *role_words])
@@ -268,8 +393,10 @@ def extract(text: str) -> list[Mention]:
     # with an office in this text, so a stated role always wins.
     titled = {slug for slug, _ in found}
     for pattern in (_SPEAKER_RE, _ATTRIBUTION_RE):
-        for m in pattern.finditer(text):
+        for m in (m for s in sentences for m in pattern.finditer(s)):
             name = " ".join(m.group("name").split())
+            name = _strip_leading_title(
+                _drop_glued_tail(_cut_at_sentence_end(name)))
             if not _plausible_name(name):
                 continue
             slug = slugify(name)
@@ -343,6 +470,56 @@ def merge_aliases(conn: sqlite3.Connection) -> int:
 PROMOTE_MIN_OUTLETS = 3
 
 
+def _tracked_terms(conn: sqlite3.Connection) -> dict[str, str]:
+    """Every name a tracked figure answers to, lowercased -> figure id."""
+    terms: dict[str, str] = {}
+    for row in conn.execute("SELECT id, name, aliases FROM figures WHERE active = 1"):
+        names = [row["name"]]
+        try:
+            names += json.loads(row["aliases"]) if row["aliases"] else []
+        except (TypeError, ValueError):
+            pass
+        for term in names:
+            if term:
+                terms[term.lower()] = row["id"]
+    return terms
+
+
+def _same_as_tracked(name: str, tracked: dict[str, str]) -> str | None:
+    """The tracked figure this candidate is another spelling of, if any.
+
+    Containment in either direction: "Presiden Prabowo Subianto" contains a
+    tracked name, and "Prabowo" is contained by one. Word-boundary aware, so
+    "Budi" does not match "Budiman".
+    """
+    words = name.lower().split()
+    for term, figure_id in tracked.items():
+        term_words = term.split()
+        if not term_words:
+            continue
+        shorter, longer = sorted((words, term_words), key=len)
+        for i in range(len(longer) - len(shorter) + 1):
+            if longer[i:i + len(shorter)] == shorter:
+                return figure_id
+    return None
+
+
+def _add_alias(conn: sqlite3.Connection, figure_id: str, alias: str) -> None:
+    row = conn.execute("SELECT aliases FROM figures WHERE id = ?",
+                       (figure_id,)).fetchone()
+    if row is None:
+        return
+    try:
+        aliases = json.loads(row["aliases"]) if row["aliases"] else []
+    except (TypeError, ValueError):
+        aliases = []
+    if any(a.lower() == alias.lower() for a in aliases):
+        return
+    aliases.append(alias)
+    conn.execute("UPDATE figures SET aliases = ? WHERE id = ?",
+                 (json.dumps(aliases, ensure_ascii=False), figure_id))
+
+
 def promote_figures(conn: sqlite3.Connection) -> dict[str, int]:
     """Turn well-corroborated candidates into tracked figures.
 
@@ -358,8 +535,14 @@ def promote_figures(conn: sqlite3.Connection) -> dict[str, int]:
     if conn.execute("SELECT count(*) FROM figures").fetchone()[0] == 0:
         seed_figures(conn)
 
-    stats = {"promoted": 0, "updated": 0}
+    stats = {"promoted": 0, "updated": 0, "folded": 0}
     now = datetime.now(timezone.utc).isoformat()
+
+    # Everything already tracked, by every name it answers to. A candidate that
+    # is one of these written longer or shorter is the same person, and
+    # promoting it would put a second copy of them on the site — "Presiden
+    # Prabowo Subianto" next to "Prabowo Subianto".
+    tracked = _tracked_terms(conn)
 
     rows = conn.execute(
         f"""SELECT m.slug, fc.name, count(DISTINCT m.source) AS outlets
@@ -371,6 +554,26 @@ def promote_figures(conn: sqlite3.Connection) -> dict[str, int]:
 
     for row in rows:
         slug, name = row["slug"], row["name"]
+        # A bare first name is not enough to put someone on the site.
+        # Sentence case still capitalises the first word of every sentence,
+        # and quotes get attributed to "Anton" or "Arum" often enough that
+        # mononyms sailed past the outlet test. Someone genuinely covered
+        # under one name still reaches the roster the other way: as an alias
+        # folded into their full name by merge_aliases.
+        if len(name.split()) < 2:
+            continue
+        owner = _same_as_tracked(name, tracked)
+        if owner is not None:
+            # Keep it as an alias of the figure it belongs to — that widens
+            # attribution — and stop reconsidering the candidate.
+            _add_alias(conn, owner, name)
+            conn.execute(
+                "UPDATE figure_candidates SET status = 'tracked', promoted_at = ? "
+                "WHERE slug = ? AND status != 'tracked'",
+                (now, slug),
+            )
+            stats["folded"] += 1
+            continue
         # Most frequently reported office wins; empty roles are ignored so a
         # single titled mention beats many untitled ones.
         role_row = conn.execute(
@@ -433,8 +636,15 @@ def record_mentions(conn: sqlite3.Connection, limit: int = 500) -> dict[str, int
 
     for art in rows:
         stats["scanned"] += 1
+        # Deliberately not the headline. Indonesian headlines are Title Case,
+        # where every word is capitalised and the capitalised-run rule cannot
+        # tell a surname from a verb: "Ahmad Muzani Tutup Rakernas" produced
+        # a person called "Ahmad Muzani Tutup". The lead and body are
+        # sentence case, so a capital there really does mark a proper noun.
+        # Attribution still reads the headline — a different question (who is
+        # this article about), answered against names already known.
         text = "\n".join(
-            part for part in (art["title"], art["summary"], art["body"]) if part
+            part for part in (art["summary"], art["body"]) if part
         )
         for mention in extract(text):
             existing = conn.execute(

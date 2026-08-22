@@ -83,17 +83,27 @@ def _attribute(text: str, figures: list[Figure]) -> Figure | None:
 
 
 def reattribute(conn: sqlite3.Connection,
-                figures: list[Figure] | None = None) -> dict[str, int]:
+                figures: list[Figure] | None = None,
+                only_unclustered: bool = False) -> dict[str, int]:
     """Re-apply subject attribution to articles already stored.
 
     Needed whenever the attribution rule or the tracked roster changes. An
     article that changes hands is unclustered so the next cluster run rebuilds
     the affected events from the corrected ownership.
+
+    `only_unclustered` restricts the pass to articles that have not been
+    clustered yet. That is the safe form, and the one the pipeline runs after
+    promoting newly discovered figures: a freshly promoted figure should own
+    the articles about to be clustered, but rebuilding events that already
+    exist would delete the summaries written for them.
     """
-    figures = figures or load_figures()
+    figures = figures or load_figures(conn)
     stats = {"checked": 0, "changed": 0, "events_removed": 0}
 
-    for art in conn.execute("SELECT id, figure_id, title FROM articles").fetchall():
+    query = "SELECT id, figure_id, title FROM articles"
+    if only_unclustered:
+        query += " WHERE event_id IS NULL"
+    for art in conn.execute(query).fetchall():
         stats["checked"] += 1
         subject = _attribute(art["title"] or "", figures)
         want = subject.id if subject else None
@@ -103,6 +113,12 @@ def reattribute(conn: sqlite3.Connection,
                 (want, art["id"]),
             )
             stats["changed"] += 1
+
+    # Nothing can be orphaned by the unclustered-only pass: those articles hold
+    # no event to empty. Skipping the sweep keeps that mode purely additive.
+    if only_unclustered:
+        conn.commit()
+        return stats
 
     orphans = [r["id"] for r in conn.execute(
         """SELECT id FROM events

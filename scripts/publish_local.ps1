@@ -94,6 +94,14 @@ try {
     Log "stage: fetch"
     python -m jejak.cli fetch --limit 200 2>&1 | Tee-Object -FilePath $LogFile -Append
 
+    # Figure discovery. The roster is not a hand-kept list: this mines the
+    # articles fetched above for "<office> <name>" mentions and promotes anyone
+    # named by enough distinct outlets, which is the only thing that grows the
+    # number of figures records can be written about. Runs before clustering so
+    # a figure promoted this cycle owns the articles clustered this cycle.
+    Log "stage: mentions"
+    python -m jejak.cli mentions --limit 1000 2>&1 | Tee-Object -FilePath $LogFile -Append
+
     foreach ($stage in @("cluster", "translate", "summarize",
                          "sentiment", "buzzer")) {
         Log "stage: $stage"
