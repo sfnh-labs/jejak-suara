@@ -121,15 +121,36 @@
     box-shadow: 0 0 0 4px #f6f2e9;
     z-index: 1;
   }
+  /* Same dateline as the figure timeline: a pill punching through the rail,
+     printed only where the day changes. It sits in the 64px gutter between
+     the two columns, so it never lands on a card. */
+  .rail-date {
+    position: absolute;
+    left: 33.3333%;
+    top: -1px;
+    transform: translateX(-50%);
+    z-index: 2;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 4px 12px;
+    border-radius: 99px;
+    white-space: nowrap;
+    box-shadow: 0 0 0 4px #f6f2e9;
+  }
 
   /* Below 760px the two columns cannot coexist: the rail moves to the far left
      and both kinds stack in one stream. */
   @media (max-width: 760px) {
     .rail::before { left: 0; }
-    .rail-row { display: block; padding-left: 30px; }
+    /* The pill is ~60px wide, so stacked rows need the same clearance the
+       timeline card gives it. */
+    .rail-row { display: block; padding-left: 74px; }
     .rail-row > .rail-event,
     .rail-row > .rail-record { padding-left: 0; padding-right: 0; }
     .rail-dot { left: 0; transform: none; box-shadow: 0 0 0 3px #f6f2e9; }
+    .rail-date { left: -14px; transform: none; }
   }
   .eyebrow {
     font-size: 11px;

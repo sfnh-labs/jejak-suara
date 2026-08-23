@@ -5,6 +5,7 @@ import FigurePortrait from "@/components/FigurePortrait";
 import RecordCard from "@/components/RecordCard";
 import { getFeed, getFigures, getSentimentHistory } from "@/lib/data";
 import {
+  dayBadge,
   formatCount,
   formatDate,
   monthGroupLabel,
@@ -144,18 +145,28 @@ export default async function Beranda() {
                   // cards alternate sides, so a repeated dateline is repeated
                   // to the reader. Show it only where the day changes.
                   const showDate = i === 0 || feedDayKey(item) !== feedDayKey(rows[i - 1]);
+                  // The pill carries the kind's colour, so replacing the dot
+                  // with it does not cost the reader that signal.
+                  const tone = item.kind === "peristiwa" ? "#8b2e1f" : "#6b645b";
+                  const marker = showDate ? (
+                    <span className="rail-date" style={{ background: tone }}>
+                      {dayBadge(item.kind === "peristiwa" ? item.peristiwa.event_date : item.record.event_date)}
+                    </span>
+                  ) : (
+                    <span className="rail-dot" style={{ background: tone }} aria-hidden />
+                  );
                   return item.kind === "peristiwa" ? (
                     <div className="rail-row" key={`p-${item.peristiwa.event_id}`}>
-                      <span className="rail-dot" style={{ background: "#8b2e1f" }} aria-hidden />
+                      {marker}
                       <div className="rail-event">
-                        <EventCard peristiwa={item.peristiwa} showDate={showDate} />
+                        <EventCard peristiwa={item.peristiwa} showDate={false} />
                       </div>
                     </div>
                   ) : (
                     <div className="rail-row" key={`r-${item.record.event_id}`}>
-                      <span className="rail-dot" style={{ background: "#6b645b" }} aria-hidden />
+                      {marker}
                       <div className="rail-record">
-                        <RecordCard record={item.record} showFigure bare showDate={showDate} />
+                        <RecordCard record={item.record} showFigure bare showDate={false} />
                       </div>
                     </div>
                   );
