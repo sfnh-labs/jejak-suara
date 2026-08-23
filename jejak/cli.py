@@ -79,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
                              "just the unclustered ones. Rebuilds affected "
                              "events and deletes the summaries of any that end "
                              "up empty — a repair tool, not part of a run.")
+    p_ment.add_argument("--gains-only", action="store_true",
+                        help="with --reattribute: hand history to newly "
+                             "discovered figures, but leave an article whose "
+                             "owner the current rule no longer claims where it "
+                             "is. Adds records without taking published ones "
+                             "apart.")
     sub.add_parser("cluster")
     sub.add_parser("summarize")
     sub.add_parser("sentiment")
@@ -138,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("reattribute:", ingest.reattribute(
                     conn,
                     only_unclustered=not getattr(args, "reattribute", False),
+                    gains_only=getattr(args, "gains_only", False),
                 ))
         if args.cmd in ("cluster", "run"):
             print("cluster:", cluster_mod.cluster(conn))

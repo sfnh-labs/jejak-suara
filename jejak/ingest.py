@@ -84,7 +84,8 @@ def _attribute(text: str, figures: list[Figure]) -> Figure | None:
 
 def reattribute(conn: sqlite3.Connection,
                 figures: list[Figure] | None = None,
-                only_unclustered: bool = False) -> dict[str, int]:
+                only_unclustered: bool = False,
+                gains_only: bool = False) -> dict[str, int]:
     """Re-apply subject attribution to articles already stored.
 
     Needed whenever the attribution rule or the tracked roster changes. An
@@ -96,9 +97,17 @@ def reattribute(conn: sqlite3.Connection,
     promoting newly discovered figures: a freshly promoted figure should own
     the articles about to be clustered, but rebuilding events that already
     exist would delete the summaries written for them.
+
+    `gains_only` keeps the articles that would lose their owner where they are.
+    The two things a full pass does are not symmetric: giving history to newly
+    discovered figures adds records, while dropping articles the attribution
+    rule no longer claims takes apart timelines that are already published —
+    on this database, 463 detachments against 105 gains. This mode does the
+    first without the second, so the roster can be applied to history and the
+    consequences of a rule change stay a separate decision.
     """
     figures = figures or load_figures(conn)
-    stats = {"checked": 0, "changed": 0, "events_removed": 0}
+    stats = {"checked": 0, "changed": 0, "kept": 0, "events_removed": 0}
 
     query = "SELECT id, figure_id, title FROM articles"
     if only_unclustered:
@@ -107,6 +116,9 @@ def reattribute(conn: sqlite3.Connection,
         stats["checked"] += 1
         subject = _attribute(art["title"] or "", figures)
         want = subject.id if subject else None
+        if want is None and art["figure_id"] is not None and gains_only:
+            stats["kept"] += 1
+            continue
         if want != art["figure_id"]:
             conn.execute(
                 "UPDATE articles SET figure_id = ?, event_id = NULL WHERE id = ?",
