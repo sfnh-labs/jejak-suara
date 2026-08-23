@@ -44,13 +44,14 @@ const LIVE = (alias: string) =>
  * Corroboration therefore has to be counted from the articles rather than read
  * off the summary, which does not exist yet for a freshly clustered record.
  */
-// The feed is ordered by when an event was last reported, not by when it
-// happened. Clustering keeps adding articles to an event for days and rewrites
-// its summary as it goes, but event_date stays at the first article — so a
-// record whose text changed this morning sorted below untouched older ones and
-// the timeline looked frozen. COALESCE keeps rows synced before the column
-// existed from sorting last.
-const FEED_ORDER = "COALESCE(e.last_seen, e.event_date)";
+// The feed is ordered by when the event happened, which is the date the card
+// prints. Ordering by last_seen (when it was last reported) instead put a
+// still-running story back at the top, but the dateline stayed at event_date —
+// so the visible dates ran 16, 18, 17, 23 Agu down the rail and the feed read
+// as broken. A record that is still being covered now surfaces through the
+// 3-day cluster window in cluster.py, which starts it a new record, rather
+// than through re-sorting an old one; last_seen stays stored and synced.
+const FEED_ORDER = "e.event_date";
 
 const RECORD_SELECT = `
   SELECT e.id                         AS event_id,
@@ -253,12 +254,12 @@ export async function getFeed(limit = 40): Promise<FeedItem[]> {
   return [
     ...records.map((record) => ({
       kind: "record" as const,
-      date: record.last_seen ?? record.event_date,
+      date: record.event_date,
       record,
     })),
     ...peristiwa.map((p) => ({
       kind: "peristiwa" as const,
-      date: p.last_seen ?? p.event_date,
+      date: p.event_date,
       peristiwa: p,
     })),
   ]
