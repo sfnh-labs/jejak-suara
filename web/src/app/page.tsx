@@ -37,6 +37,13 @@ const TREND_MARK: Record<Trend, { glyph: string; color: string; label: string }>
   flat: { glyph: "▬", color: "#9b9285", label: "stabil" },
 };
 
+/** The day a feed card *shows*, which is the event's own date — not the
+ *  last_seen the feed is sorted by. */
+function feedDayKey(item: FeedItem): string {
+  const iso = item.kind === "peristiwa" ? item.peristiwa.event_date : item.record.event_date;
+  return (iso ?? "").slice(0, 10);
+}
+
 export default async function Beranda() {
   const [figures, feed, history] = await Promise.all([
     getFigures(),
@@ -132,23 +139,27 @@ export default async function Beranda() {
                 {month}
               </h2>
               <div className="rail">
-                {rows.map((item) =>
-                  item.kind === "peristiwa" ? (
+                {rows.map((item, i) => {
+                  // The rail is one column of reading order even though the
+                  // cards alternate sides, so a repeated dateline is repeated
+                  // to the reader. Show it only where the day changes.
+                  const showDate = i === 0 || feedDayKey(item) !== feedDayKey(rows[i - 1]);
+                  return item.kind === "peristiwa" ? (
                     <div className="rail-row" key={`p-${item.peristiwa.event_id}`}>
                       <span className="rail-dot" style={{ background: "#8b2e1f" }} aria-hidden />
                       <div className="rail-event">
-                        <EventCard peristiwa={item.peristiwa} />
+                        <EventCard peristiwa={item.peristiwa} showDate={showDate} />
                       </div>
                     </div>
                   ) : (
                     <div className="rail-row" key={`r-${item.record.event_id}`}>
                       <span className="rail-dot" style={{ background: "#6b645b" }} aria-hidden />
                       <div className="rail-record">
-                        <RecordCard record={item.record} showFigure bare />
+                        <RecordCard record={item.record} showFigure bare showDate={showDate} />
                       </div>
                     </div>
-                  )
-                )}
+                  );
+                })}
               </div>
             </section>
           ))
