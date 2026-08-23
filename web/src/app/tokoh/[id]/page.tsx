@@ -7,6 +7,7 @@ import SentimentTrack from "@/components/SentimentTrack";
 import { getFigure, getFigureEvents } from "@/lib/data";
 import { getCv } from "@/lib/cv";
 import {
+  dayBadge,
   monthGroupLabel,
   sentimentLabel,
   toDisplayScore,
@@ -138,15 +139,21 @@ export default async function HalamanTokoh({
                   >
                     {month}
                   </h2>
-                  {rows.map((ev, i) => (
-                    <RecordCard
-                      key={ev.event_id}
-                      record={ev}
-                      // A run of records from the same day is one dateline, not
-                      // one per card: the badge marks where the day changes.
-                      // Groups are per month, so the first row always changes.
-                      showDate={i === 0 || dayKey(ev) !== dayKey(rows[i - 1])}
-                    />
+                  {byDay(rows).map(([day, dayRows]) => (
+                    <div className="day-group" key={day}>
+                      <div className="day-rail" aria-hidden={false}>
+                        <span className="day-pill">{dayBadge(dayRows[0].event_date)}</span>
+                      </div>
+                      {dayRows.map((ev, i) => (
+                        // The day's pill already sits where the first card's
+                        // marker would be; the rest keep a dot as their anchor.
+                        <RecordCard
+                          key={ev.event_id}
+                          record={ev}
+                          marker={i === 0 ? "none" : "dot"}
+                        />
+                      ))}
+                    </div>
                   ))}
                 </section>
               ))
@@ -158,8 +165,16 @@ export default async function HalamanTokoh({
   );
 }
 
-function dayKey(ev: EventRecord): string {
-  return (ev.event_date ?? "").slice(0, 10);
+/** Records split into consecutive same-day runs, in the order given. */
+function byDay(rows: EventRecord[]): [string, EventRecord[]][] {
+  const out: [string, EventRecord[]][] = [];
+  for (const ev of rows) {
+    const key = (ev.event_date ?? "").slice(0, 10);
+    const last = out[out.length - 1];
+    if (last && last[0] === key) last[1].push(ev);
+    else out.push([key, [ev]]);
+  }
+  return out;
 }
 
 function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
