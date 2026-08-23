@@ -26,15 +26,17 @@ export default function RecordCard({
   record,
   showFigure = false,
   showSummary = true,
-  showDate = true,
+  marker = "badge",
   bare = false,
 }: {
   record: EventRecord;
   showFigure?: boolean;
   showSummary?: boolean;
-  /** False for a record that repeats the day above it — the rail keeps a dot
-   *  so the card still has its anchor, but the dateline is not restated. */
-  showDate?: boolean;
+  /** What the card puts on the rail beside it. "badge" is the dateline;
+   *  "dot" is the anchor a card gets when the dateline above already covers
+   *  its day; "none" is for the first card under a sticky day heading, whose
+   *  own pill would otherwise land on top of it. */
+  marker?: "badge" | "dot" | "none";
   bare?: boolean;
 }) {
   const display = toDisplayScore(record.sentiment_score);
@@ -55,14 +57,14 @@ export default function RecordCard({
       }}
     >
       {bare ? (
-        showDate ? (
+        marker === "badge" ? (
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: "#7a7264", marginBottom: 9 }}>
             {dayBadge(record.event_date)}
           </div>
         ) : null
-      ) : (
+      ) : marker === "none" ? null : (
         <div style={{ position: "absolute", left: -14, top: 0 }}>
-          {showDate ? (
+          {marker === "badge" ? (
             <span
               style={{
                 display: "inline-block",
@@ -216,27 +218,9 @@ export default function RecordCard({
         </div>
       </div>
 
-      {/* A single-source record carries no badge. The sources disclosure above
-          already says how many outlets there are, and a warning strip on the
-          most common case read as an accusation against the record itself. */}
-      {record.single_source_flag ? null : (
-        <div style={{ marginBottom: 14 }}>
-          <span
-            style={{
-              display: "inline-block",
-              fontSize: 11,
-              fontWeight: 600,
-              color: "#3d6b4a",
-              background: "#e6efe8",
-              border: "1px solid #b6d0bd",
-              borderRadius: 2,
-              padding: "3px 8px",
-            }}
-          >
-            ✓ Dikuatkan {record.corroboration_count} media
-          </span>
-        </div>
-      )}
+      {/* No corroboration badge either way. The sources disclosure above
+          already names every outlet and counts them, so a strip repeating the
+          count added a verdict to a card that had the evidence on it. */}
 
       {display === null ? null : (
         <>

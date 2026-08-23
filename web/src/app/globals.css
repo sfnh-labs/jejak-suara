@@ -121,15 +121,28 @@
     box-shadow: 0 0 0 4px #f6f2e9;
     z-index: 1;
   }
-  /* Same dateline as the figure timeline: a pill punching through the rail,
-     printed only where the day changes. It sits in the 64px gutter between
-     the two columns, so it never lands on a card. */
-  .rail-date {
+  /* One dateline per day, and it stays with the reader for as long as that
+     day's cards do. The rail column is a zero-width absolute box spanning the
+     whole day group, so the pill inside it can be sticky: it travels down the
+     rail until the next day's group pushes it off. Below the month heading,
+     which is sticky too. */
+  .day-group,
+  .rail-day { position: relative; }
+  .day-rail {
     position: absolute;
-    left: 33.3333%;
-    top: -1px;
-    transform: translateX(-50%);
-    z-index: 2;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    z-index: 4;
+    pointer-events: none;
+  }
+  .day-group > .day-rail { left: -14px; }
+  .rail-day > .day-rail { left: 33.3333%; }
+  .day-pill {
+    position: sticky;
+    top: 100px;
+    display: inline-block;
+    background: #6b645b;
     color: #fff;
     font-size: 11px;
     font-weight: 700;
@@ -139,6 +152,9 @@
     white-space: nowrap;
     box-shadow: 0 0 0 4px #f6f2e9;
   }
+  /* The home rail's line runs between the columns, so its pill straddles it;
+     the figure timeline's line is the card's own left border. */
+  .rail-day > .day-rail > .day-pill { transform: translateX(-50%); }
 
   /* Below 760px the two columns cannot coexist: the rail moves to the far left
      and both kinds stack in one stream. */
@@ -150,7 +166,8 @@
     .rail-row > .rail-event,
     .rail-row > .rail-record { padding-left: 0; padding-right: 0; }
     .rail-dot { left: 0; transform: none; box-shadow: 0 0 0 3px #f6f2e9; }
-    .rail-date { left: -14px; transform: none; }
+    .rail-day > .day-rail { left: -14px; }
+    .rail-day > .day-rail > .day-pill { transform: none; }
   }
   .eyebrow {
     font-size: 11px;

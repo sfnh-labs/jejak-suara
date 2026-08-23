@@ -38,11 +38,21 @@ const TREND_MARK: Record<Trend, { glyph: string; color: string; label: string }>
   flat: { glyph: "▬", color: "#9b9285", label: "stabil" },
 };
 
-/** The day a feed card *shows*, which is the event's own date — not the
- *  last_seen the feed is sorted by. */
-function feedDayKey(item: FeedItem): string {
-  const iso = item.kind === "peristiwa" ? item.peristiwa.event_date : item.record.event_date;
-  return (iso ?? "").slice(0, 10);
+/** The day a feed card *shows*, which is the event's own date. */
+function feedDate(item: FeedItem): string | null {
+  return item.kind === "peristiwa" ? item.peristiwa.event_date : item.record.event_date;
+}
+
+/** Feed items split into consecutive same-day runs, in the order given. */
+function byDay(rows: FeedItem[]): [string, FeedItem[]][] {
+  const out: [string, FeedItem[]][] = [];
+  for (const item of rows) {
+    const key = (feedDate(item) ?? "").slice(0, 10);
+    const last = out[out.length - 1];
+    if (last && last[0] === key) last[1].push(item);
+    else out.push([key, [item]]);
+  }
+  return out;
 }
 
 export default async function Beranda() {
@@ -140,37 +150,33 @@ export default async function Beranda() {
                 {month}
               </h2>
               <div className="rail">
-                {rows.map((item, i) => {
-                  // The rail is one column of reading order even though the
-                  // cards alternate sides, so a repeated dateline is repeated
-                  // to the reader. Show it only where the day changes.
-                  const showDate = i === 0 || feedDayKey(item) !== feedDayKey(rows[i - 1]);
-                  // The pill carries the kind's colour, so replacing the dot
-                  // with it does not cost the reader that signal.
-                  const tone = item.kind === "peristiwa" ? "#8b2e1f" : "#6b645b";
-                  const marker = showDate ? (
-                    <span className="rail-date" style={{ background: tone }}>
-                      {dayBadge(item.kind === "peristiwa" ? item.peristiwa.event_date : item.record.event_date)}
-                    </span>
-                  ) : (
-                    <span className="rail-dot" style={{ background: tone }} aria-hidden />
-                  );
-                  return item.kind === "peristiwa" ? (
-                    <div className="rail-row" key={`p-${item.peristiwa.event_id}`}>
-                      {marker}
-                      <div className="rail-event">
-                        <EventCard peristiwa={item.peristiwa} showDate={false} />
-                      </div>
+                {byDay(rows).map(([day, items]) => (
+                  // One dateline per day, and it rides the rail for as long as
+                  // that day's cards do. The dot each row keeps is what carries
+                  // the kind: maroon peristiwa, grey record.
+                  <div className="rail-day" key={day}>
+                    <div className="day-rail">
+                      <span className="day-pill">{dayBadge(feedDate(items[0]))}</span>
                     </div>
-                  ) : (
-                    <div className="rail-row" key={`r-${item.record.event_id}`}>
-                      {marker}
-                      <div className="rail-record">
-                        <RecordCard record={item.record} showFigure bare showDate={false} />
-                      </div>
-                    </div>
-                  );
-                })}
+                    {items.map((item) =>
+                      item.kind === "peristiwa" ? (
+                        <div className="rail-row" key={`p-${item.peristiwa.event_id}`}>
+                          <span className="rail-dot" style={{ background: "#8b2e1f" }} aria-hidden />
+                          <div className="rail-event">
+                            <EventCard peristiwa={item.peristiwa} showDate={false} />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rail-row" key={`r-${item.record.event_id}`}>
+                          <span className="rail-dot" style={{ background: "#6b645b" }} aria-hidden />
+                          <div className="rail-record">
+                            <RecordCard record={item.record} showFigure bare marker="none" />
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                ))}
               </div>
             </section>
           ))
