@@ -6,7 +6,6 @@ import RecordCard from "@/components/RecordCard";
 import SentimentTrack from "@/components/SentimentTrack";
 import { getFigure, getFigureEvents } from "@/lib/data";
 import { getCv } from "@/lib/cv";
-import { figureImage } from "@/lib/tokoh-images";
 import {
   monthGroupLabel,
   sentimentLabel,
@@ -53,22 +52,15 @@ export default async function HalamanTokoh({
 
         <div className="tokoh-grid">
           <aside className="tokoh-profile">
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 18 }}>
               <FigurePortrait
                 figureId={id}
                 name={figure.name}
-                width={108}
-                height={132}
-                fontSize={40}
+                width={196}
+                height={240}
+                fontSize={64}
                 align="flex-end"
               />
-              {figureImage(id) ? (
-                // Said out loud, where the reader can see it: this is a drawing
-                // of a real person, not a photograph of one.
-                <div style={{ fontSize: 11, color: "#7a7264", marginTop: 5 }}>
-                  Ilustrasi
-                </div>
-              ) : null}
             </div>
             <div className="eyebrow" style={{ marginBottom: 6 }}>{figure.role}</div>
             <h1
@@ -146,8 +138,15 @@ export default async function HalamanTokoh({
                   >
                     {month}
                   </h2>
-                  {rows.map((ev) => (
-                    <RecordCard key={ev.event_id} record={ev} />
+                  {rows.map((ev, i) => (
+                    <RecordCard
+                      key={ev.event_id}
+                      record={ev}
+                      // A run of records from the same day is one dateline, not
+                      // one per card: the badge marks where the day changes.
+                      // Groups are per month, so the first row always changes.
+                      showDate={i === 0 || dayKey(ev) !== dayKey(rows[i - 1])}
+                    />
                   ))}
                 </section>
               ))
@@ -157,6 +156,10 @@ export default async function HalamanTokoh({
       </div>
     </div>
   );
+}
+
+function dayKey(ev: EventRecord): string {
+  return (ev.event_date ?? "").slice(0, 10);
 }
 
 function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {

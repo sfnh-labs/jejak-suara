@@ -139,10 +139,9 @@ export default async function DetailCatatan({
         )}
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "20px 0 34px" }}>
-          <Badge
-            tone={record.single_source_flag ? "warn" : "ok"}
-            text={record.single_source_flag ? "⚠ Satu sumber" : `✓ Dikuatkan ${record.corroboration_count} media`}
-          />
+          {record.single_source_flag ? null : (
+            <Badge tone="ok" text={`✓ Dikuatkan ${record.corroboration_count} media`} />
+          )}
           <Badge tone="quiet" text={`${sources.length} artikel sumber`} />
         </div>
 

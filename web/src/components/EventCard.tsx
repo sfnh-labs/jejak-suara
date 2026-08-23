@@ -18,9 +18,12 @@ import type { Peristiwa } from "@/lib/types";
 export default function EventCard({
   peristiwa,
   bare = false,
+  showDate = true,
 }: {
   peristiwa: Peristiwa;
   bare?: boolean;
+  /** False when the card repeats the day of the one above it in the feed. */
+  showDate?: boolean;
 }) {
   const chip = eventTypeChip(peristiwa.event_type);
   const sources = peristiwa.sources ?? [];
@@ -47,7 +50,7 @@ export default function EventCard({
 
       <div style={{ padding: peristiwa.image ? "0 18px" : 0 }}>
 
-      {bare ? null : (
+      {bare || !showDate ? null : (
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: "#7a7264", marginBottom: 8 }}>
           {dayBadge(peristiwa.event_date)}
         </div>

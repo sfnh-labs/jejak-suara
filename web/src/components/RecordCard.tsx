@@ -26,11 +26,15 @@ export default function RecordCard({
   record,
   showFigure = false,
   showSummary = true,
+  showDate = true,
   bare = false,
 }: {
   record: EventRecord;
   showFigure?: boolean;
   showSummary?: boolean;
+  /** False for a record that repeats the day above it — the rail keeps a dot
+   *  so the card still has its anchor, but the dateline is not restated. */
+  showDate?: boolean;
   bare?: boolean;
 }) {
   const display = toDisplayScore(record.sentiment_score);
@@ -43,33 +47,53 @@ export default function RecordCard({
     <article
       style={{
         position: "relative",
-        paddingLeft: bare ? 0 : 42,
+        // The badge overhangs the rail by 14px and runs ~60px wide, so the
+        // body has to start clear of it or the dateline sits on the chip.
+        paddingLeft: bare ? 0 : 68,
         paddingBottom: 34,
         borderLeft: bare ? undefined : "1.5px solid #d8cfba",
       }}
     >
       {bare ? (
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: "#7a7264", marginBottom: 9 }}>
-          {dayBadge(record.event_date)}
-        </div>
+        showDate ? (
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: "#7a7264", marginBottom: 9 }}>
+            {dayBadge(record.event_date)}
+          </div>
+        ) : null
       ) : (
         <div style={{ position: "absolute", left: -14, top: 0 }}>
-          <span
-            style={{
-              display: "inline-block",
-              background: "#6b645b",
-              color: "#fff",
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.04em",
-              padding: "4px 12px",
-              borderRadius: 99,
-              whiteSpace: "nowrap",
-              boxShadow: "0 0 0 4px #f6f2e9",
-            }}
-          >
-            {dayBadge(record.event_date)}
-          </span>
+          {showDate ? (
+            <span
+              style={{
+                display: "inline-block",
+                background: "#6b645b",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                padding: "4px 12px",
+                borderRadius: 99,
+                whiteSpace: "nowrap",
+                boxShadow: "0 0 0 4px #f6f2e9",
+              }}
+            >
+              {dayBadge(record.event_date)}
+            </span>
+          ) : (
+            <span
+              aria-hidden
+              style={{
+                display: "block",
+                width: 9,
+                height: 9,
+                marginLeft: 9,
+                marginTop: 7,
+                background: "#c9bfa8",
+                borderRadius: "50%",
+                boxShadow: "0 0 0 4px #f6f2e9",
+              }}
+            />
+          )}
         </div>
       )}
 
@@ -192,24 +216,10 @@ export default function RecordCard({
         </div>
       </div>
 
-      {record.single_source_flag ? (
-        <div style={{ marginBottom: 14 }}>
-          <span
-            style={{
-              display: "inline-block",
-              fontSize: 11,
-              fontWeight: 600,
-              color: "#8b2e1f",
-              background: "#f5e7e3",
-              border: "1px solid #d8a99f",
-              borderRadius: 2,
-              padding: "3px 8px",
-            }}
-          >
-            ⚠ Satu sumber
-          </span>
-        </div>
-      ) : (
+      {/* A single-source record carries no badge. The sources disclosure above
+          already says how many outlets there are, and a warning strip on the
+          most common case read as an accusation against the record itself. */}
+      {record.single_source_flag ? null : (
         <div style={{ marginBottom: 14 }}>
           <span
             style={{
