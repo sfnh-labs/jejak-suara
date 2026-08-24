@@ -1,7 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { isCandidateVerdict, setCandidateVerdict } from "@/lib/candidates";
+import {
+  isCandidateVerdict,
+  setCandidateNote,
+  setCandidateVerdict,
+} from "@/lib/candidates";
 
 /**
  * Record a decision on one discovered name.
@@ -25,5 +29,25 @@ export async function decide(formData: FormData): Promise<void> {
   const aliases = String(formData.get("aliases") ?? "").trim();
 
   await setCandidateVerdict(slug, verdict, fullName, aliases);
+  revalidatePath("/kurasi/kandidat");
+}
+
+/**
+ * Save a curator note.
+ *
+ * Separate from `decide` on purpose: a row can be worth annotating without
+ * being ruled on — "this is a police rank", "same man as a figure we already
+ * track" — and the note has to survive a verdict being cleared.
+ */
+export async function annotate(formData: FormData): Promise<void> {
+  const slug = String(formData.get("slug") ?? "").trim();
+  if (!slug) throw new Error("missing slug");
+
+  const notes = String(formData.get("notes") ?? "");
+  // Long enough for a paragraph of reasoning, short enough that a stuck paste
+  // does not become a database row.
+  if (notes.length > 2000) throw new Error("note too long");
+
+  await setCandidateNote(slug, notes);
   revalidatePath("/kurasi/kandidat");
 }

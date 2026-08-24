@@ -5,7 +5,7 @@ import {
   type CandidateFilter,
   type CandidateRow,
 } from "@/lib/candidates";
-import { decide } from "./actions";
+import { annotate, decide } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -161,12 +161,44 @@ function CandidateItem({ row: r }: { row: CandidateRow }) {
       </div>
 
       {r.headlines.length > 0 ? (
+        // Openable, because a name mined from an article's body often does not
+        // appear in its headline at all — judging "Agung" needs the sentence,
+        // not the title.
         <ul style={{ margin: "0 0 12px", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.6, color: "#4a443d" }}>
-          {r.headlines.slice(0, 3).map((t, i) => (
-            <li key={i}>{t}</li>
+          {r.headlines.slice(0, 3).map((h, i) => (
+            <li key={i}>
+              {h.source ? (
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginRight: 6 }}>
+                  {h.source}
+                </span>
+              ) : null}
+              {h.url ? (
+                <a href={h.url} target="_blank" rel="noreferrer" style={{ color: "#4a443d" }}>
+                  {h.title}
+                </a>
+              ) : (
+                h.title
+              )}
+            </li>
           ))}
         </ul>
       ) : null}
+
+      <form action={annotate} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 12, flexWrap: "wrap" }}>
+        <input type="hidden" name="slug" value={r.slug} />
+        <label style={{ fontSize: 11.5, color: MUTED, display: "grid", gap: 3, flex: "1 1 420px", minWidth: 0 }}>
+          Catatan — apa yang kamu lihat di sini
+          <textarea
+            name="notes"
+            rows={2}
+            defaultValue={r.notes ?? ""}
+            placeholder="mis. ini pangkat polisi, bukan nama · orang yang sama dengan tokoh X · cuma pernah dikutip, tidak pernah jadi pelaku"
+            style={{ ...input, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+            aria-label={`Catatan untuk ${r.name}`}
+          />
+        </label>
+        <button type="submit" style={button("quiet")}>Simpan catatan</button>
+      </form>
 
       {decided ? (
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>

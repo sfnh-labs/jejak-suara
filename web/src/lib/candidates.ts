@@ -24,18 +24,25 @@ export function isCandidateVerdict(value: unknown): value is CandidateVerdict {
   );
 }
 
+export interface CandidateHeadline {
+  title: string;
+  url: string | null;
+  source: string | null;
+}
+
 export interface CandidateRow {
   slug: string;
   name: string;
   outlets: number;
   mentions: number;
   role: string | null;
-  headlines: string[];
+  headlines: CandidateHeadline[];
   verdict: CandidateVerdict | null;
   full_name: string | null;
   aliases: string | null;
   decided_at: string | null;
   applied_at: string | null;
+  notes: string | null;
 }
 
 export type CandidateFilter = "undecided" | "promote" | "reject" | "all";
@@ -44,12 +51,31 @@ interface RawRow extends Omit<CandidateRow, "headlines"> {
   headlines: string | null;
 }
 
-/** Sample headlines are stored as a JSON array; a malformed one is not fatal. */
-function parseHeadlines(raw: string | null): string[] {
+/**
+ * Sample articles, stored as a JSON array.
+ *
+ * Rows synced before the shape gained a url hold bare title strings, so both
+ * are accepted; a malformed value costs the row its examples, not the page.
+ */
+function parseHeadlines(raw: string | null): CandidateHeadline[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((t) => typeof t === "string") : [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item): CandidateHeadline[] => {
+      if (typeof item === "string") return [{ title: item, url: null, source: null }];
+      if (item && typeof item === "object") {
+        const row = item as Record<string, unknown>;
+        if (typeof row.title === "string") {
+          return [{
+            title: row.title,
+            url: typeof row.url === "string" ? row.url : null,
+            source: typeof row.source === "string" ? row.source : null,
+          }];
+        }
+      }
+      return [];
+    });
   } catch {
     return [];
   }
@@ -68,7 +94,7 @@ export async function getCandidates(
 
   const rows = await query<RawRow>(
     `SELECT slug, name, outlets, mentions, role, headlines,
-            verdict, full_name, aliases, decided_at, applied_at
+            verdict, full_name, aliases, decided_at, applied_at, notes
        FROM figure_candidates
       WHERE ${where}
       ORDER BY outlets DESC, mentions DESC, name
@@ -128,4 +154,19 @@ export async function setCandidateVerdict(
       WHERE slug = $1`,
     [slug, verdict, fullName || null, aliases || null]
   );
+}
+
+/**
+ * A curator note, kept separate from the verdict.
+ *
+ * Some rows are worth writing down without deciding — "this is a police rank,
+ * not a person", "same man as the figure we already track". The note is what
+ * the next round of extractor tuning reads, so it outlives the decision and
+ * clearing a verdict leaves it alone.
+ */
+export async function setCandidateNote(slug: string, notes: string | null): Promise<void> {
+  await query(`UPDATE figure_candidates SET notes = $2 WHERE slug = $1`, [
+    slug,
+    notes && notes.trim() ? notes.trim() : null,
+  ]);
 }

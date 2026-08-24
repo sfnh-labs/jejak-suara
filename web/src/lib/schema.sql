@@ -151,13 +151,17 @@ CREATE TABLE IF NOT EXISTS figure_candidates (
     outlets     INTEGER NOT NULL DEFAULT 0,
     mentions    INTEGER NOT NULL DEFAULT 0,
     role        TEXT,
-    headlines   TEXT,          -- JSON array of sample article titles
+    headlines   TEXT,          -- JSON array of {title, url, source}
     synced_at   TEXT,
     verdict     TEXT,          -- 'promote' | 'reject' | NULL (undecided)
     full_name   TEXT,          -- display name the curator wants on the site
     aliases     TEXT,          -- pipe-separated extra spellings
     decided_at  TEXT,
-    applied_at  TEXT           -- set once the pipeline has acted on the verdict
+    applied_at  TEXT,          -- set once the pipeline has acted on the verdict
+    -- What the curator saw that the evidence does not say: "this is a rank",
+    -- "same person as X", "only ever quoted, never the actor". Free text,
+    -- read by whoever tunes the extractor next.
+    notes       TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_candidates_verdict ON figure_candidates(verdict);

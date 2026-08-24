@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     pg = _connect_pg(_load_database_url())
     with pg.cursor() as cur:
         cur.execute(
-            """SELECT slug, name, verdict, full_name, aliases
+            """SELECT slug, name, verdict, full_name, aliases, notes
                  FROM figure_candidates
                 WHERE verdict IS NOT NULL AND applied_at IS NULL
                 ORDER BY verdict, outlets DESC"""
@@ -139,12 +139,16 @@ def main(argv: list[str] | None = None) -> int:
     conn.row_factory = sqlite3.Row
     done: list[str] = []
     try:
-        for slug, name, verdict, full_name, aliases in pending:
+        for slug, name, verdict, full_name, aliases, notes in pending:
             if verdict == "promote":
                 line = _promote(conn, slug, name, full_name, aliases)
             else:
                 line = _reject(conn, slug)
             print(("apply " if args.apply else "would ") + line)
+            # The curator's reasoning is the useful half of a reject: it says
+            # what the extractor mistook, which is what gets tuned next.
+            if notes:
+                print(f"    note: {notes}")
             done.append(slug)
         if args.apply:
             conn.commit()

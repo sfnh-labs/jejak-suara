@@ -159,6 +159,7 @@ MIGRATIONS = (
     # Curator verdict. Postgres-only on purpose — see the events Table entry.
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS curated TEXT",
     "CREATE INDEX IF NOT EXISTS idx_events_curated ON events(curated)",
+    "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS notes TEXT",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS comment_id TEXT",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS channel TEXT",
     "ALTER TABLE articles ADD COLUMN IF NOT EXISTS body_original TEXT",
@@ -291,12 +292,17 @@ def sync_candidates(pg, sqlite: sqlite3.Connection, min_outlets: int = 3) -> int
                 GROUP BY role ORDER BY count(*) DESC LIMIT 1""",
             (c["slug"],),
         ).fetchone()
+        # The article, not just its headline: a name mined from the body
+        # often does not appear in the title at all, so the reviewer needs to
+        # be able to open the piece and see the sentence it came from.
         titles = [
-            r["title"] for r in sqlite.execute(
-                """SELECT DISTINCT a.title
+            {"title": r["title"], "url": r["url"], "source": r["source"]}
+            for r in sqlite.execute(
+                """SELECT a.title, a.url, a.source, max(a.published_at) AS pub
                      FROM figure_mentions m JOIN articles a ON a.id = m.article_id
                     WHERE m.slug = ? AND a.title IS NOT NULL
-                    ORDER BY a.published_at DESC LIMIT 4""",
+                    GROUP BY a.title
+                    ORDER BY pub DESC LIMIT 4""",
                 (c["slug"],),
             )
         ]
@@ -323,11 +329,12 @@ def sync_candidates(pg, sqlite: sqlite3.Connection, min_outlets: int = 3) -> int
             rows,
         )
     # A candidate that has since been promoted or folded stops being a
-    # question. Undecided rows are dropped; a decided one is kept so the
-    # decision stays visible until the pipeline has applied it.
+    # question. Rows nobody has touched are dropped; a verdict or a note is
+    # someone's work, so those stay until the pipeline has applied them.
     with pg.cursor() as cur:
         cur.execute(
-            "DELETE FROM figure_candidates WHERE verdict IS NULL AND slug <> ALL(%s)",
+            "DELETE FROM figure_candidates "
+            " WHERE verdict IS NULL AND notes IS NULL AND slug <> ALL(%s)",
             ([r[0] for r in rows],),
         )
     pg.commit()
