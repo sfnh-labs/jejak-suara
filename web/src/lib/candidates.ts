@@ -28,6 +28,9 @@ export interface CandidateHeadline {
   title: string;
   url: string | null;
   source: string | null;
+  /** The sentence fragment the name was found in — the only evidence that
+   *  says whether the extractor caught a person or half an office. */
+  context: string | null;
 }
 
 export interface CandidateRecord {
@@ -47,6 +50,7 @@ export interface CandidateRow {
   verdict: CandidateVerdict | null;
   full_name: string | null;
   aliases: string | null;
+  curated_role: string | null;
   decided_at: string | null;
   applied_at: string | null;
   notes: string | null;
@@ -93,7 +97,9 @@ function parseHeadlines(raw: string | null): CandidateHeadline[] {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item): CandidateHeadline[] => {
-      if (typeof item === "string") return [{ title: item, url: null, source: null }];
+      if (typeof item === "string") {
+        return [{ title: item, url: null, source: null, context: null }];
+      }
       if (item && typeof item === "object") {
         const row = item as Record<string, unknown>;
         if (typeof row.title === "string") {
@@ -101,6 +107,7 @@ function parseHeadlines(raw: string | null): CandidateHeadline[] {
             title: row.title,
             url: typeof row.url === "string" ? row.url : null,
             source: typeof row.source === "string" ? row.source : null,
+            context: typeof row.context === "string" ? row.context : null,
           }];
         }
       }
@@ -124,7 +131,8 @@ export async function getCandidates(
 
   const rows = await query<RawRow>(
     `SELECT slug, name, outlets, mentions, role, headlines,
-            records, verdict, full_name, aliases, decided_at, applied_at, notes
+            records, verdict, full_name, aliases, curated_role,
+            decided_at, applied_at, notes
        FROM figure_candidates
       WHERE ${where}
       ORDER BY outlets DESC, mentions DESC, name
@@ -166,13 +174,14 @@ export async function setCandidateVerdict(
   slug: string,
   verdict: CandidateVerdict | null,
   fullName?: string | null,
-  aliases?: string | null
+  aliases?: string | null,
+  curatedRole?: string | null
 ): Promise<void> {
   if (verdict === null) {
     await query(
       `UPDATE figure_candidates
           SET verdict = NULL, full_name = NULL, aliases = NULL,
-              decided_at = NULL, applied_at = NULL
+              curated_role = NULL, decided_at = NULL, applied_at = NULL
         WHERE slug = $1`,
       [slug]
     );
@@ -183,10 +192,11 @@ export async function setCandidateVerdict(
         SET verdict = $2,
             full_name = $3,
             aliases = $4,
+            curated_role = $5,
             decided_at = now()::text,
             applied_at = NULL
       WHERE slug = $1`,
-    [slug, verdict, fullName || null, aliases || null]
+    [slug, verdict, fullName || null, aliases || null, curatedRole || null]
   );
 }
 

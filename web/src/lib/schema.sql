@@ -159,6 +159,10 @@ CREATE TABLE IF NOT EXISTS figure_candidates (
     verdict     TEXT,          -- 'promote' | 'reject' | NULL (undecided)
     full_name   TEXT,          -- display name the curator wants on the site
     aliases     TEXT,          -- pipe-separated extra spellings
+    -- The office as the curator settled it. `role` above is what the coverage
+    -- said most often, which is frequently a fragment ("Menko", "Kepala");
+    -- this is what the site will print under the name.
+    curated_role TEXT,
     decided_at  TEXT,
     applied_at  TEXT,          -- set once the pipeline has acted on the verdict
     -- What the curator saw that the evidence does not say: "this is a rank",

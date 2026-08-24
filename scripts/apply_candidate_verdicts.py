@@ -59,7 +59,8 @@ def _connect_pg(url: str):
 
 
 def _promote(conn: sqlite3.Connection, slug: str, name: str,
-             full_name: str | None, aliases_raw: str | None) -> str:
+             full_name: str | None, aliases_raw: str | None,
+             curated_role: str | None = None) -> str:
     """Create the tracked figure a 'promote' verdict asked for."""
     if conn.execute("SELECT 1 FROM figures WHERE id = ?", (slug,)).fetchone():
         return f"already a figure: {slug}"
@@ -70,13 +71,18 @@ def _promote(conn: sqlite3.Connection, slug: str, name: str,
     # headlines write them, and attribution reads headlines.
     alias_list = sorted({name, display, *extra})
 
-    role_row = conn.execute(
-        """SELECT role FROM figure_mentions
-            WHERE slug = ? AND role IS NOT NULL AND role != ''
-            GROUP BY role ORDER BY count(*) DESC LIMIT 1""",
-        (slug,),
-    ).fetchone()
-    role = role_row["role"] if role_row else ""
+    # The curator's wording wins. What the coverage said most often is a
+    # starting point and frequently a fragment — "Menko", "Kepala" — and this
+    # string is printed under the name on the public page.
+    role = (curated_role or "").strip()
+    if not role:
+        role_row = conn.execute(
+            """SELECT role FROM figure_mentions
+                WHERE slug = ? AND role IS NOT NULL AND role != ''
+                GROUP BY role ORDER BY count(*) DESC LIMIT 1""",
+            (slug,),
+        ).fetchone()
+        role = role_row["role"] if role_row else ""
 
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
@@ -123,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     pg = _connect_pg(_load_database_url())
     with pg.cursor() as cur:
         cur.execute(
-            """SELECT slug, name, verdict, full_name, aliases, notes
+            """SELECT slug, name, verdict, full_name, aliases, curated_role, notes
                  FROM figure_candidates
                 WHERE verdict IS NOT NULL AND applied_at IS NULL
                 ORDER BY verdict, outlets DESC"""
@@ -139,9 +145,9 @@ def main(argv: list[str] | None = None) -> int:
     conn.row_factory = sqlite3.Row
     done: list[str] = []
     try:
-        for slug, name, verdict, full_name, aliases, notes in pending:
+        for slug, name, verdict, full_name, aliases, curated_role, notes in pending:
             if verdict == "promote":
-                line = _promote(conn, slug, name, full_name, aliases)
+                line = _promote(conn, slug, name, full_name, aliases, curated_role)
             else:
                 line = _reject(conn, slug)
             print(("apply " if args.apply else "would ") + line)

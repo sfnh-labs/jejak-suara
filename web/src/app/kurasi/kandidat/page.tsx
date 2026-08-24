@@ -127,8 +127,27 @@ export default async function KandidatTokoh({
   );
 }
 
+/** The candidate's name, marked where it appears in the quoted sentence. */
+function highlight(text: string, name: string) {
+  const at = text.toLowerCase().indexOf(name.toLowerCase());
+  if (at < 0) return text;
+  return (
+    <>
+      {text.slice(0, at)}
+      <strong style={{ background: "#f3e6c9", color: INK }}>
+        {text.slice(at, at + name.length)}
+      </strong>
+      {text.slice(at + name.length)}
+    </>
+  );
+}
+
 function CandidateItem({ row: r }: { row: CandidateRow }) {
   const decided = r.verdict !== null;
+  const contexts = r.headlines
+    .map((h) => h.context)
+    .filter((c): c is string => Boolean(c))
+    .slice(0, 2);
   return (
     <article style={{ padding: "18px 0", borderBottom: `1px solid ${RULE}` }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
@@ -159,6 +178,20 @@ function CandidateItem({ row: r }: { row: CandidateRow }) {
         <span>·</span>
         <span>{r.role ? `disebut sebagai ${r.role}` : "tidak pernah disebut jabatannya"}</span>
       </div>
+
+      {contexts.length > 0 ? (
+        // The only evidence that answers "is this a person?". The name is
+        // mined from article bodies, so this is the sentence that produced
+        // it — "Jaksa Agung ST Burhanuddin" says at once that "Agung" is half
+        // an office, which no headline or record title would have revealed.
+        <div style={{ margin: "0 0 12px", borderLeft: `3px solid ${RULE}`, paddingLeft: 12 }}>
+          {contexts.map((c, i) => (
+            <p key={i} style={{ fontSize: 13.5, lineHeight: 1.6, color: "#4a443d", margin: i ? "8px 0 0" : 0 }}>
+              {highlight(c, r.name)}
+            </p>
+          ))}
+        </div>
+      ) : null}
 
       {r.records.length > 0 ? (
         // What the coverage became on the site. This is the thing accepting a
@@ -239,6 +272,7 @@ function CandidateItem({ row: r }: { row: CandidateRow }) {
           {r.verdict === "promote" ? (
             <span style={{ fontSize: 13, color: "#4a443d" }}>
               Akan tampil sebagai <strong>{r.full_name || r.name}</strong>
+              {r.curated_role || r.role ? ` · ${r.curated_role || r.role}` : ""}
               {r.aliases ? ` · alias: ${r.aliases.split("|").join(", ")}` : ""}
             </span>
           ) : null}
@@ -262,6 +296,16 @@ function CandidateItem({ row: r }: { row: CandidateRow }) {
                 defaultValue={r.name}
                 style={{ ...input, width: 200 }}
                 aria-label={`Nama lengkap untuk ${r.name}`}
+              />
+            </label>
+            <label style={{ fontSize: 11.5, color: MUTED, display: "grid", gap: 3 }}>
+              Jabatan
+              <input
+                name="curated_role"
+                defaultValue={r.role ?? ""}
+                placeholder="mis. Menteri Ketenagakerjaan"
+                style={{ ...input, width: 210 }}
+                aria-label={`Jabatan untuk ${r.name}`}
               />
             </label>
             <label style={{ fontSize: 11.5, color: MUTED, display: "grid", gap: 3 }}>

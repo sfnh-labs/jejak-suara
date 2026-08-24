@@ -27,8 +27,9 @@ export async function decide(formData: FormData): Promise<void> {
 
   const fullName = String(formData.get("full_name") ?? "").trim();
   const aliases = String(formData.get("aliases") ?? "").trim();
+  const curatedRole = String(formData.get("curated_role") ?? "").trim();
 
-  await setCandidateVerdict(slug, verdict, fullName, aliases);
+  await setCandidateVerdict(slug, verdict, fullName, aliases, curatedRole);
   revalidatePath("/kurasi/kandidat");
 }
 
