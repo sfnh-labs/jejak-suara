@@ -50,7 +50,10 @@ export default async function Kurasi({
     <div style={{ minHeight: "100vh" }}>
       <div className="container-page" style={{ maxWidth: 820 }}>
         <header className="rule-heavy" style={{ padding: "clamp(24px, 4vw, 40px) 0 22px" }}>
-          <div className="eyebrow" style={{ marginBottom: 12 }}>Internal</div>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>
+            Internal ·{" "}
+            <Link href="/kurasi/kandidat" style={{ color: MUTED }}>Kandidat tokoh</Link>
+          </div>
           <h1
             style={{
               fontFamily: "var(--font-serif)",
