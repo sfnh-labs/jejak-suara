@@ -132,3 +132,33 @@ CREATE TABLE IF NOT EXISTS buzzer_signals (
     signals_triggered   TEXT,
     analyzed_at         TEXT NOT NULL
 );
+
+-- The queue behind /kurasi/kandidat.
+--
+-- Discovery promotes a candidate named by enough distinct outlets, but it
+-- refuses a one-word name outright: sentence case capitalises the first word
+-- of every sentence, so "Dasar" and "Lalu" reach three outlets as readily as
+-- "Dasco" does and no pattern separates them. Those land here with their
+-- evidence for a person to rule on.
+--
+-- Evidence columns are overwritten by every sync from SQLite. The verdict
+-- columns are not written by sync at all — same arrangement as events.curated:
+-- Postgres is their only home, because the curator's decision has no SQLite
+-- counterpart to be rebuilt from.
+CREATE TABLE IF NOT EXISTS figure_candidates (
+    slug        TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    outlets     INTEGER NOT NULL DEFAULT 0,
+    mentions    INTEGER NOT NULL DEFAULT 0,
+    role        TEXT,
+    headlines   TEXT,          -- JSON array of sample article titles
+    synced_at   TEXT,
+    verdict     TEXT,          -- 'promote' | 'reject' | NULL (undecided)
+    full_name   TEXT,          -- display name the curator wants on the site
+    aliases     TEXT,          -- pipe-separated extra spellings
+    decided_at  TEXT,
+    applied_at  TEXT           -- set once the pipeline has acted on the verdict
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidates_verdict ON figure_candidates(verdict);
+CREATE INDEX IF NOT EXISTS idx_candidates_outlets ON figure_candidates(outlets DESC);

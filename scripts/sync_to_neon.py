@@ -259,6 +259,86 @@ def sync_figures(pg) -> int:
     return len(rows)
 
 
+# Candidates corroborated by this many outlets are worth a human's time. Kept
+# in step with mentions.PROMOTE_MIN_OUTLETS, which is the same bar the
+# automatic promoter uses before its own name-shape checks.
+CANDIDATE_EVIDENCE_SQL = """
+    SELECT c.slug,
+           c.name,
+           count(DISTINCT m.source) AS outlets,
+           count(*)                 AS mentions
+      FROM figure_candidates c
+      JOIN figure_mentions m ON m.slug = c.slug
+     WHERE c.slug NOT IN (SELECT id FROM figures)
+       AND c.status != 'tracked'
+     GROUP BY c.slug
+    HAVING outlets >= ?
+"""
+
+
+def sync_candidates(pg, sqlite: sqlite3.Connection, min_outlets: int = 3) -> int:
+    """Publish the review queue, evidence only.
+
+    The curator's verdict columns are absent from the INSERT and from the
+    ON CONFLICT update, so a re-sync refreshes the counts behind a decision
+    without touching the decision itself.
+    """
+    rows = []
+    for c in sqlite.execute(CANDIDATE_EVIDENCE_SQL, (min_outlets,)).fetchall():
+        role_row = sqlite.execute(
+            """SELECT role FROM figure_mentions
+                WHERE slug = ? AND role IS NOT NULL AND role != ''
+                GROUP BY role ORDER BY count(*) DESC LIMIT 1""",
+            (c["slug"],),
+        ).fetchone()
+        titles = [
+            r["title"] for r in sqlite.execute(
+                """SELECT DISTINCT a.title
+                     FROM figure_mentions m JOIN articles a ON a.id = m.article_id
+                    WHERE m.slug = ? AND a.title IS NOT NULL
+                    ORDER BY a.published_at DESC LIMIT 4""",
+                (c["slug"],),
+            )
+        ]
+        rows.append((
+            c["slug"], c["name"], c["outlets"], c["mentions"],
+            role_row["role"] if role_row else None,
+            json.dumps(titles, ensure_ascii=False),
+            _now_iso(),
+        ))
+    if not rows:
+        return 0
+    with pg.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO figure_candidates
+                   (slug, name, outlets, mentions, role, headlines, synced_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (slug) DO UPDATE SET
+                 name = EXCLUDED.name,
+                 outlets = EXCLUDED.outlets,
+                 mentions = EXCLUDED.mentions,
+                 role = EXCLUDED.role,
+                 headlines = EXCLUDED.headlines,
+                 synced_at = EXCLUDED.synced_at""",
+            rows,
+        )
+    # A candidate that has since been promoted or folded stops being a
+    # question. Undecided rows are dropped; a decided one is kept so the
+    # decision stays visible until the pipeline has applied it.
+    with pg.cursor() as cur:
+        cur.execute(
+            "DELETE FROM figure_candidates WHERE verdict IS NULL AND slug <> ALL(%s)",
+            ([r[0] for r in rows],),
+        )
+    pg.commit()
+    return len(rows)
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
 def pull(pg, sqlite: sqlite3.Connection) -> dict[str, int]:
     """Copy Neon history into the local working copy.
 
@@ -330,6 +410,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="hydrate SQLite from Neon and stop")
     parser.add_argument("--push", action="store_true",
                         help="publish SQLite to Neon and stop")
+    parser.add_argument("--candidates", action="store_true",
+                        help="refresh only the figure-discovery review queue "
+                             "(/kurasi/kandidat) and stop — cheap enough to "
+                             "run whenever new names have been mined")
     parser.add_argument("--schema", action="store_true",
                         help="apply the schema + migrations to Neon and stop "
                              "(run this before deploying a web change that "
@@ -344,6 +428,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--reset rebuilds Neon from SQLite; --pull is meaningless with it")
     if args.schema and (args.pull or args.push or args.reset):
         parser.error("--schema applies DDL only; combine it with nothing")
+    if args.candidates and (args.pull or args.push or args.reset or args.schema):
+        parser.error("--candidates refreshes the review queue only; "
+                     "combine it with nothing")
 
     do_pull = not args.reset and (args.pull or not args.push)
     do_push = args.reset or args.push or not args.pull
@@ -364,9 +451,20 @@ def main(argv: list[str] | None = None) -> int:
     jejak_db.init_db()
     sqlite = jejak_db.connect()
 
+    if args.candidates:
+        try:
+            n = sync_candidates(pg, sqlite)
+            print(f"figure_candidates: {n} rows awaiting review")
+        finally:
+            sqlite.close()
+            pg.close()
+        return 0
+
     try:
         n = sync_figures(pg)
         print(f"figures: {n} rows")
+        n = sync_candidates(pg, sqlite)
+        print(f"figure_candidates: {n} rows awaiting review")
 
         saved_curation: list[tuple[int, str]] = []
         if args.reset:
