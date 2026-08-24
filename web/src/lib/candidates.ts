@@ -30,6 +30,12 @@ export interface CandidateHeadline {
   source: string | null;
 }
 
+export interface CandidateRecord {
+  id: number;
+  title: string;
+  figure_id: string | null;
+}
+
 export interface CandidateRow {
   slug: string;
   name: string;
@@ -37,6 +43,7 @@ export interface CandidateRow {
   mentions: number;
   role: string | null;
   headlines: CandidateHeadline[];
+  records: CandidateRecord[];
   verdict: CandidateVerdict | null;
   full_name: string | null;
   aliases: string | null;
@@ -47,8 +54,31 @@ export interface CandidateRow {
 
 export type CandidateFilter = "undecided" | "promote" | "reject" | "all";
 
-interface RawRow extends Omit<CandidateRow, "headlines"> {
+interface RawRow extends Omit<CandidateRow, "headlines" | "records"> {
   headlines: string | null;
+  records: string | null;
+}
+
+/** The events the evidence articles clustered into. Malformed JSON costs the
+ *  row its examples, not the page. */
+function parseRecords(raw: string | null): CandidateRecord[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item): CandidateRecord[] => {
+      if (!item || typeof item !== "object") return [];
+      const row = item as Record<string, unknown>;
+      if (typeof row.id !== "number" || typeof row.title !== "string") return [];
+      return [{
+        id: row.id,
+        title: row.title,
+        figure_id: typeof row.figure_id === "string" ? row.figure_id : null,
+      }];
+    });
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -94,14 +124,18 @@ export async function getCandidates(
 
   const rows = await query<RawRow>(
     `SELECT slug, name, outlets, mentions, role, headlines,
-            verdict, full_name, aliases, decided_at, applied_at, notes
+            records, verdict, full_name, aliases, decided_at, applied_at, notes
        FROM figure_candidates
       WHERE ${where}
       ORDER BY outlets DESC, mentions DESC, name
       LIMIT $1`,
     [limit]
   );
-  return rows.map((r) => ({ ...r, headlines: parseHeadlines(r.headlines) }));
+  return rows.map((r) => ({
+    ...r,
+    headlines: parseHeadlines(r.headlines),
+    records: parseRecords(r.records),
+  }));
 }
 
 export async function getCandidateCounts(): Promise<Record<CandidateFilter, number>> {
