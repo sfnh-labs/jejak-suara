@@ -24,6 +24,21 @@ function Log($msg) {
     $line | Tee-Object -FilePath $LogFile -Append
 }
 
+# Run one pipeline step, logging everything it writes.
+#
+# The ForEach-Object is not decoration. PowerShell turns every stderr line from
+# a native command into an ErrorRecord, so `2>&1` makes a progress bar or a
+# library warning render as a NativeCommandError block with PowerShell context
+# wrapped around it - "Loading weights: 100%" arriving as a red error. Casting
+# each object to a string flattens it back to the line python actually wrote,
+# which keeps the log readable and leaves red text meaning something went
+# wrong.
+function Invoke-Stage([string]$Label, [string[]]$Arguments) {
+    Log "stage: $Label"
+    & python @Arguments 2>&1 | ForEach-Object { "$_" } |
+        Tee-Object -FilePath $LogFile -Append
+}
+
 # A resummarize backfill or a slow model can outlast the scheduling interval;
 # without a lock, an overlapping run would race the same SQLite file.
 if (Test-Path $LockFile) {
@@ -72,18 +87,15 @@ try {
         Log "Ollama is up."
     }
 
-    Log "pull from Neon"
-    python scripts\sync_to_neon.py --pull 2>&1 | Tee-Object -FilePath $LogFile -Append
+    Invoke-Stage "pull from Neon" @("scripts\sync_to_neon.py", "--pull")
 
-    Log "stage: ingest"
-    python -m jejak.cli ingest 2>&1 | Tee-Object -FilePath $LogFile -Append
+    Invoke-Stage "ingest" @("-m", "jejak.cli", "ingest")
 
     # RSS only reaches back about a day, so each cycle also walks further back
     # through the outlet archives. Six days a cycle, four cycles a day, is
     # roughly a month of history per day - about a month to reach the floor
     # date, after which this stage becomes a no-op.
-    Log "stage: backfill"
-    python -m jejak.cli backfill --days 6 2>&1 | Tee-Object -FilePath $LogFile -Append
+    Invoke-Stage "backfill" @("-m", "jejak.cli", "backfill", "--days", "6")
 
     # The fetch limit is tied to the backfill rate, not chosen for its own sake.
     # An article with no body is summarized from its headline alone (backfilled
@@ -91,25 +103,21 @@ try {
     # body arrives later - so a fetch queue that cannot keep up turns into
     # history made of headlines. Six days a cycle yields ~150 figure articles;
     # 200 drains that plus the RSS intake, at ~1s each.
-    Log "stage: fetch"
-    python -m jejak.cli fetch --limit 200 2>&1 | Tee-Object -FilePath $LogFile -Append
+    Invoke-Stage "fetch" @("-m", "jejak.cli", "fetch", "--limit", "200")
 
     # Figure discovery. The roster is not a hand-kept list: this mines the
     # articles fetched above for "<office> <name>" mentions and promotes anyone
     # named by enough distinct outlets, which is the only thing that grows the
     # number of figures records can be written about. Runs before clustering so
     # a figure promoted this cycle owns the articles clustered this cycle.
-    Log "stage: mentions"
-    python -m jejak.cli mentions --limit 1000 2>&1 | Tee-Object -FilePath $LogFile -Append
+    Invoke-Stage "mentions" @("-m", "jejak.cli", "mentions", "--limit", "1000")
 
     foreach ($stage in @("cluster", "translate", "summarize",
                          "sentiment", "buzzer")) {
-        Log "stage: $stage"
-        python -m jejak.cli $stage 2>&1 | Tee-Object -FilePath $LogFile -Append
+        Invoke-Stage $stage @("-m", "jejak.cli", $stage)
     }
 
-    Log "push to Neon"
-    python scripts\sync_to_neon.py --push 2>&1 | Tee-Object -FilePath $LogFile -Append
+    Invoke-Stage "push to Neon" @("scripts\sync_to_neon.py", "--push")
 
     Log "=== publish_local done ==="
 }
