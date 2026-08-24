@@ -160,12 +160,45 @@ function CandidateItem({ row: r }: { row: CandidateRow }) {
         <span>{r.role ? `disebut sebagai ${r.role}` : "tidak pernah disebut jabatannya"}</span>
       </div>
 
+      {r.records.length > 0 ? (
+        // What the coverage became on the site. This is the thing accepting a
+        // candidate really creates — the articles below are only the evidence
+        // it was built from.
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9b9285", marginBottom: 5 }}>
+            Catatan terkait
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14, lineHeight: 1.55, fontFamily: "var(--font-serif)" }}>
+            {r.records.map((rec) => (
+              <li key={rec.id}>
+                {rec.figure_id ? (
+                  <Link
+                    href={`/tokoh/${rec.figure_id}/${rec.id}`}
+                    target="_blank"
+                    style={{ color: INK }}
+                  >
+                    {rec.title}
+                  </Link>
+                ) : (
+                  // A peristiwa belongs to no figure and has no detail page.
+                  <span style={{ color: INK }}>{rec.title}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {r.headlines.length > 0 ? (
         // Openable, because a name mined from an article's body often does not
         // appear in its headline at all — judging "Agung" needs the sentence,
         // not the title.
-        <ul style={{ margin: "0 0 12px", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.6, color: "#4a443d" }}>
-          {r.headlines.slice(0, 3).map((h, i) => (
+        <details style={{ marginBottom: 12 }}>
+          <summary style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, cursor: "pointer" }}>
+            Artikel bukti ({r.headlines.length})
+          </summary>
+        <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.6, color: "#4a443d" }}>
+          {r.headlines.map((h, i) => (
             <li key={i}>
               {h.source ? (
                 <span style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginRight: 6 }}>
@@ -182,6 +215,7 @@ function CandidateItem({ row: r }: { row: CandidateRow }) {
             </li>
           ))}
         </ul>
+        </details>
       ) : null}
 
       <form action={annotate} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 12, flexWrap: "wrap" }}>

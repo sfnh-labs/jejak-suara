@@ -152,6 +152,9 @@ CREATE TABLE IF NOT EXISTS figure_candidates (
     mentions    INTEGER NOT NULL DEFAULT 0,
     role        TEXT,
     headlines   TEXT,          -- JSON array of {title, url, source}
+    -- The events those articles clustered into: the record as the site words
+    -- it, which is the thing a reviewer is really deciding to create.
+    records     TEXT,          -- JSON array of {id, title, figure_id}
     synced_at   TEXT,
     verdict     TEXT,          -- 'promote' | 'reject' | NULL (undecided)
     full_name   TEXT,          -- display name the curator wants on the site

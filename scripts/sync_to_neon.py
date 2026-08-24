@@ -160,6 +160,7 @@ MIGRATIONS = (
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS curated TEXT",
     "CREATE INDEX IF NOT EXISTS idx_events_curated ON events(curated)",
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS notes TEXT",
+    "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS records TEXT",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS comment_id TEXT",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS channel TEXT",
     "ALTER TABLE articles ADD COLUMN IF NOT EXISTS body_original TEXT",
@@ -306,10 +307,27 @@ def sync_candidates(pg, sqlite: sqlite3.Connection, min_outlets: int = 3) -> int
                 (c["slug"],),
             )
         ]
+        # The events those articles ended up in. A candidate is only worth
+        # promoting if the coverage naming them is coverage of something, and
+        # the event title is that something in the site's own words.
+        records = [
+            {"id": r["id"], "title": r["title"], "figure_id": r["figure_id"]}
+            for r in sqlite.execute(
+                """SELECT e.id, e.title, e.figure_id, max(a.published_at) AS pub
+                     FROM figure_mentions m
+                     JOIN articles a ON a.id = m.article_id
+                     JOIN events e ON e.id = a.event_id
+                    WHERE m.slug = ? AND e.title IS NOT NULL
+                    GROUP BY e.id
+                    ORDER BY pub DESC LIMIT 4""",
+                (c["slug"],),
+            )
+        ]
         rows.append((
             c["slug"], c["name"], c["outlets"], c["mentions"],
             role_row["role"] if role_row else None,
             json.dumps(titles, ensure_ascii=False),
+            json.dumps(records, ensure_ascii=False),
             _now_iso(),
         ))
     if not rows:
@@ -317,14 +335,16 @@ def sync_candidates(pg, sqlite: sqlite3.Connection, min_outlets: int = 3) -> int
     with pg.cursor() as cur:
         cur.executemany(
             """INSERT INTO figure_candidates
-                   (slug, name, outlets, mentions, role, headlines, synced_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   (slug, name, outlets, mentions, role, headlines, records,
+                    synced_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (slug) DO UPDATE SET
                  name = EXCLUDED.name,
                  outlets = EXCLUDED.outlets,
                  mentions = EXCLUDED.mentions,
                  role = EXCLUDED.role,
                  headlines = EXCLUDED.headlines,
+                 records = EXCLUDED.records,
                  synced_at = EXCLUDED.synced_at""",
             rows,
         )
