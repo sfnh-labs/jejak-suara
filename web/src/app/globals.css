@@ -136,11 +136,15 @@
     z-index: 4;
     pointer-events: none;
   }
-  .day-group > .day-rail { left: -14px; }
+  /* The pill sits flush with the month heading's left edge and level with the
+     card title rather than the kicker above it. The line and the card body move
+     right by the pill's 14px overhang, so the pill keeps its clearance. */
+  .day-group { margin-left: 14px; }
+  .day-group > .day-rail { left: -14px; padding-top: 30px; }
   .rail-day > .day-rail { left: 33.3333%; }
   .day-pill {
     position: sticky;
-    top: 100px;
+    top: 126px;
     display: inline-block;
     background: #6b645b;
     color: #fff;

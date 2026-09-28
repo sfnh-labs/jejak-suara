@@ -143,7 +143,7 @@ export default async function Beranda() {
                   fontSize: 20,
                   color: "#9b8f7d",
                   margin: "18px 0 20px",
-                  padding: "6px 0",
+                  padding: "14px 0",
                   borderBottom: "1px solid #d8cfba",
                 }}
               >
