@@ -23,6 +23,7 @@ mid-run is a no-op for rows that already exist locally (local writes win).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
@@ -91,6 +92,7 @@ TABLES: tuple[Table, ...] = (
     Table("events", "id", (
         "id", "figure_id", "kind", "title", "event_date", "last_seen",
         "event_type", "scope", "impact", "status", "created_at",
+        "quote", "quote_url",
     ), serial=True),
     Table("event_figures", "event_id", ("event_id", "figure_id"),
           conflict=("event_id", "figure_id")),
@@ -158,6 +160,8 @@ MIGRATIONS = (
     "CREATE INDEX IF NOT EXISTS idx_events_last_seen ON events(last_seen)",
     # Curator verdict. Postgres-only on purpose — see the events Table entry.
     "ALTER TABLE events ADD COLUMN IF NOT EXISTS curated TEXT",
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS quote TEXT",
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS quote_url TEXT",
     "CREATE INDEX IF NOT EXISTS idx_events_curated ON events(curated)",
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS notes TEXT",
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS records TEXT",
@@ -427,12 +431,36 @@ def pull(pg, sqlite: sqlite3.Connection) -> dict[str, int]:
     return counts
 
 
+def _row_hash(row) -> str:
+    return hashlib.sha1(repr(tuple(row)).encode("utf-8")).hexdigest()
+
+
 def push(pg, sqlite: sqlite3.Connection) -> dict[str, int]:
-    """Upsert the local working copy into Neon, preserving row identity."""
+    """Upsert rows changed since the last push, preserving row identity.
+
+    `_pushed` in SQLite remembers each row's hash as last sent, so a cycle ships
+    its few hundred new or edited rows instead of the whole database. Rows
+    edited directly in Neon are not re-sent; --reset clears the ledger.
+    """
+    sqlite.execute(
+        "CREATE TABLE IF NOT EXISTS _pushed "
+        "(tbl TEXT, key TEXT, hash TEXT, PRIMARY KEY (tbl, key))"
+    )
     counts: dict[str, int] = {}
+    sent: list[tuple[str, str, str]] = []
     for t in TABLES:
         names = ", ".join(t.insert_cols)
-        rows = sqlite.execute(f"SELECT {names} FROM {t.name}").fetchall()
+        seen = dict(sqlite.execute(
+            "SELECT key, hash FROM _pushed WHERE tbl = ?", (t.name,)
+        ).fetchall())
+        key_idx = [t.insert_cols.index(c) for c in t.target]
+        rows = []
+        for r in sqlite.execute(f"SELECT {names} FROM {t.name}"):
+            key = repr(tuple(r[i] for i in key_idx))
+            h = _row_hash(r)
+            if seen.get(key) != h:
+                rows.append(r)
+                sent.append((t.name, key, h))
         if not rows:
             counts[t.name] = 0
             continue
@@ -464,6 +492,9 @@ def push(pg, sqlite: sqlite3.Connection) -> dict[str, int]:
                 f"COALESCE((SELECT MAX({t.pk}) FROM {t.name}), 0) + 1, false)"
             )
     pg.commit()
+    # Recorded only after Neon committed, so a failed push is retried in full.
+    sqlite.executemany("INSERT OR REPLACE INTO _pushed VALUES (?, ?, ?)", sent)
+    sqlite.commit()
     return counts
 
 
@@ -533,6 +564,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.reset:
             print("reset: truncating all synced tables in Neon")
             saved_curation = reset(pg)
+            sqlite.execute("DROP TABLE IF EXISTS _pushed")
             print(f"  held {len(saved_curation)} curator verdicts for restore")
 
         if do_pull:

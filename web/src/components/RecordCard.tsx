@@ -161,6 +161,8 @@ export default function RecordCard({
         </Link>
       </h3>
 
+      {record.quote ? <Quote record={record} sources={sources} /> : null}
+
       {showSummary && record.summary ? (
         <SummaryList summary={record.summary} />
       ) : null}
@@ -241,5 +243,41 @@ export default function RecordCard({
         </>
       )}
     </article>
+  );
+}
+
+/**
+ * The figure's own words, ahead of the summary: what someone actually said
+ * outranks any paraphrase of it. Verbatim from the linked article.
+ */
+export function Quote({ record, sources }: { record: EventRecord; sources: EventRecord["sources"] }) {
+  const outlet = sources.find((s) => s.url === record.quote_url)?.source;
+  return (
+    <figure style={{ margin: "4px 0 14px", paddingLeft: 14, borderLeft: "3px solid #8b2e1f" }}>
+      <blockquote
+        style={{
+          margin: 0,
+          fontFamily: "var(--font-serif)",
+          fontStyle: "italic",
+          fontSize: 17,
+          lineHeight: 1.5,
+          color: "#16130f",
+        }}
+      >
+        “{record.quote}”
+      </blockquote>
+      {record.quote_url ? (
+        <figcaption style={{ marginTop: 6, fontSize: 12, color: "#7a7264" }}>
+          <a
+            href={record.quote_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ position: "relative", zIndex: 1, color: "inherit" }}
+          >
+            {outlet ? `Kutipan dari ${outlet}` : "Kutipan dari sumber"}
+          </a>
+        </figcaption>
+      ) : null}
+    </figure>
   );
 }

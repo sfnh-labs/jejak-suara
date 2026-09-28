@@ -1,8 +1,10 @@
 # Runs the whole pipeline: collection (ingest/fetch/cluster) then the model
 # stages (translate/summarize/sentiment/buzzer) that need a local Ollama.
 # Scheduled on this machine via Task Scheduler (registered by
-# scripts/register_publish_task.ps1). Neon holds the durable state, so the
-# run starts with a --pull and ends with a --push.
+# scripts/register_publish_task.ps1). jejak.db persists on this machine, so
+# there is no --pull: the web app never writes a table the pull fetches, and a
+# full pull every cycle alone blew Neon's 5 GB/month transfer allowance. Pull
+# by hand only to rebuild a lost jejak.db. The run ends with a --push.
 #
 # Collection used to live in a GitHub Actions cron. That split existed only
 # because runners have no Ollama; it cost a second set of secrets and a second
@@ -87,8 +89,6 @@ try {
         Log "Ollama is up."
     }
 
-    Invoke-Stage "pull from Neon" @("scripts\sync_to_neon.py", "--pull")
-
     Invoke-Stage "ingest" @("-m", "jejak.cli", "ingest")
 
     # RSS only reaches back about a day, so each cycle also walks further back
@@ -112,7 +112,7 @@ try {
     # a figure promoted this cycle owns the articles clustered this cycle.
     Invoke-Stage "mentions" @("-m", "jejak.cli", "mentions", "--limit", "1000")
 
-    foreach ($stage in @("cluster", "translate", "summarize",
+    foreach ($stage in @("cluster", "quotes", "translate", "summarize",
                          "sentiment", "buzzer")) {
         Invoke-Stage $stage @("-m", "jejak.cli", $stage)
     }

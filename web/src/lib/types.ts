@@ -98,6 +98,9 @@ export interface EventRecord {
   event_type: string | null;
   /** Null until the summarize stage reaches it — the card renders without it. */
   summary: string | null;
+  /** The figure's own words, verbatim from the source at `quote_url`. */
+  quote: string | null;
+  quote_url: string | null;
   corroboration_count: number;
   single_source_flag: number;
   sources: EventSource[];
