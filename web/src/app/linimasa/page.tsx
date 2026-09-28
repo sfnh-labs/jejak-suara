@@ -88,7 +88,7 @@ export default async function Linimasa() {
                   fontSize: 20,
                   color: "#9b8f7d",
                   margin: "22px 0 16px",
-                  padding: "6px 0",
+                  padding: "14px 0",
                   borderBottom: "1px solid #d8cfba",
                 }}
               >
