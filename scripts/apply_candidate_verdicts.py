@@ -33,6 +33,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from jejak.mentions import stated_role  # noqa: E402
+
 DB_PATH = ROOT / "jejak.db"
 
 
@@ -76,13 +78,7 @@ def _promote(conn: sqlite3.Connection, slug: str, name: str,
     # string is printed under the name on the public page.
     role = (curated_role or "").strip()
     if not role:
-        role_row = conn.execute(
-            """SELECT role FROM figure_mentions
-                WHERE slug = ? AND role IS NOT NULL AND role != ''
-                GROUP BY role ORDER BY count(*) DESC LIMIT 1""",
-            (slug,),
-        ).fetchone()
-        role = role_row["role"] if role_row else ""
+        role = stated_role(conn, slug)
 
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
