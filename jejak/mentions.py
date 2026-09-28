@@ -520,6 +520,28 @@ def _add_alias(conn: sqlite3.Connection, figure_id: str, alias: str) -> None:
                  (json.dumps(aliases, ensure_ascii=False), figure_id))
 
 
+def stated_role(conn: sqlite3.Connection, slug: str) -> str:
+    """The office coverage most often gives this person, with its organisation.
+
+    Most frequently reported office wins; empty roles are ignored so a single
+    titled mention beats many untitled ones. The organisation is kept apart at
+    extraction ("Wakil Ketua" + "MPR"), and the office alone says nothing to a
+    reader — so the most common organisation for that office is put back.
+    """
+    row = conn.execute(
+        """SELECT role, org_name FROM figure_mentions
+            WHERE slug = ? AND role IS NOT NULL AND role != ''
+            GROUP BY role, org_name
+            ORDER BY sum(count(*)) OVER (PARTITION BY role) DESC,
+                     org_name IS NULL, count(*) DESC
+            LIMIT 1""",
+        (slug,),
+    ).fetchone()
+    if row is None:
+        return ""
+    return " ".join(filter(None, (row["role"], row["org_name"])))
+
+
 def promote_figures(conn: sqlite3.Connection) -> dict[str, int]:
     """Turn well-corroborated candidates into tracked figures.
 
@@ -574,15 +596,7 @@ def promote_figures(conn: sqlite3.Connection) -> dict[str, int]:
             )
             stats["folded"] += 1
             continue
-        # Most frequently reported office wins; empty roles are ignored so a
-        # single titled mention beats many untitled ones.
-        role_row = conn.execute(
-            """SELECT role FROM figure_mentions
-                WHERE slug = ? AND role IS NOT NULL AND role != ''
-                GROUP BY role ORDER BY count(*) DESC LIMIT 1""",
-            (slug,),
-        ).fetchone()
-        role = role_row["role"] if role_row else ""
+        role = stated_role(conn, slug)
 
         aliases = sorted({
             r["name"] for r in conn.execute(
