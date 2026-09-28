@@ -218,6 +218,8 @@ _MIGRATIONS = {
         ("scope", "TEXT"),
         ("impact", "TEXT"),
         ("last_seen", "TEXT"),
+        ("quote", "TEXT"),
+        ("quote_url", "TEXT"),
     ],
     "sentiment": [
         ("samples_json", "TEXT"),

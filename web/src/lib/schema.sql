@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS events (
     -- feed sorts by this instead and an event still being written about stays
     -- near the top.
     last_seen   TEXT,
+    -- The figure's own words, verbatim from quote_url (jejak/quotes.py).
+    quote       TEXT,
+    quote_url   TEXT,
     event_type  TEXT DEFAULT 'other',
     scope       TEXT,
     impact      TEXT,

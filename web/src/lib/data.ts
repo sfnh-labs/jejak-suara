@@ -62,6 +62,8 @@ const RECORD_SELECT = `
          e.title,
          e.event_type,
          es.summary_text              AS summary,
+         e.quote,
+         e.quote_url,
          COALESCE(es.corroboration_count, src.outlet_count, 0) AS corroboration_count,
          COALESCE(es.single_source_flag,
                   CASE WHEN COALESCE(src.outlet_count, 0) <= 1 THEN 1 ELSE 0 END)

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import Nav from "@/components/Nav";
 import OutletTile from "@/components/OutletTile";
+import { Quote } from "@/components/RecordCard";
 import SentimentTrack from "@/components/SentimentTrack";
 import SummaryList from "@/components/SummaryList";
 import {
@@ -125,6 +126,8 @@ export default async function DetailCatatan({
             </div>
           </section>
         ) : null}
+
+        {record.quote ? <Quote record={record} sources={record.sources ?? []} /> : null}
 
         <h2 style={{ fontFamily: "var(--font-serif)", fontSize: 19, fontWeight: 600, margin: "0 0 12px" }}>Ringkasan</h2>
         {record.summary ? (

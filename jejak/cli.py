@@ -30,7 +30,7 @@ from datetime import date
 from . import backfill as backfill_mod
 from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
-from . import db, fetch, ingest, mentions, sentiment, summarize, timeline as timeline_mod
+from . import db, fetch, ingest, mentions, quotes, sentiment, summarize, timeline as timeline_mod
 from . import translate
 from . import youtube_ingest
 
@@ -87,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
                              "apart.")
     sub.add_parser("cluster")
     sub.add_parser("summarize")
+    sub.add_parser("quotes")
     sub.add_parser("sentiment")
     sub.add_parser("buzzer")
     sub.add_parser("translate")
@@ -148,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
                 ))
         if args.cmd in ("cluster", "run"):
             print("cluster:", cluster_mod.cluster(conn))
+        if args.cmd in ("quotes", "run"):
+            print("quotes:", quotes.quote_pending(conn))
         if args.cmd in ("summarize", "run"):
             try:
                 for res in summarize.summarize_pending(conn):

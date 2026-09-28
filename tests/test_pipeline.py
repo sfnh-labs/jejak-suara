@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from jejak import (  # noqa: E402
-    anonymize, backfill, cluster, db, embed, ingest, mentions, reddit,
+    anonymize, backfill, cluster, db, embed, ingest, mentions, quotes, reddit,
     relevance, sentiment, summarize, youtube,
 )
 from jejak.config import Figure  # noqa: E402
@@ -562,6 +562,49 @@ class TestMentionExtraction:
     def test_text_without_any_title_is_skipped(self):
         assert mentions.extract("Hujan deras mengguyur kota sejak pagi.") == []
 
+    def test_stated_role_puts_the_organisation_back(self, tmp_path):
+        """"Wakil Ketua" alone tells a reader nothing; "Wakil Ketua MPR" does."""
+        conn = _fresh(tmp_path)
+        conn.execute("PRAGMA foreign_keys = OFF")  # only the mention rows matter
+        rows = [("Wakil Ketua", "MPR"), ("Wakil Ketua", "MPR"),
+                ("Wakil Ketua", "MPR RI"), ("Wakil Ketua", None), ("", None)]
+        conn.executemany(
+            "INSERT INTO figure_mentions (slug, article_id, role, org_name, source, seen_at) "
+            "VALUES ('eddy', ?, ?, ?, 'x', '2026-09-01')",
+            [(f"a{i}", role, org) for i, (role, org) in enumerate(rows)],
+        )
+        assert mentions.stated_role(conn, "eddy") == "Wakil Ketua MPR"
+        assert mentions.stated_role(conn, "nobody") == ""
+
+
+class TestQuotes:
+    """Only words the outlet explicitly credits to the figure are shown as theirs."""
+
+    NAME, ALIASES = "Prabowo Subianto", ["Prabowo"]
+
+    def _q(self, body):
+        return quotes.find_quote(body, self.NAME, self.ALIASES)
+
+    def test_quote_then_speaker(self):
+        body = ('"Kita akan bikin kaget banyak orang dengan pertumbuhan ekonomi kita," '
+                'kata Presiden Prabowo Subianto di Istana.')
+        assert self._q(body) == "Kita akan bikin kaget banyak orang dengan pertumbuhan ekonomi kita"
+
+    def test_speaker_then_quote(self):
+        body = ('Prabowo mengatakan, “Saya titip sama saudara-saudara, jangan pakai '
+                'untuk yang tidak positif.”')
+        assert self._q(body) == "Saya titip sama saudara-saudara, jangan pakai untuk yang tidak positif."
+
+    def test_someone_else_speaking_about_the_figure(self):
+        """The speaker is the name beside the verb, not one later in the clause."""
+        body = ('"Karena itu Bapak Presiden memerintahkan kepada saya untuk segera bertindak," '
+                'kata Bahlil usai bertemu Prabowo di Istana.')
+        assert self._q(body) is None
+
+    def test_unnamed_followup_is_not_credited(self):
+        body = '"Ini semua berkat perjuangan para atlet yang gigih sekali," ujarnya.'
+        assert self._q(body) is None
+
 
 class TestNeonSync:
     def test_events_carry_their_id(self):
@@ -587,6 +630,29 @@ class TestNeonSync:
         for table in sync_to_neon.TABLES:
             names = ", ".join(table.cols)
             conn.execute(f"SELECT {names} FROM {table.name}")  # raises if wrong
+
+    def test_push_sends_only_changed_rows(self, tmp_path):
+        """A full push every cycle blew Neon's monthly transfer allowance."""
+        import sync_to_neon
+        from unittest import mock
+
+        conn = _fresh(tmp_path)
+        conn.execute("INSERT INTO pipeline_state (key, value, updated_at) "
+                     "VALUES ('a', '1', 'x'), ('b', '1', 'x')")
+        pg = mock.MagicMock()
+        cur = pg.cursor.return_value.__enter__.return_value
+
+        def sent():
+            return [len(c.args[1]) for c in cur.executemany.call_args_list]
+
+        sync_to_neon.push(pg, conn)
+        assert sent() == [2]
+        cur.executemany.reset_mock()
+        sync_to_neon.push(pg, conn)
+        assert sent() == []
+        conn.execute("UPDATE pipeline_state SET value = '2' WHERE key = 'b'")
+        sync_to_neon.push(pg, conn)
+        assert sent() == [1]
 
 
 class TestBackfill:
