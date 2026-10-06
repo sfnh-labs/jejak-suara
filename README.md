@@ -75,17 +75,17 @@ python -m jejak.cli run             # ingest + fetch + translate + mentions + cl
 ```
 
 Configuration is TOML: `sources.toml` (news feeds) and `figures.toml` (tracked people).
-Environment variables live in `.env.example`.
+Environment variables live in `.env.example`. Moving to a new machine: see [`docs/SETUP.md`](docs/SETUP.md).
 
 ### Where each stage runs
 
-Every stage runs on one workstation, on a 6-hourly Windows scheduled task. The
+Every stage runs on one workstation, on a Windows scheduled task at 05:00, 11:00 and 18:00. The
 model stages need a local Ollama, and keeping collection on a separate cloud
 cron meant a second set of secrets and a second schedule to hold in sync — so
 the whole pipeline lives in one place instead.
 
 ```powershell
-powershell -File scripts\register_publish_task.ps1   # register the 6h task
+powershell -File scripts\register_publish_task.ps1   # register the scheduled task
 powershell -File scripts\publish_local.ps1           # or run a cycle now
 ```
 

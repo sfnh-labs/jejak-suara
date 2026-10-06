@@ -1,6 +1,6 @@
 # Registers/updates the Windows Scheduled Task that runs publish_local.ps1.
 #
-# Every 6 hours. -StartWhenAvailable runs a missed cycle as soon as the
+# Three times a day, at 05:00, 11:00 and 18:00. -StartWhenAvailable runs a missed cycle as soon as the
 # machine is back, so powering down overnight delays collection rather than
 # skipping it.
 #
@@ -13,11 +13,7 @@ $ScriptPath = Join-Path $RepoRoot "scripts\publish_local.ps1"
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
 
-# Omitting -RepetitionDuration makes the repetition indefinite (Task
-# Scheduler's XML duration field has a real upper bound - [TimeSpan]::MaxValue
-# overflows it).
-$trigger = New-ScheduledTaskTrigger -Once -At "01:30" `
-    -RepetitionInterval (New-TimeSpan -Hours 6)
+$trigger = "05:00", "11:00", "18:00" | ForEach-Object { New-ScheduledTaskTrigger -Daily -At $_ }
 
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
