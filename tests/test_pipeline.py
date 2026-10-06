@@ -1188,3 +1188,25 @@ class TestAuthorIdHashing:
         ids = {r["author_id"] for r in
                conn.execute("SELECT author_id FROM comments")}
         assert len(ids) == 1, "one account must remain one identity"
+
+
+class TestPruneCandidates:
+    def test_keeps_articles_that_are_mention_evidence(self, tmp_path):
+        conn = _fresh(tmp_path)
+        old = "2000-01-01T00:00:00+00:00"
+        for eid in (1, 2):
+            conn.execute("INSERT INTO events (id, kind, status, created_at) "
+                         "VALUES (?, 'peristiwa', 'candidate', ?)", (eid, old))
+        for aid, eid in (("a1", 1), ("a2", 1), ("b1", 2)):
+            conn.execute("INSERT INTO articles (id, source, url, title, fetched_at, event_id) "
+                         "VALUES (?, 'x', ?, 't', ?, ?)", (aid, aid, old, eid))
+            conn.execute("INSERT INTO article_scans (article_id) VALUES (?)", (aid,))
+        conn.execute("INSERT INTO figure_mentions (slug, article_id, role) "
+                     "VALUES ('budi-santoso', 'a1', 'Menteri')")
+        conn.commit()
+
+        assert cluster.prune_candidates(conn) == 2
+        assert [r["id"] for r in conn.execute("SELECT id FROM articles")] == ["a1"]
+        assert [tuple(r) for r in conn.execute("SELECT id, status FROM events")] == [(1, "expired")]
+        # Expired is not picked up again on the next run.
+        assert cluster.prune_candidates(conn) == 0

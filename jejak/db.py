@@ -62,7 +62,9 @@ CREATE TABLE IF NOT EXISTS events (
     -- 'candidate' is peristiwa-only: clustered but not yet corroborated by
     -- enough distinct outlets to publish. Everything from 'new' onward is
     -- public; 'approved' only means the summary has been written.
-    status      TEXT NOT NULL DEFAULT 'new', -- candidate|new|summarized|approved|rejected
+    -- 'expired' is a stale candidate kept only because its articles are
+    -- evidence in figure_mentions (see cluster.prune_candidates).
+    status      TEXT NOT NULL DEFAULT 'new', -- candidate|new|summarized|approved|rejected|expired
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_figure ON events(figure_id);

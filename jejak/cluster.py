@@ -398,6 +398,12 @@ def prune_candidates(conn: sqlite3.Connection) -> int:
     Bulk ingestion means most figure-less articles never corroborate into
     anything. Once a candidate is older than the clustering window it will never
     gain more coverage, so it is dropped rather than kept forever.
+
+    An article someone was named in is kept: figure_mentions points at it as
+    the evidence for promoting that person, and promotion counts outlets with
+    no time limit. Its candidate becomes 'expired' rather than deleted, since
+    the article still needs an event_id that exists, and an orphaned NULL one
+    would be re-clustered into a fresh candidate every cycle.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=CANDIDATE_TTL_DAYS)).isoformat()
     stale = [r["id"] for r in conn.execute(
@@ -408,9 +414,16 @@ def prune_candidates(conn: sqlite3.Connection) -> int:
     if not stale:
         return 0
     marks = ",".join("?" * len(stale))
-    conn.execute(f"DELETE FROM articles WHERE event_id IN ({marks})", stale)
-    conn.execute(f"DELETE FROM event_figures WHERE event_id IN ({marks})", stale)
-    conn.execute(f"DELETE FROM events WHERE id IN ({marks})", stale)
+    doomed = (f"SELECT id FROM articles WHERE event_id IN ({marks}) AND id NOT IN "
+              "(SELECT article_id FROM figure_mentions)")
+    conn.execute(f"DELETE FROM article_scans WHERE article_id IN ({doomed})", stale)
+    conn.execute(f"DELETE FROM articles WHERE id IN ({doomed})", stale)
+    conn.execute(
+        f"UPDATE events SET status = 'expired' WHERE id IN ({marks}) "
+        "AND id IN (SELECT event_id FROM articles)", stale)
+    empty = f"SELECT id FROM events WHERE id IN ({marks}) AND status = 'candidate'"
+    conn.execute(f"DELETE FROM event_figures WHERE event_id IN ({empty})", stale)
+    conn.execute(f"DELETE FROM events WHERE id IN ({empty})", stale)
     conn.commit()
     return len(stale)
 
