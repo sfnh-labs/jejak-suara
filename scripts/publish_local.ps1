@@ -92,8 +92,8 @@ try {
     Invoke-Stage "ingest" @("-m", "jejak.cli", "ingest")
 
     # RSS only reaches back about a day, so each cycle also walks further back
-    # through the outlet archives. Six days a cycle, four cycles a day, is
-    # roughly a month of history per day - about a month to reach the floor
+    # through the outlet archives. Six days a cycle, three cycles a day, is
+    # about 18 days of history per day - under two months to reach the floor
     # date, after which this stage becomes a no-op.
     Invoke-Stage "backfill" @("-m", "jejak.cli", "backfill", "--days", "6")
 
