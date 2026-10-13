@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Nav from "@/components/Nav";
-import OutletTile from "@/components/OutletTile";
+import SourceList from "@/components/SourceList";
 import { Quote } from "@/components/RecordCard";
 import SentimentTrack from "@/components/SentimentTrack";
-import SummaryList from "@/components/SummaryList";
+import SummaryList, { withoutTitleRepeats } from "@/components/SummaryList";
 import {
   getBuzzerSignal,
   getEvent,
@@ -60,6 +60,7 @@ export default async function DetailCatatan({
   const display = toDisplayScore(record.sentiment_score);
   const { positive, neutral, negative, total } = record.stance;
   const sources = record.sources ?? [];
+  const { title, summary } = withoutTitleRepeats(record.title, record.summary);
   const signals = (buzzer?.signals_triggered ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -97,11 +98,11 @@ export default async function DetailCatatan({
             letterSpacing: "-0.01em",
           }}
         >
-          {record.title || "Tanpa judul"}
+          {title || "Tanpa judul"}
         </h1>
         <p style={{ fontSize: 13, color: "#7a7264", margin: "0 0 26px" }}>
           {formatDate(record.event_date)} · tentang{" "}
-          <Link href={`/tokoh/${id}`} className="fig-link" style={{ color: "#16130f", fontWeight: 600 }}>
+          <Link href={`/tokoh/${id}`} className="link-subtle" style={{ color: "#16130f", fontWeight: 600 }}>
             {record.figure_name}
           </Link>
         </p>
@@ -129,10 +130,14 @@ export default async function DetailCatatan({
 
         {record.quote ? <Quote record={record} sources={record.sources ?? []} /> : null}
 
-        <h2 style={{ fontFamily: "var(--font-serif)", fontSize: 19, fontWeight: 600, margin: "0 0 12px" }}>Ringkasan</h2>
-        {record.summary ? (
-          <SummaryList summary={record.summary} size={15.5} />
-        ) : (
+        {/* A summary whose bullets all repeat the heading has nothing left to
+            show, so the section goes rather than claiming none exists. */}
+        {summary || !record.summary ? (
+          <h2 style={{ fontFamily: "var(--font-serif)", fontSize: 19, fontWeight: 600, margin: "0 0 12px" }}>Ringkasan</h2>
+        ) : null}
+        {summary ? (
+          <SummaryList summary={summary} sources={sources} size={15.5} />
+        ) : record.summary ? null : (
           // A record is published as soon as it clusters, so it can arrive here
           // before the summarize stage has run. Say so rather than showing a
           // blank section — the source articles below still carry the story.
@@ -141,9 +146,9 @@ export default async function DetailCatatan({
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "20px 0 34px" }}>
-          <Badge tone="quiet" text={`${sources.length} artikel sumber`} />
-        </div>
+        {/* No "N artikel sumber" badge: it looked like a button, and the
+            Artikel Sumber heading below already gives the count. */}
+        <div aria-hidden style={{ height: 34 }} />
 
         {buzzer && buzzer.anomaly_pct ? (
           <details style={{ background: "#f5e7e3", border: "1px solid #d8a99f", padding: "12px 16px", marginBottom: 34 }}>
@@ -160,7 +165,8 @@ export default async function DetailCatatan({
                     color: "#8b2e1f",
                     background: "#f6f2e9",
                     border: "1px solid #d8a99f",
-                    borderRadius: 99,
+                    // Square-cornered: rounded pills on this site are links.
+                    borderRadius: 2,
                     padding: "3px 10px",
                   }}
                 >
@@ -178,32 +184,9 @@ export default async function DetailCatatan({
         <h2 className="section-label rule-heavy" style={{ padding: "0 0 10px", margin: "0 0 16px" }}>
           Artikel Sumber ({sources.length})
         </h2>
-        <ol style={{ listStyle: "none", margin: "0 0 40px", padding: 0 }}>
-          {sources.map((s, i) => {
-            return (
-              <li key={s.url} style={{ borderBottom: "1px solid #e4dcc9" }}>
-                <a
-                  href={s.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ display: "flex", gap: 14, alignItems: "center", padding: "13px 0", textDecoration: "none", color: "inherit" }}
-                >
-                  <span style={{ flex: "none", fontFamily: "var(--font-serif)", fontSize: 13, color: "#bcb3a0", width: 22 }}>
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
-                  <OutletTile source={s.source} size={26} ring="#f6f2e9" />
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: 14, fontWeight: 600, lineHeight: 1.35 }}>{s.title}</span>
-                    <span style={{ display: "block", fontSize: 11.5, color: "#7a7264", marginTop: 2 }}>
-                      {s.source} · {formatDateShort(s.published_at)}
-                    </span>
-                  </span>
-                  <span style={{ flex: "none", fontSize: 11.5, fontWeight: 600, color: "#8b2e1f" }}>Buka ↗</span>
-                </a>
-              </li>
-            );
-          })}
-        </ol>
+        <div style={{ marginBottom: 40 }}>
+          <SourceList sources={sources} large />
+        </div>
 
         <h2 className="section-label rule-heavy" style={{ padding: "0 0 10px", margin: "0 0 8px" }}>
           Komentar Publik
@@ -233,51 +216,19 @@ function NeighbourLink({ href, label, muted }: { href: string | null; label: str
     letterSpacing: "0.1em",
     textTransform: "uppercase",
     padding: "5px 12px",
-    borderRadius: 99,
-    border: "1px solid",
-    textDecoration: "none",
   };
   if (!href) {
+    // Square and faded, so it does not read as a link that failed to work.
     return (
-      <span style={{ ...style, color: "#bcb3a0", borderColor: "#e4dcc9" }} aria-disabled>
+      <span style={{ ...style, color: "#bcb3a0", border: "1px solid #e4dcc9", borderRadius: 2 }} aria-disabled>
         {label}
       </span>
     );
   }
   return (
-    <Link
-      href={href}
-      style={{
-        ...style,
-        color: muted ? "#7a7264" : "#8b2e1f",
-        borderColor: muted ? "#d8cfba" : "#d8a99f",
-      }}
-    >
+    <Link href={href} className={muted ? "pill-link" : "pill-link is-primary"} style={style}>
       {label}
     </Link>
-  );
-}
-
-function Badge({ tone, text }: { tone: "ok" | "warn" | "quiet"; text: string }) {
-  const tones = {
-    ok: { color: "#3d6b4a", bg: "#e6efe8", border: "#b6d0bd" },
-    warn: { color: "#8b2e1f", bg: "#f5e7e3", border: "#d8a99f" },
-    quiet: { color: "#6b645b", bg: "#efe9dc", border: "#ddd3bf" },
-  }[tone];
-  return (
-    <span
-      style={{
-        fontSize: 11,
-        fontWeight: 600,
-        color: tones.color,
-        background: tones.bg,
-        border: `1px solid ${tones.border}`,
-        borderRadius: 2,
-        padding: "4px 9px",
-      }}
-    >
-      {text}
-    </span>
   );
 }
 

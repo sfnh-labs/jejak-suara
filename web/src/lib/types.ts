@@ -115,6 +115,10 @@ export interface FigureSummary extends Figure {
   outlet_count: number;
   comment_count: number;
   avg_sentiment: number | null;
+  /** last_seen of the figure's newest live record. */
+  last_record_at: string | null;
+  /** Live records with coverage in the last 24 hours. */
+  recent_count: number;
 }
 
 /**

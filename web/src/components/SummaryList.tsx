@@ -11,6 +11,12 @@
  * to a paragraph rather than being forced into one bogus bullet.
  */
 
+import Citation from "./Citation";
+import { formatDateShort } from "@/lib/design";
+import type { EventRecord } from "@/lib/types";
+
+type Source = EventRecord["sources"][number];
+
 /** Leading list markers the model emits: "- ", "* ", "• ", "1. ", "1) ". */
 const MARKER = /^\s*(?:[-*•–—]|\d+[.)])\s+/;
 
@@ -28,6 +34,83 @@ function contentLines(summary: string): string[] {
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l && !HEADER.test(l) && !RULE.test(l));
+}
+
+/** Lowercased words only, for comparing a title with a bullet. */
+function words(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+// Function words that a rewording adds or drops without changing what it says.
+const FILLER = new Set(
+  (
+    "yang para di ke dari dan untuk dengan pada dalam itu ini akan telah sudah " +
+    "juga atas bagi oleh serta sebagai terhadap kepada tersebut sangat lebih " +
+    "secara bahwa adalah agar karena saat"
+  ).split(" ")
+);
+
+/** The distinct words that carry meaning. */
+function contentWords(text: string): string[] {
+  return [...new Set(words(text).split(" ").filter((w) => w && !FILLER.has(w)))];
+}
+
+/**
+ * A bullet counts as a rewording of the title when at least this share of its
+ * content words are already in the title. Measured on 3,000 records: at 0.8
+ * the bullets hidden are paraphrases ("Menolak isu mengundurkan diri dari
+ * jabatan Menteri Agama" under "Menolak isu pengunduran diri dari jabatan
+ * sebagai Menteri Agama"), at the cost of the odd extra word such as a place.
+ */
+const REWORDED = 0.8;
+
+/**
+ * The title and summary without the bullets that only repeat the title.
+ *
+ * The model often opens the list by repeating the JUDUL with a few more words —
+ * "Menandatangani Peraturan Daerah" over "Menandatangani peraturan daerah
+ * terkait pemberdayaan masyarakat dan desa". Dropping that bullet would lose
+ * those words, so it becomes the heading instead. Any bullet left that says
+ * the heading again in other words is then dropped.
+ */
+export function withoutTitleRepeats(
+  title: string | null,
+  summary: string | null
+): { title: string | null; summary: string | null } {
+  if (!title || !summary) return { title, summary };
+  let lines = summary.split("\n");
+  const lead = lines.findIndex((l) => {
+    const t = l.trim();
+    return t && !HEADER.test(t) && !RULE.test(t);
+  });
+  // A summary that came back as a paragraph has no bullet to compare.
+  if (lead < 0 || !MARKER.test(lines[lead])) return { title, summary };
+
+  const text = lines[lead]
+    .replace(MARKER, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/[\s.]+$/, "")
+    .trim();
+  const t = words(title);
+  const b = words(text);
+  if (b === t || b.startsWith(t + " ")) {
+    title = text.charAt(0).toUpperCase() + text.slice(1);
+    lines = lines.filter((_, i) => i !== lead);
+  }
+
+  const inTitle = new Set(contentWords(title));
+  lines = lines.filter((l) => {
+    if (!MARKER.test(l)) return true;
+    const c = contentWords(l);
+    return c.length === 0 || c.filter((w) => inTitle.has(w)).length / c.length < REWORDED;
+  });
+
+  const rest = lines.join("\n");
+  return { title, summary: contentLines(rest).length > 0 ? rest : null };
 }
 
 export function toBullets(summary: string): string[] {
@@ -53,28 +136,48 @@ function shortenCitations(text: string): string {
     .trim();
 }
 
-/** Text with the citation markers rendered as their own muted spans. */
-function withCitations(text: string, size: number) {
+/**
+ * Text with each [n] citation rendered as a link to the nth source, with a
+ * tooltip naming the article and outlet. The summarizer numbers its documents
+ * in the same order the sources arrive here (see data.ts). A number with no
+ * matching source — a model miscount — stays plain muted text.
+ */
+function withCitations(text: string, size: number, sources: Source[]) {
   return shortenCitations(text)
     .split(CITE_SPLIT)
     .filter(Boolean)
-    .map((part, i) =>
-      CITE_SPLIT.test(part) ? (
-        <span key={i} style={{ color: "#9b9285", fontSize: size - 2 }}>
-          {part}
-        </span>
-      ) : (
-        part
-      )
-    );
+    .map((part, i) => {
+      if (!CITE_SPLIT.test(part)) return part;
+      const source = sources[Number(part.slice(1, -1)) - 1];
+      if (!source) {
+        return (
+          <span key={i} style={{ color: "#9b9285", fontSize: size - 2 }}>
+            {part}
+          </span>
+        );
+      }
+      return (
+        <Citation
+          key={i}
+          label={part}
+          href={source.url}
+          title={source.title}
+          meta={source.published_at ? `${source.source} · ${formatDateShort(source.published_at)}` : source.source}
+          size={size - 2}
+        />
+      );
+    });
 }
 
 export default function SummaryList({
   summary,
+  sources = [],
   size = 14.5,
   color = "#3e382f",
 }: {
   summary: string;
+  /** The entry's sources, in the order the summary's [n] numbers refer to. */
+  sources?: Source[];
   size?: number;
   color?: string;
 }) {
@@ -83,7 +186,7 @@ export default function SummaryList({
   if (bullets.length === 0) {
     return (
       <p style={{ fontSize: size, lineHeight: 1.62, color, margin: "0 0 14px", whiteSpace: "pre-line" }}>
-        {withCitations(contentLines(summary).join("\n"), size)}
+        {withCitations(contentLines(summary).join("\n"), size, sources)}
       </p>
     );
   }
@@ -122,7 +225,7 @@ export default function SummaryList({
               background: "#b9ab93",
             }}
           />
-          {withCitations(text, size)}
+          {withCitations(text, size, sources)}
         </li>
       ))}
     </ul>

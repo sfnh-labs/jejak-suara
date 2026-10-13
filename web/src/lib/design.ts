@@ -162,10 +162,10 @@ export function markerLeft(display: number): string {
 
 /** Ring colour for the home page story bubbles. */
 export function sentimentRing(display: number | null): string {
-  if (display === null) return "linear-gradient(135deg,#d8cfba,#e4ddcf)";
-  if (display <= -10) return "linear-gradient(135deg,#d6453e,#e7807a)";
-  if (display < 16) return "linear-gradient(135deg,#e0a53b,#edc784)";
-  return "linear-gradient(135deg,#2e9e6b,#7bc6a0)";
+  if (display === null) return "#bcb3a0";
+  if (display <= -10) return "#d6453e";
+  if (display < 16) return "#e0a53b";
+  return "#2e9e6b";
 }
 
 const BULAN = [

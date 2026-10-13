@@ -1,13 +1,12 @@
 import Link from "next/link";
 import FigurePortrait from "./FigurePortrait";
-import OutletTile from "./OutletTile";
 import SentimentTrack from "./SentimentTrack";
-import SummaryList from "./SummaryList";
+import { SourcesDisclosure } from "./SourceList";
+import SummaryList, { withoutTitleRepeats } from "./SummaryList";
 import {
   dayBadge,
   eventTypeChip,
   formatCount,
-  formatDateShort,
   percent,
   toDisplayScore,
 } from "@/lib/design";
@@ -44,6 +43,7 @@ export default function RecordCard({
   const chip = eventTypeChip(record.event_type);
   const href = `/tokoh/${record.figure_id}/${record.event_id}`;
   const sources = record.sources ?? [];
+  const { title, summary } = withoutTitleRepeats(record.title, record.summary);
 
   return (
     <article
@@ -101,20 +101,24 @@ export default function RecordCard({
 
       {showFigure ? (
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10, flexWrap: "wrap" }}>
-          <FigurePortrait
-            figureId={record.figure_id}
-            name={record.figure_name}
-            width={24}
-            round
-            fontSize={9}
-            hatchStep={4}
-          />
           <Link
             href={`/tokoh/${record.figure_id}`}
             className="fig-link"
-            style={{ position: "relative", zIndex: 1, fontSize: 13, fontWeight: 700, color: "#16130f", textDecoration: "none" }}
+            style={{ position: "relative", zIndex: 2, display: "inline-flex", alignItems: "center", gap: 9 }}
           >
-            {record.figure_name}
+            <span className="fig-link-portrait">
+              <FigurePortrait
+                figureId={record.figure_id}
+                name={record.figure_name}
+                width={24}
+                round
+                fontSize={9}
+                hatchStep={4}
+              />
+            </span>
+            <span className="fig-link-name" style={{ fontSize: 13, fontWeight: 700 }}>
+              {record.figure_name}
+            </span>
           </Link>
           {record.event_type ? (
             <>
@@ -156,68 +160,21 @@ export default function RecordCard({
           letterSpacing: "-0.01em",
         }}
       >
-        <Link href={href} className="card-link" style={{ color: "inherit", textDecoration: "none" }}>
-          {record.title || "Tanpa judul"}
+        <Link href={href} className="card-link">
+          {title || "Tanpa judul"}
+          {/* Non-breaking, so the arrow never wraps onto a line of its own. */}
+          <span aria-hidden className="card-arrow">{"\u00a0→"}</span>
         </Link>
       </h3>
 
       {record.quote ? <Quote record={record} sources={sources} /> : null}
 
-      {showSummary && record.summary ? (
-        <SummaryList summary={record.summary} />
+      {showSummary && summary ? (
+        <SummaryList summary={summary} sources={sources} />
       ) : null}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <details style={{ position: "relative", zIndex: 1, flex: 1, minWidth: 0 }}>
-          <summary
-            style={{
-              fontSize: 11.5,
-              fontWeight: 700,
-              color: "#8b2e1f",
-              cursor: "pointer",
-              padding: "3px 0",
-              listStyle: "none",
-            }}
-          >
-            Artikel Sumber ({sources.length})
-          </summary>
-          <div style={{ background: "#efe9dc", border: "1px solid #ddd3bf", padding: "4px 16px 6px", marginTop: 10 }}>
-            {sources.map((s, i) => (
-              <a
-                key={s.url}
-                href={s.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  display: "flex",
-                  gap: 12,
-                  padding: "11px 0",
-                  borderBottom: i === sources.length - 1 ? "none" : "1px solid #e4dcc9",
-                  textDecoration: "none",
-                  color: "inherit",
-                }}
-              >
-                <div style={{ flex: "none", display: "flex", alignItems: "center", paddingTop: 1 }}>
-                  <OutletTile source={s.source} size={24} ring="#efe9dc" />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: "#16130f", lineHeight: 1.3 }}>{s.title}</div>
-                  <div style={{ fontSize: 11.5, color: "#7a7264", marginTop: 2 }}>
-                    {s.source} · {formatDateShort(s.published_at)}
-                  </div>
-                </div>
-                <div style={{ flex: "none", fontSize: 11.5, fontWeight: 600, color: "#8b2e1f", alignSelf: "center" }}>
-                  Buka ↗
-                </div>
-              </a>
-            ))}
-          </div>
-        </details>
-        <div aria-hidden style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 5 }}>
-          {sources.slice(0, 4).map((s) => (
-            <OutletTile key={s.url} source={s.source} size={22} />
-          ))}
-        </div>
+      <div style={{ marginBottom: 16 }}>
+        <SourcesDisclosure sources={sources} />
       </div>
 
       {/* No corroboration badge either way. The sources disclosure above
@@ -272,7 +229,8 @@ export function Quote({ record, sources }: { record: EventRecord; sources: Event
             href={record.quote_url}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ position: "relative", zIndex: 1, color: "inherit" }}
+            className="link-subtle"
+            style={{ position: "relative", zIndex: 2 }}
           >
             {outlet ? `Kutipan dari ${outlet}` : "Kutipan dari sumber"}
           </a>

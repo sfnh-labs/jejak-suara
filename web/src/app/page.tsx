@@ -2,6 +2,7 @@ import Link from "next/link";
 import Nav from "@/components/Nav";
 import EventCard from "@/components/EventCard";
 import FigurePortrait from "@/components/FigurePortrait";
+import HScroller from "@/components/HScroller";
 import RecordCard from "@/components/RecordCard";
 import { getFeed, getFigures, getSentimentHistory } from "@/lib/data";
 import {
@@ -186,29 +187,32 @@ export default async function Beranda() {
   );
 }
 
+/** Newest record first; figures with no live record go to the end. */
+function byLatestRecord(figures: FigureSummary[]): FigureSummary[] {
+  const at = (f: FigureSummary) => (f.last_record_at ? Date.parse(f.last_record_at) : -Infinity);
+  return [...figures].sort((a, b) => at(b) - at(a) || a.name.localeCompare(b.name));
+}
+
 function StoryBubbles({ figures, history }: { figures: FigureSummary[]; history: SentimentPoint[] }) {
   return (
     <section aria-label="Tokoh dipantau" style={{ padding: "28px 0 4px" }}>
-      <div style={{ display: "flex", gap: 18, overflowX: "auto", paddingBottom: 8 }}>
-        {figures.map((fig) => {
+      <HScroller label="Daftar tokoh, terbaru lebih dulu">
+        {byLatestRecord(figures).map((fig) => {
           const display = toDisplayScore(fig.avg_sentiment);
           const trend = TREND_MARK[trendFor(history, fig.id)];
+          const recent = Number(fig.recent_count);
           return (
             <Link
               key={fig.id}
               href={`/tokoh/${fig.id}`}
-              style={{ flex: "none", width: 74, textAlign: "center", textDecoration: "none", color: "inherit" }}
+              className="bubble-link"
+              style={{ flex: "none", width: 74, textAlign: "center" }}
             >
               <div
-                style={{
-                  width: 66,
-                  height: 66,
-                  margin: "0 auto",
-                  borderRadius: "50%",
-                  background: sentimentRing(display),
-                  padding: 3,
-                }}
+                className="bubble-ring"
+                style={{ position: "relative", width: 66, height: 66, margin: "0 auto", padding: 5 }}
               >
+                <StoryRing count={recent} color={sentimentRing(display)} size={66} />
                 <FigurePortrait
                   figureId={fig.id}
                   name={fig.name}
@@ -219,18 +223,61 @@ function StoryBubbles({ figures, history }: { figures: FigureSummary[]; history:
                   hatchStep={5}
                 />
               </div>
-              <div style={{ fontSize: 12, fontWeight: 600, marginTop: 7, lineHeight: 1.25 }}>
+              <div className="bubble-name" style={{ fontSize: 12, fontWeight: 600, marginTop: 7, lineHeight: 1.25 }}>
                 {fig.name.split(/\s+/)[0]}
               </div>
               <div style={{ fontSize: 11, color: trend.color, marginTop: 2 }}>
                 <span aria-hidden>{trend.glyph}</span>
-                <span className="sr-only"> {trend.label}</span>
+                <span className="sr-only">
+                  {" "}{trend.label}
+                  {recent > 0 ? `, ${recent} catatan baru dalam 24 jam` : ""}
+                </span>
               </div>
             </Link>
           );
         })}
-      </div>
+      </HScroller>
     </section>
+  );
+}
+
+/** More segments than this would be too short to tell apart at 66px. */
+const STORY_MAX_SEGMENTS = 20;
+
+/**
+ * The ring around a story bubble, Instagram-style: one segment per record with
+ * coverage in the last 24 hours, in the figure's sentiment colour. With nothing
+ * new it is a thin grey line, like a story already seen.
+ */
+function StoryRing({ count, color, size }: { count: number; color: string; size: number }) {
+  const stroke = count > 0 ? 3 : 1.5;
+  const r = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * r;
+  const segments = Math.min(count, STORY_MAX_SEGMENTS);
+  const gap = segments > 1 ? (segments > 12 ? 2.5 : 4) : 0;
+  const dash = segments > 0 ? circumference / segments - gap : circumference;
+  return (
+    <svg
+      aria-hidden
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      // Rotated so the first segment starts at twelve o'clock.
+      style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)" }}
+    >
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke={count > 0 ? color : "#cfc6b2"}
+        strokeWidth={stroke}
+        strokeDasharray={gap ? `${dash} ${gap}` : undefined}
+        // A gap is left at the end of each dash, so shift by half a gap to
+        // centre the gaps on the segment boundaries.
+        strokeDashoffset={gap ? -gap / 2 : undefined}
+      />
+    </svg>
   );
 }
 

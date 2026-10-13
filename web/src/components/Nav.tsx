@@ -38,17 +38,13 @@ export default function Nav({ active }: { active?: string }) {
       </Link>
       <div style={{ display: "flex", gap: "clamp(14px, 3vw, 28px)", fontSize: 13, fontWeight: 600 }}>
         {LINKS.map((link) => {
-          const isActive = active === link.href;
           return (
             <Link
               key={link.href}
               href={link.href}
-              style={{
-                color: isActive ? "#16130f" : "#7a7264",
-                textDecoration: "none",
-                paddingBottom: 2,
-                borderBottom: isActive ? "2px solid #8b2e1f" : "2px solid transparent",
-              }}
+              className="nav-link"
+              aria-current={active === link.href ? "page" : undefined}
+              style={{ paddingBottom: 2 }}
             >
               {link.label}
             </Link>

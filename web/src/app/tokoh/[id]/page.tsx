@@ -4,7 +4,7 @@ import FigurePortrait from "@/components/FigurePortrait";
 import Nav from "@/components/Nav";
 import RecordCard from "@/components/RecordCard";
 import SentimentTrack from "@/components/SentimentTrack";
-import { getFigure, getFigureEvents } from "@/lib/data";
+import { FIGURE_PAGE_SIZE, getFigure, getFigureEvents } from "@/lib/data";
 import { getCv } from "@/lib/cv";
 import {
   dayBadge,
@@ -21,12 +21,14 @@ export default async function HalamanTokoh({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; hal?: string }>;
 }) {
   const { id } = await params;
-  const { tab } = await searchParams;
-  const [figure, events] = await Promise.all([getFigure(id), getFigureEvents(id)]);
+  const { tab, hal } = await searchParams;
+  const page = Math.max(1, Math.floor(Number(hal)) || 1);
+  const [figure, events] = await Promise.all([getFigure(id), getFigureEvents(id, page)]);
   if (!figure) notFound();
+  const pageCount = Math.max(1, Math.ceil(Number(figure.event_count) / FIGURE_PAGE_SIZE));
 
   const cv = getCv(id);
   // The tab lives in the URL rather than client state, so the page stays a
@@ -46,7 +48,7 @@ export default async function HalamanTokoh({
       <Nav />
       <div className="container-page" style={{ maxWidth: 1120 }}>
         <nav aria-label="Breadcrumb" style={{ padding: "20px 0 0", fontSize: 12.5, color: "#7a7264" }}>
-          <Link href="/" style={{ color: "#7a7264" }}>Beranda</Link>
+          <Link href="/" className="link-subtle">Beranda</Link>
           <span aria-hidden> · </span>
           <span style={{ color: "#16130f" }}>{figure.name}</span>
         </nav>
@@ -116,10 +118,18 @@ export default async function HalamanTokoh({
               <CvPanel cv={cv} />
             ) : events.length === 0 ? (
               <p style={{ fontSize: 15, color: "#7a7264", lineHeight: 1.6 }}>
-                Belum ada catatan yang tayang untuk tokoh ini.
+                {page > 1 ? (
+                  <>
+                    Tidak ada catatan di halaman ini.{" "}
+                    <Link href={`/tokoh/${id}`} className="link">Kembali ke halaman 1</Link>
+                  </>
+                ) : (
+                  "Belum ada catatan yang tayang untuk tokoh ini."
+                )}
               </p>
             ) : (
-              [...groups.entries()].map(([month, rows]) => (
+              <>
+              {[...groups.entries()].map(([month, rows]) => (
                 <section key={month}>
                   <h2
                     style={{
@@ -156,7 +166,9 @@ export default async function HalamanTokoh({
                     </div>
                   ))}
                 </section>
-              ))
+              ))}
+              <Pager id={id} page={page} pageCount={pageCount} />
+              </>
             )}
           </main>
         </div>
@@ -177,21 +189,49 @@ function byDay(rows: EventRecord[]): [string, EventRecord[]][] {
   return out;
 }
 
+/** Newer/older links under the record list; hidden when it all fits on one page. */
+function Pager({ id, page, pageCount }: { id: string; page: number; pageCount: number }) {
+  if (pageCount <= 1) return null;
+  const href = (n: number) => (n === 1 ? `/tokoh/${id}` : `/tokoh/${id}?hal=${n}`);
+  return (
+    <nav
+      aria-label="Halaman catatan"
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 16,
+        borderTop: "1px solid #d8cfba",
+        margin: "28px 0 48px",
+        paddingTop: 16,
+      }}
+    >
+      <span style={{ minWidth: 0 }}>
+        {page > 1 ? <Link href={href(page - 1)} className="link" style={{ fontSize: 13 }}>← Lebih baru</Link> : null}
+      </span>
+      <span style={{ fontSize: 12.5, color: "#7a7264" }}>
+        Halaman {Math.min(page, pageCount)} dari {pageCount}
+      </span>
+      <span style={{ minWidth: 0, textAlign: "right" }}>
+        {page < pageCount ? <Link href={href(page + 1)} className="link" style={{ fontSize: 13 }}>Lebih lama →</Link> : null}
+      </span>
+    </nav>
+  );
+}
+
 function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
   return (
     <Link
       href={href}
       role="tab"
       aria-selected={active}
+      className="tab-link"
       style={{
         fontSize: 12,
         fontWeight: 700,
         letterSpacing: "0.14em",
         textTransform: "uppercase",
-        color: active ? "#16130f" : "#7a7264",
-        textDecoration: "none",
         padding: "10px 0",
-        borderBottom: active ? "2px solid #8b2e1f" : "2px solid transparent",
         marginBottom: -1,
       }}
     >

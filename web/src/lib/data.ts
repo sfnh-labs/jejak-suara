@@ -87,7 +87,9 @@ const RECORD_SELECT = `
                json_build_object(
                  'source', a.source, 'url', a.url,
                  'title', a.title, 'published_at', a.published_at
-               ) ORDER BY a.published_at
+               -- The order the summarizer numbered them in, so [Sumber N]
+               -- links to the Nth source. SQLite sorts NULLs first.
+               ) ORDER BY a.published_at NULLS FIRST, a.id
              ) AS sources
         FROM articles a
        WHERE a.event_id = e.id
@@ -120,13 +122,21 @@ export async function getFigures(): Promise<FigureSummary[]> {
             COALESCE(st.event_count, 0)  AS event_count,
             COALESCE(st.outlet_count, 0) AS outlet_count,
             COALESCE(st.comment_count, 0) AS comment_count,
-            st.avg_sentiment
+            st.avg_sentiment,
+            st.last_record_at,
+            COALESCE(st.recent_count, 0) AS recent_count
        FROM figures f
        LEFT JOIN LATERAL (
          SELECT count(DISTINCT e.id)     AS event_count,
                 count(DISTINCT a.source) AS outlet_count,
                 count(c.id)              AS comment_count,
-                avg(s.score)             AS avg_sentiment
+                avg(s.score)             AS avg_sentiment,
+                -- last_seen, the newest article, is what the feed sorts by, so
+                -- the homepage's story row orders figures the same way.
+                max(e.last_seen)         AS last_record_at,
+                count(DISTINCT e.id) FILTER (
+                  WHERE e.last_seen::timestamptz > now() - interval '24 hours'
+                )                        AS recent_count
            FROM events e
            LEFT JOIN articles a  ON a.event_id = e.id
            LEFT JOIN comments c  ON c.event_id = e.id
@@ -145,10 +155,29 @@ export async function getFigure(figureId: string): Promise<FigureSummary | null>
   return rows.find((f) => f.id === figureId) ?? null;
 }
 
-export async function getFigureEvents(figureId: string): Promise<EventRecord[]> {
+/** Records per page on a figure's Rekam Jejak. */
+export const FIGURE_PAGE_SIZE = 100;
+
+/**
+ * One page of a figure's records, newest first.
+ *
+ * Paged because a figure's history is unbounded (one has over 10,000 live
+ * records, and rendering them all hangs the server). The page's ids are picked
+ * in the subquery so RECORD_SELECT's per-event aggregates run for those rows
+ * only, not for the whole history before the sort. `e.id` breaks date ties so
+ * pages never overlap or skip a record.
+ */
+export async function getFigureEvents(figureId: string, page = 1): Promise<EventRecord[]> {
   return query<EventRecord>(
-    `${RECORD_SELECT} AND e.figure_id = $1 ORDER BY e.event_date DESC`,
-    [figureId]
+    `${RECORD_SELECT}
+       AND e.id IN (
+         SELECT p.id FROM events p
+          WHERE p.figure_id = $1 AND p.kind = 'record' AND ${LIVE("p")}
+          ORDER BY p.event_date DESC NULLS LAST, p.id DESC
+          LIMIT $2 OFFSET $3
+       )
+     ORDER BY e.event_date DESC NULLS LAST, e.id DESC`,
+    [figureId, FIGURE_PAGE_SIZE, (page - 1) * FIGURE_PAGE_SIZE]
   );
 }
 
@@ -217,7 +246,7 @@ export async function getPeristiwa(limit = 60): Promise<Peristiwa[]> {
                   json_build_object(
                     'source', a.source, 'url', a.url,
                     'title', a.title, 'published_at', a.published_at
-                  ) ORDER BY a.published_at
+                  ) ORDER BY a.published_at NULLS FIRST, a.id
                 ) AS sources
            FROM articles a
           WHERE a.event_id = e.id
