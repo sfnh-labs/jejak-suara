@@ -46,6 +46,12 @@ Text to translate:
 ---END ARTICLE---"""
 
 
+# A full article comes back as up to ~2,500 words of Indonesian. On an M1 Pro
+# running qwen2.5:7b a 9k-character BBC piece took 268 s, so the old 120 s limit
+# failed every long article, and each cycle retried it and failed again.
+TRANSLATE_TIMEOUT = 600
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -65,7 +71,7 @@ def _ollama_complete(prompt: str) -> str | None:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=TRANSLATE_TIMEOUT) as resp:
             body = resp.read().decode("utf-8")
             data = json.loads(body)
             return data.get("response", "").strip()
