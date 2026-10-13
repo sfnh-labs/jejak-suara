@@ -129,6 +129,71 @@ at roughly 25 × `--days`, plus the RSS intake; otherwise articles get summarize
 from headlines alone (see README, *Filling in history*). With 3 runs a day at
 `--days 6`, backfill covers about 18 days of history per day.
 
+### On macOS
+
+The pipeline moved to a Mac (M1 Pro) on 2026-10-13. There, a launchd agent,
+`com.jejaksuara.publish-local`, replaces the scheduled task, and
+`scripts/publish_local.sh` replaces `publish_local.ps1`, running the same stages
+in the same order.
+
+1. Install Python and Ollama with Homebrew, then build the venv the script
+   uses. Homebrew's `python@3.14` no longer links a bare `python3`, so call it
+   by version:
+   ```bash
+   brew install python@3.14 ollama
+   brew services start ollama
+   ollama pull qwen2.5:7b
+   python3.14 -m venv .venv
+   .venv/bin/pip install -r requirements.txt pytest
+   ```
+2. Put `DATABASE_URL` **and** `YOUTUBE_API_KEY` in the repo-root `.env`.
+   launchd doesn't load a shell profile, so `.env` is the only place the script
+   finds keys.
+3. Register the agent, then run one cycle and watch `scripts/publish_local.log`:
+   ```bash
+   bash scripts/register_publish_agent.sh
+   launchctl kickstart gui/$(id -u)/com.jejaksuara.publish-local
+   ```
+
+How it differs from the Windows task:
+
+- **One push a day.** Only a run starting at 18:00 or later pushes to Neon, at
+  most once a day (`scripts/.last_neon_push` records the day). The 05:00 and
+  11:00 runs work locally and their rows go out with the evening push. Force
+  one with `PUSH=1 bash scripts/publish_local.sh`.
+- **Empty-database guard.** The script refuses to run when `jejak.db` is
+  missing or under 1 MB, because a run on an empty copy would mint fresh row ids
+  and push them over Neon's.
+- **Missed runs:** launchd runs a cycle missed during sleep once the Mac wakes.
+  A Mac that was shut down skips it.
+- **Priority:** the agent runs as `ProcessType` `Standard`. As `Background`,
+  macOS throttled the cluster stage to a quarter of its speed.
+- **No time limit.** A lock older than 4 hours still counts as left over from a
+  crash.
+
+Check it:
+
+```bash
+launchctl print gui/$(id -u)/com.jejaksuara.publish-local | grep -E "state|last exit"
+tail -40 scripts/publish_local.log
+```
+
+**If you rebuild `jejak.db` from Neon** (`sync_to_neon.py --pull`), three things
+don't come back, because they aren't in Neon:
+
+- The figure roster: the pull keeps only `figures.toml`'s seeds. Copy the
+  `figures` table from Neon into the local one.
+- The push ledger (`_pushed`): without it the next push re-sends every row.
+  Right after the pull, local and Neon match, so fill the ledger with the
+  current row hashes.
+- Figure-mention evidence (`figure_mentions`): it builds up again as the mentions
+  stage scans articles. Until then the review queue shrinks, and pruning
+  deletes stale candidates' articles it would otherwise have kept.
+
+The first cluster run after a rebuild also refills the embedding cache
+(`article_embeddings`), about 15 minutes on the M1 Pro. Later runs take a minute
+or two.
+
 ## 4. Web app
 
 ```powershell

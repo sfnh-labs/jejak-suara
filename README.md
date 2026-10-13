@@ -95,6 +95,10 @@ Ollama if it isn't already up, and logs to `scripts/publish_local.log`. The task
 is registered with `-StartWhenAvailable`, so a cycle missed while the machine
 was off runs once it's back.
 
+On macOS, `scripts/publish_local.sh` runs the same stages from a launchd agent
+(`bash scripts/register_publish_agent.sh`) and pushes to Neon once a day, from
+the 18:00 run. See `docs/SETUP.md`, *On macOS*.
+
 The equivalent by hand:
 
 ```bash
