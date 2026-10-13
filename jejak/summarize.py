@@ -60,6 +60,11 @@ grounded ONLY in the provided source documents.
 - Prefer "Menurut [outlet], ..." / "[Outlet] melaporkan ...".
 {_KATEGORI_RULES}
 
+The bullets sit directly under the JUDUL, so they must not repeat it:
+- Do NOT open with the JUDUL, word for word or reworded. The first bullet
+  adds what the JUDUL leaves out — who, where, when, how much, why.
+- Every bullet carries at least one fact the JUDUL does not.
+
 Output format, exactly:
 JUDUL: <a plain factual clause naming what happened, 4-12 words>
 KATEGORI: <type of event, 1-3 words>
@@ -95,6 +100,14 @@ The JUDUL is a ledger heading, NOT a news headline:
 {_KATEGORI_RULES}
 - KATEGORI describes {{name}}'s act itself (e.g. "Pernyataan", "Kunjungan
   Kerja"), never {{name}}'s job title or field.
+
+The bullets sit directly under the JUDUL, so they must not repeat it:
+- Do NOT open with the JUDUL, word for word or reworded. With JUDUL
+  "Menandatangani peraturan daerah", the bullet "Menandatangani peraturan
+  daerah tentang pemberdayaan desa" is wrong; write "Peraturan itu mengatur
+  pemberdayaan masyarakat dan desa" instead.
+- Every bullet carries at least one fact the JUDUL does not — what exactly,
+  where, when, how much, why, or what {{name}} said.
 
 Output format, exactly:
 JUDUL: <verb phrase>
@@ -148,7 +161,9 @@ _PROMPT_PERISTIWA = (
     "format poin-poin. Setiap poin satu fakta kunci, diakhiri [Sumber 1], "
     "[Sumber 2], dan seterusnya. Jika hanya satu sumber yang melaporkannya, "
     "nyatakan bahwa peristiwa ini belum terkonfirmasi oleh media lain. "
-    "Jangan gunakan paragraf pembuka atau penutup.\n\n"
+    "Jangan gunakan paragraf pembuka atau penutup. "
+    "Poin-poin tidak boleh mengulang JUDUL, baik kata per kata maupun dengan "
+    "kata lain; setiap poin menambah fakta yang belum ada di JUDUL.\n\n"
     "{categories}"
     "Ikuti kerangka ini persis, termasuk kata JUDUL, KATEGORI, dan garis ---. "
     "Ganti bagian di dalam < > dengan isi dari dokumen:\n"
@@ -167,6 +182,8 @@ _PROMPT_RECORD = (
     "[Sumber 2], dan seterusnya. Abaikan bagian dokumen yang bukan tentang "
     "perbuatan atau ucapan {name}. "
     "Jangan gunakan paragraf pembuka atau penutup. "
+    "Poin-poin tidak boleh mengulang JUDUL, baik kata per kata maupun dengan "
+    "kata lain; setiap poin menambah fakta yang belum ada di JUDUL. "
     "Setiap poin ditulis pada baris sendiri dan diawali tanda '- '.\n\n"
     "{categories}"
     "Ikuti kerangka ini persis, termasuk kata JUDUL, KATEGORI, dan garis ---. "
@@ -346,8 +363,11 @@ def summarize_event(conn: sqlite3.Connection, event_id: int) -> dict:
     Returns a small result dict for logging.
     """
     articles = conn.execute(
+        # The web numbers sources in this same order to link each [Sumber N]
+        # to its article (web/src/lib/data.ts), so keep the two in step. The id
+        # breaks ties between articles published at the same moment.
         "SELECT source, url, title, summary, body, published_at FROM articles "
-        "WHERE event_id = ? ORDER BY published_at",
+        "WHERE event_id = ? ORDER BY published_at, id",
         (event_id,),
     ).fetchall()
     if not articles:
