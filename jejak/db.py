@@ -187,6 +187,15 @@ CREATE TABLE IF NOT EXISTS pipeline_state (
     updated_at TEXT NOT NULL
 );
 
+-- Clustering's embedding cache (jejak/cluster.py). Local only, never synced:
+-- it is derived from the article text and rebuilt on demand, so a working copy
+-- pulled fresh from Neon just pays one slow cluster run to refill it.
+CREATE TABLE IF NOT EXISTS article_embeddings (
+    article_id TEXT PRIMARY KEY,
+    text_hash  TEXT NOT NULL,
+    vec        BLOB NOT NULL
+);
+
 -- Correction / right-of-reply requests (legal safety valve).
 CREATE TABLE IF NOT EXISTS corrections (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

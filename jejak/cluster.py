@@ -6,6 +6,7 @@ share concrete entities/topics beyond the tracked figure's name.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -15,7 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import numpy as np
 
-from .embed import cosine_similarity, embed
+from .embed import MODEL_NAME, cosine_similarity, embed
 from .config import load_figures
 
 _STOP = {
@@ -130,6 +131,32 @@ def _text(article: dict | sqlite3.Row) -> str:
     return "\n".join(parts)
 
 
+def _embed_article(conn: sqlite3.Connection, article_id: str, txt: str):
+    """An article's embedding, from the local cache when its text is unchanged.
+
+    Matching needs a vector for every article of every open event, which is
+    nearly the whole database; encoding them all afresh made this stage take
+    most of an hour each run. The hash covers the model and the text, so a
+    fetched body, a translation or a model change re-encodes just that article.
+    """
+    import numpy as np
+
+    key = hashlib.sha1(f"{MODEL_NAME}\n{txt}".encode("utf-8")).hexdigest()
+    row = conn.execute(
+        "SELECT text_hash, vec FROM article_embeddings WHERE article_id = ?",
+        (article_id,),
+    ).fetchone()
+    if row and row["text_hash"] == key:
+        return np.frombuffer(row["vec"], dtype=np.float32)
+    vec = np.asarray(embed(txt), dtype=np.float32)
+    conn.execute(
+        "INSERT OR REPLACE INTO article_embeddings (article_id, text_hash, vec) "
+        "VALUES (?, ?, ?)",
+        (article_id, key, vec.tobytes()),
+    )
+    return vec
+
+
 def cluster(conn: sqlite3.Connection) -> dict[str, int]:
     """Assign every unclustered article to a new or existing event.
 
@@ -164,7 +191,7 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
            ORDER BY e.event_date"""
     ).fetchall():
         arts = conn.execute(
-            "SELECT title, summary, body FROM articles WHERE event_id = ? "
+            "SELECT id, title, summary, body FROM articles WHERE event_id = ? "
             "ORDER BY published_at",
             (ev["id"],),
         ).fetchall()
@@ -175,7 +202,7 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
         for a in arts:
             txt = _text(a)
             all_toks |= _tokens(txt)
-            vecs.append(embed(txt))
+            vecs.append(_embed_article(conn, a["id"], txt))
         mean_vec = sum(vecs[1:], vecs[0]) / len(vecs)
         norm = float((mean_vec @ mean_vec) ** 0.5)
         if norm > 0:
@@ -187,7 +214,7 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
 
     for art in rows:
         txt = _text(art)
-        vec = embed(txt)
+        vec = _embed_article(conn, art["id"], txt)
         toks = _tokens(txt)
         when = _parse(art["published_at"])
 
