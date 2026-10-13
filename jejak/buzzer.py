@@ -207,19 +207,35 @@ def _volume_signal(comments: list[dict]) -> dict[int, set[str]]:
     return dict(result)
 
 
+def _signals(comments: list[dict]) -> tuple[dict, dict, dict, dict, dict]:
+    """Every signal over the whole comment set: (cross, pasta, ext, vel, vol).
+
+    Each one is keyed by event and computed across all comments, so the result
+    is the same whichever event asks. Copypasta compares every pair of comments
+    (~100M comparisons at 14k comments), which made recomputing it per event
+    cost minutes for each one; analyze_all computes this once per run.
+    """
+    return (
+        _cross_event_signal(comments),
+        _copypasta_signal(comments),
+        _extremity_signal(comments),
+        _velocity_signal(comments),
+        _volume_signal(comments),
+    )
+
+
 def analyze_event(conn: sqlite3.Connection, event_id: int,
-                  comments: list[dict]) -> dict:
-    """Run all signals for a single event and return the buzzer analysis."""
+                  comments: list[dict], signals: tuple | None = None) -> dict:
+    """Run all signals for a single event and return the buzzer analysis.
+
+    `signals` is `_signals(comments)`, passed in when analysing many events.
+    """
     event_comments = [c for c in comments if c["event_id"] == event_id]
     if not event_comments:
         return {"event_id": event_id, "anomaly_score": 0.0, "anomaly_pct": 0.0,
                 "suspicious_ids": [], "signals_triggered": []}
 
-    cross = _cross_event_signal(comments)
-    pasta = _copypasta_signal(comments)
-    ext = _extremity_signal(comments)
-    vel = _velocity_signal(comments)
-    vol = _volume_signal(comments)
+    cross, pasta, ext, vel, vol = signals or _signals(comments)
 
     triggers: list[str] = []
     suspicious_ids: set[int] = set()
@@ -283,9 +299,10 @@ def analyze_all(conn: sqlite3.Connection) -> list[dict]:
 
     results: list[dict] = []
     now = datetime.now(timezone.utc).isoformat()
+    signals = _signals(comments) if event_ids else None
 
     for eid in sorted(event_ids):
-        result = analyze_event(conn, eid, comments)
+        result = analyze_event(conn, eid, comments, signals)
         conn.execute(
             """INSERT OR REPLACE INTO buzzer_signals
                (event_id, anomaly_score, anomaly_pct, suspicious_ids_json,
