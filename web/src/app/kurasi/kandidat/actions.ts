@@ -30,7 +30,8 @@ export async function decide(formData: FormData): Promise<void> {
   const curatedRole = String(formData.get("curated_role") ?? "").trim();
 
   await setCandidateVerdict(slug, verdict, fullName, aliases, curatedRole);
-  revalidatePath("/kurasi/kandidat");
+  // Also decided from an event page in /kurasi, so the whole section.
+  revalidatePath("/kurasi", "layout");
 }
 
 /**
@@ -50,5 +51,6 @@ export async function annotate(formData: FormData): Promise<void> {
   if (notes.length > 2000) throw new Error("note too long");
 
   await setCandidateNote(slug, notes);
-  revalidatePath("/kurasi/kandidat");
+  // Also decided from an event page in /kurasi, so the whole section.
+  revalidatePath("/kurasi", "layout");
 }

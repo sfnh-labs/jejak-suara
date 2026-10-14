@@ -52,6 +52,77 @@ CREATE TABLE IF NOT EXISTS event_figures (
 );
 CREATE INDEX IF NOT EXISTS idx_event_figures_figure ON event_figures(figure_id);
 
+-- Records proposed as part of a peristiwa, by jejak/link.py. Pipeline-owned and
+-- pushed like any other table; the curator's ruling lives apart from it, in
+-- record_link_verdicts, so a --reset that truncates this table cannot take a
+-- decision with it.
+CREATE TABLE IF NOT EXISTS record_links (
+    record_id    INTEGER NOT NULL,
+    peristiwa_id INTEGER NOT NULL,
+    score        REAL,
+    evidence     TEXT,          -- JSON array of the rare words both share
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (record_id, peristiwa_id)
+);
+CREATE INDEX IF NOT EXISTS idx_record_links_peristiwa ON record_links(peristiwa_id);
+
+-- Curator-owned tables below. Postgres is their only home — no sync writes
+-- them — and scripts/apply_curation.py copies each decision into the pipeline,
+-- stamping applied_at so it is carried out once.
+
+-- 'confirmed' links are shown on the public site; 'rejected' ones are never
+-- proposed again. A confirmed row with no record_links counterpart is a link
+-- the curator added by hand. NULL is a withdrawn ruling still to be undone in
+-- the pipeline; apply_curation.py deletes the row once it has.
+CREATE TABLE IF NOT EXISTS record_link_verdicts (
+    record_id    INTEGER NOT NULL,
+    peristiwa_id INTEGER NOT NULL,
+    verdict      TEXT,           -- 'confirmed' | 'rejected' | NULL (withdrawn)
+    decided_at   TEXT NOT NULL,
+    applied_at   TEXT,
+    PRIMARY KEY (record_id, peristiwa_id)
+);
+
+-- A curator's correction to a tracked figure's name, office or aliases. Shown
+-- on the site at once (sync_figures lays a pending edit over what it pushes),
+-- and applied to the pipeline's roster so attribution matches on the aliases.
+CREATE TABLE IF NOT EXISTS figure_edits (
+    figure_id  TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    role       TEXT,
+    aliases    TEXT NOT NULL,    -- JSON array
+    -- FALSE retires the figure: discovery mis-mined it ("Ahmad Muzani Tutup")
+    -- or it duplicates someone tracked. It leaves the figure list and the
+    -- pipeline stops attributing new coverage to it; records it already owns
+    -- stay up until each is taken down.
+    active     BOOLEAN NOT NULL DEFAULT TRUE,
+    edited_at  TEXT NOT NULL,
+    applied_at TEXT
+);
+
+-- A curator's "these two are the same person". The web app moves the
+-- duplicate's records to the target in Postgres at once; apply_curation.py
+-- does the same in SQLite (jejak.roster.merge_figure), and until it has, every
+-- push lays the merge back over the rows it sends. Postgres-only.
+CREATE TABLE IF NOT EXISTS figure_merges (
+    from_id    TEXT PRIMARY KEY,  -- the duplicate, retired by the merge
+    into_id    TEXT NOT NULL,
+    decided_at TEXT NOT NULL,
+    applied_at TEXT
+);
+
+-- A related figure struck from a peristiwa: the alias matched someone else.
+-- struck = FALSE is a restore still to be carried into the pipeline; the row
+-- is deleted once it has been.
+CREATE TABLE IF NOT EXISTS event_figure_rejections (
+    event_id   INTEGER NOT NULL,
+    figure_id  TEXT NOT NULL,
+    struck     BOOLEAN NOT NULL DEFAULT TRUE,
+    decided_at TEXT NOT NULL,
+    applied_at TEXT,
+    PRIMARY KEY (event_id, figure_id)
+);
+
 CREATE TABLE IF NOT EXISTS articles (
     id           TEXT PRIMARY KEY,
     figure_id    TEXT,               -- NULL = general news, peristiwa material

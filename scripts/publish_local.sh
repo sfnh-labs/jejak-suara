@@ -84,13 +84,6 @@ if ! curl -s -m 3 http://localhost:11434/api/tags >/dev/null; then
     log "Ollama is up."
 fi
 
-run_stage "ingest" -m jejak.cli ingest
-run_stage "backfill" -m jejak.cli backfill --days 6
-run_stage "fetch" -m jejak.cli fetch --limit 200
-run_stage "mentions" -m jejak.cli mentions --limit 1000
-for stage in cluster quotes translate summarize sentiment buzzer; do
-    run_stage "$stage" -m jejak.cli "$stage"
-done
 # Neon gets one push a day, from the evening run: each push wakes Neon's
 # compute, and the free tier's monthly allowance is tight. The 05:00 and 11:00
 # runs only work locally; their rows ride along with the evening push. A run
@@ -98,7 +91,27 @@ done
 # up after sleep still counts). PUSH=1 forces a push.
 PUSH_STAMP="$REPO_ROOT/scripts/.last_neon_push"
 today=$(date +%F)
+do_push=0
 if [ "${PUSH:-0}" = 1 ] || { [ "$(date +%H)" -ge 18 ] && [ "$(cat "$PUSH_STAMP" 2>/dev/null)" != "$today" ]; }; then
+    do_push=1
+fi
+
+# Curator decisions from /kurasi go in first, so this run's attribution,
+# clustering and linking already follow them. Only on the run that pushes:
+# reading them is a Neon round trip too, and that run is awake anyway.
+if [ "$do_push" = 1 ]; then
+    run_stage "apply curation" scripts/apply_curation.py --apply \
+        || log "apply curation failed - the decisions stay pending for the next push run."
+fi
+
+run_stage "ingest" -m jejak.cli ingest
+run_stage "backfill" -m jejak.cli backfill --days 6
+run_stage "fetch" -m jejak.cli fetch --limit 200
+run_stage "mentions" -m jejak.cli mentions --limit 1000
+for stage in cluster link quotes translate summarize sentiment buzzer; do
+    run_stage "$stage" -m jejak.cli "$stage"
+done
+if [ "$do_push" = 1 ]; then
     if run_stage "push to Neon" scripts/sync_to_neon.py --push; then
         echo "$today" > "$PUSH_STAMP"
     else

@@ -89,6 +89,10 @@ try {
         Log "Ollama is up."
     }
 
+    # Curator decisions from /kurasi go in first, so this cycle's attribution,
+    # clustering and linking already follow them.
+    Invoke-Stage "apply curation" @("scripts\apply_curation.py", "--apply")
+
     Invoke-Stage "ingest" @("-m", "jejak.cli", "ingest")
 
     # RSS only reaches back about a day, so each cycle also walks further back
@@ -105,14 +109,14 @@ try {
     # 200 drains that plus the RSS intake, at ~1s each.
     Invoke-Stage "fetch" @("-m", "jejak.cli", "fetch", "--limit", "200")
 
-    # Figure discovery. The roster is not a hand-kept list: this mines the
-    # articles fetched above for "<office> <name>" mentions and promotes anyone
-    # named by enough distinct outlets, which is the only thing that grows the
-    # number of figures records can be written about. Runs before clustering so
-    # a figure promoted this cycle owns the articles clustered this cycle.
+    # Figure discovery. Mines the articles fetched above for people named in
+    # them; anyone named by enough distinct outlets goes to the curator's
+    # queue (/kurasi/kandidat), and accepting them there is what grows the
+    # roster. Runs before clustering so a figure accepted since the last run
+    # owns the articles clustered this cycle.
     Invoke-Stage "mentions" @("-m", "jejak.cli", "mentions", "--limit", "1000")
 
-    foreach ($stage in @("cluster", "quotes", "translate", "summarize",
+    foreach ($stage in @("cluster", "link", "quotes", "translate", "summarize",
                          "sentiment", "buzzer")) {
         Invoke-Stage $stage @("-m", "jejak.cli", $stage)
     }

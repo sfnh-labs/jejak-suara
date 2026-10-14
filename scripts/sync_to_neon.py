@@ -96,6 +96,12 @@ TABLES: tuple[Table, ...] = (
     ), serial=True),
     Table("event_figures", "event_id", ("event_id", "figure_id"),
           conflict=("event_id", "figure_id")),
+    # Proposals only. `origin` and `verdict` are left out for the same reason
+    # as events.curated: the curator's ruling is in record_link_verdicts, and
+    # apply_curation.py is what copies it down into SQLite.
+    Table("record_links", "record_id",
+          ("record_id", "peristiwa_id", "score", "evidence", "created_at"),
+          conflict=("record_id", "peristiwa_id")),
     Table("articles", "id", (
         "id", "figure_id", "source", "url", "title", "summary", "body",
         "body_original", "body_lang", "fetch_status", "published_at",
@@ -166,6 +172,7 @@ MIGRATIONS = (
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS notes TEXT",
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS records TEXT",
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS curated_role TEXT",
+    "ALTER TABLE figure_edits ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS comment_id TEXT",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS channel TEXT",
     "ALTER TABLE articles ADD COLUMN IF NOT EXISTS body_original TEXT",
@@ -237,17 +244,19 @@ def restore_curation(pg, saved: list[tuple[int, str]]) -> int:
     return len(saved)
 
 
-def sync_figures(pg) -> int:
+def sync_figures(pg, sqlite: sqlite3.Connection) -> int:
     """Mirror the tracked roster into Postgres so the web app has real names.
 
     Reads the roster from SQLite, not from figures.toml: the TOML only seeds it,
     and most figures arrive from the mentions stage, which promotes anyone named
     by enough distinct outlets.
     """
-    figures = load_figures()
+    load_figures(sqlite)  # seeds the roster from figures.toml on a fresh db
+    # Retired figures go too, flagged inactive. Sending only the active ones
+    # left a figure switched off in the pipeline still live on the site.
     rows = [
-        (f.id, f.name, f.role, json.dumps(f.aliases, ensure_ascii=False), True)
-        for f in figures
+        (r["id"], r["name"], r["role"] or "", r["aliases"] or "[]", bool(r["active"]))
+        for r in sqlite.execute("SELECT id, name, role, aliases, active FROM figures")
     ]
     if not rows:
         return 0
@@ -262,8 +271,42 @@ def sync_figures(pg) -> int:
                  active = EXCLUDED.active""",
             rows,
         )
+        # An edit the pipeline has not applied yet would be undone by the row
+        # just pushed, so it is laid back over it. Once applied, SQLite holds
+        # the same values and this matches nothing.
+        cur.execute(
+            """UPDATE figures f
+                  SET name = e.name, role = e.role, aliases = e.aliases,
+                      active = e.active
+                 FROM figure_edits e
+                WHERE e.figure_id = f.id AND e.applied_at IS NULL"""
+        )
     pg.commit()
     return len(rows)
+
+
+def overlay_merges(pg) -> int:
+    """Lay merges the pipeline has not applied yet back over pushed rows.
+
+    A record whose SQLite row changed since the merge is pushed with the
+    duplicate's id again; this moves it back. Once apply_curation.py has run,
+    SQLite agrees and this matches nothing.
+    """
+    with pg.cursor() as cur:
+        cur.execute("SELECT from_id, into_id FROM figure_merges WHERE applied_at IS NULL")
+        pending = cur.fetchall()
+        for from_id, into_id in pending:
+            cur.execute("UPDATE events SET figure_id = %s WHERE figure_id = %s", (into_id, from_id))
+            cur.execute("UPDATE articles SET figure_id = %s WHERE figure_id = %s", (into_id, from_id))
+            cur.execute(
+                """INSERT INTO event_figures (event_id, figure_id)
+                   SELECT event_id, %s FROM event_figures WHERE figure_id = %s
+                   ON CONFLICT DO NOTHING""",
+                (into_id, from_id),
+            )
+            cur.execute("DELETE FROM event_figures WHERE figure_id = %s", (from_id,))
+    pg.commit()
+    return len(pending)
 
 
 # Candidates corroborated by this many outlets are worth a human's time. Kept
@@ -555,7 +598,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        n = sync_figures(pg)
+        n = sync_figures(pg, sqlite)
         print(f"figures: {n} rows")
         n = sync_candidates(pg, sqlite)
         print(f"figure_candidates: {n} rows awaiting review")
@@ -576,6 +619,11 @@ def main(argv: list[str] | None = None) -> int:
             print("push (SQLite -> Neon)")
             for table, count in push(pg, sqlite).items():
                 print(f"  {table}: {count} rows")
+
+        if do_push:
+            n = overlay_merges(pg)
+            if n:
+                print(f"  re-applied {n} pending figure merge(s)")
 
         if saved_curation:
             n = restore_curation(pg, saved_curation)

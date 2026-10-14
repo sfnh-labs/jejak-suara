@@ -294,6 +294,17 @@ _ATTRIBUTION_RE = re.compile(
     r"(?P<name>[A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*){0,2})"
 )
 
+# Religious honorifics. Unlike "Pak" or "KH" they stay in the name, because
+# they are how the person is known — "Habib Umar", "Gus Yahya", "Buya Hamka" —
+# and they carry no office, so nothing else catches someone who is only met
+# ("bersilaturahmi dengan Habib Umar bin Hafidz"). Arabic patronymics join with
+# a lowercase "bin"/"binti", which the capitalised-run rule would stop at.
+_RELIGIOUS_RE = re.compile(
+    r"\b(?P<name>(?:Habib|Habibah|Gus|Kiai|Kyai|Buya|Syekh|Syaikh|Ustaz|Ustadz"
+    r"|Ustazah|Ustadzah|Tuan Guru)"
+    r"\s+[A-Z][\w'-]*(?:\s+(?:bin|binti)\s+[A-Z][\w'-]*|\s+[A-Z][\w'-]*){0,2})"
+)
+
 NO_ROLE = ""
 
 # Titles naming a body rather than an individual. They still mark who is acting
@@ -392,7 +403,7 @@ def extract(text: str) -> list[Mention]:
     # Untitled actors. Only recorded when the same person was not already found
     # with an office in this text, so a stated role always wins.
     titled = {slug for slug, _ in found}
-    for pattern in (_SPEAKER_RE, _ATTRIBUTION_RE):
+    for pattern in (_SPEAKER_RE, _ATTRIBUTION_RE, _RELIGIOUS_RE):
         for m in (m for s in sentences for m in pattern.finditer(s)):
             name = " ".join(m.group("name").split())
             name = _strip_leading_title(
@@ -485,21 +496,34 @@ def _tracked_terms(conn: sqlite3.Connection) -> dict[str, str]:
     return terms
 
 
+def _name_words(name: str) -> list[str]:
+    # Hyphens split too: "Prabowo Subianto-Gibran Rakabuming" is a ticket that
+    # names Prabowo Subianto, not a person called "Subianto-Gibran".
+    return [w for w in re.split(r"[\s\-–]+", name.lower()) if w]
+
+
 def _same_as_tracked(name: str, tracked: dict[str, str]) -> str | None:
     """The tracked figure this candidate is another spelling of, if any.
 
-    Containment in either direction: "Presiden Prabowo Subianto" contains a
-    tracked name, and "Prabowo" is contained by one. Word-boundary aware, so
-    "Budi" does not match "Budiman".
+    The candidate must contain a tracked name: "Presiden Prabowo Subianto" is
+    Prabowo Subianto with his office attached. Word-boundary aware, so "Budi"
+    does not match "Budiman". Never the other way round — a shorter candidate
+    folded in becomes a shorter alias, which matches far more than it should:
+    "Mahkamah Agung" filed under a figure "Mahkamah Agung Sunarto" would claim
+    every headline about the court. Those go to the curator instead.
+
+    A one-word alias only counts when it is the whole candidate. Surnames are
+    shared: "Listyo Sigit Prabowo" is the Kapolri, and "Prabowo Didit" is a
+    headline fragment — folding either into Prabowo Subianto let his alias
+    list claim their coverage.
     """
-    words = name.lower().split()
+    words = _name_words(name)
     for term, figure_id in tracked.items():
-        term_words = term.split()
-        if not term_words:
+        term_words = _name_words(term)
+        if not term_words or (len(term_words) < 2 and term_words != words):
             continue
-        shorter, longer = sorted((words, term_words), key=len)
-        for i in range(len(longer) - len(shorter) + 1):
-            if longer[i:i + len(shorter)] == shorter:
+        for i in range(len(words) - len(term_words) + 1):
+            if words[i:i + len(term_words)] == term_words:
                 return figure_id
     return None
 
@@ -543,51 +567,74 @@ def stated_role(conn: sqlite3.Connection, slug: str) -> str:
 
 
 def promote_figures(conn: sqlite3.Connection) -> dict[str, int]:
-    """Turn well-corroborated candidates into tracked figures.
+    """Settle well-corroborated candidates that need no human decision.
 
-    A figure may arrive with no role at all — plenty of people are named
-    without an office ("Cak Imin: ..."). That is fine: the role is refreshed
-    from the accumulated mentions on every run, so it fills in as soon as an
-    article states one, and improves as coverage accumulates.
+    Nothing new is put on the site from here. Promotion used to be automatic
+    at three outlets, and at volume that bar let through offices ("Wali
+    Kota"), headline fragments ("Prabowo Tak Suka") and misspelt duplicates
+    ("Airlangga Hyundai") — mining a 30k-article backlog would have added 552
+    figures in one night. New names now wait in /kurasi/kandidat, where a
+    curator accepts them (scripts/apply_candidate_verdicts.py creates the
+    figure) or rejects them.
+
+    What still happens automatically is the unambiguous part: a candidate
+    that is a tracked figure written longer or shorter becomes one of their
+    aliases, and a tracked figure with no role yet gets the one the coverage
+    states. A role already set is left alone — it may be a curator's wording.
     """
     from .config import seed_figures
 
     # Seed the hand-maintained roster first, so a configured figure is never
-    # re-created as a discovered one and then overwritten.
+    # mistaken for a newcomer.
     if conn.execute("SELECT count(*) FROM figures").fetchone()[0] == 0:
         seed_figures(conn)
 
-    stats = {"promoted": 0, "updated": 0, "folded": 0}
+    stats = {"queued": 0, "folded": 0, "roles_filled": 0}
     now = datetime.now(timezone.utc).isoformat()
 
     # Everything already tracked, by every name it answers to. A candidate that
-    # is one of these written longer or shorter is the same person, and
-    # promoting it would put a second copy of them on the site — "Presiden
+    # is one of these written longer or shorter is the same person — "Presiden
     # Prabowo Subianto" next to "Prabowo Subianto".
     tracked = _tracked_terms(conn)
 
+    # A curator's rejection is final: a rejected name is neither folded nor
+    # queued again.
     rows = conn.execute(
         f"""SELECT m.slug, fc.name, count(DISTINCT m.source) AS outlets
               FROM figure_mentions m
               JOIN figure_candidates fc ON fc.slug = m.slug
+             WHERE fc.status != 'rejected'
              GROUP BY m.slug
             HAVING outlets >= {PROMOTE_MIN_OUTLETS}"""
     ).fetchall()
 
     for row in rows:
         slug, name = row["slug"], row["name"]
-        # A bare first name is not enough to put someone on the site.
-        # Sentence case still capitalises the first word of every sentence,
-        # and quotes get attributed to "Anton" or "Arum" often enough that
-        # mononyms sailed past the outlet test. Someone genuinely covered
-        # under one name still reaches the roster the other way: as an alias
-        # folded into their full name by merge_aliases.
+        # A bare first name is not enough to identify anyone. Sentence case
+        # still capitalises the first word of every sentence, and quotes get
+        # attributed to "Anton" or "Arum" often enough that mononyms sailed
+        # past the outlet test. Someone genuinely covered under one name still
+        # reaches the roster as an alias folded into their full name by
+        # merge_aliases.
         if len(name.split()) < 2:
             continue
+
+        existing = conn.execute(
+            "SELECT role FROM figures WHERE id = ?", (slug,)
+        ).fetchone()
+        if existing is not None:
+            if not (existing["role"] or "").strip():
+                role = stated_role(conn, slug)
+                if role:
+                    conn.execute("UPDATE figures SET role = ? WHERE id = ?",
+                                 (role, slug))
+                    stats["roles_filled"] += 1
+            continue
+
         owner = _same_as_tracked(name, tracked)
         if owner is not None:
             # Keep it as an alias of the figure it belongs to — that widens
-            # attribution — and stop reconsidering the candidate.
+            # attribution — and stop offering the candidate.
             _add_alias(conn, owner, name)
             conn.execute(
                 "UPDATE figure_candidates SET status = 'tracked', promoted_at = ? "
@@ -596,37 +643,9 @@ def promote_figures(conn: sqlite3.Connection) -> dict[str, int]:
             )
             stats["folded"] += 1
             continue
-        role = stated_role(conn, slug)
 
-        aliases = sorted({
-            r["name"] for r in conn.execute(
-                "SELECT name FROM figure_candidates WHERE slug = ?", (slug,)
-            )
-        } | {name})
-
-        existing = conn.execute(
-            "SELECT id, origin FROM figures WHERE id = ?", (slug,)
-        ).fetchone()
-        if existing is None:
-            conn.execute(
-                """INSERT INTO figures (id, name, role, aliases, active, origin, created_at)
-                   VALUES (?, ?, ?, ?, 1, 'discovered', ?)""",
-                (slug, name, role, json.dumps(aliases, ensure_ascii=False), now),
-            )
-            stats["promoted"] += 1
-        elif existing["origin"] == "discovered":
-            # Never overwrite a hand-configured row from figures.toml.
-            conn.execute(
-                "UPDATE figures SET name = ?, role = ? WHERE id = ?",
-                (name, role, slug),
-            )
-            stats["updated"] += 1
-
-        conn.execute(
-            "UPDATE figure_candidates SET status = 'tracked', promoted_at = ? "
-            "WHERE slug = ? AND status != 'tracked'",
-            (now, slug),
-        )
+        # Left as a candidate: sync_to_neon puts it in the review queue.
+        stats["queued"] += 1
 
     conn.commit()
     return stats
@@ -644,6 +663,9 @@ def record_mentions(conn: sqlite3.Connection, limit: int = 500) -> dict[str, int
              FROM articles a
              LEFT JOIN article_scans s ON s.article_id = a.id
             WHERE s.article_id IS NULL
+            -- Newest first: a curator reads this week's records, and with a
+            -- backlog an unordered batch could leave them unmined for days.
+            ORDER BY a.published_at DESC
             LIMIT ?""",
         (limit,),
     ).fetchall()

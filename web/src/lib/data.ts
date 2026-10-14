@@ -258,6 +258,12 @@ export async function getPeristiwa(limit = 60): Promise<Peristiwa[]> {
            FROM event_figures ef
            LEFT JOIN figures f ON f.id = ef.figure_id
           WHERE ef.event_id = e.id
+            -- Struck by a curator. Gone from the site at once; the pipeline
+            -- drops the row itself once apply_curation.py has run.
+            AND NOT EXISTS (
+              SELECT 1 FROM event_figure_rejections x
+               WHERE x.event_id = ef.event_id AND x.figure_id = ef.figure_id
+                 AND x.struck)
        ) rel ON TRUE
       WHERE e.kind = 'peristiwa'
         AND ${LIVE("e")}
@@ -266,6 +272,26 @@ export async function getPeristiwa(limit = 60): Promise<Peristiwa[]> {
     [limit]
   );
   return rows.map((r) => ({ ...r, image: peristiwaImage(r.event_id) }));
+}
+
+/**
+ * The peristiwa a record is part of, as a curator confirmed it.
+ *
+ * Confirmed only: jejak/link.py proposes these pairs from shared vocabulary,
+ * and about half its proposals are wrong, so an unreviewed one is not shown.
+ */
+export async function getRecordPeristiwa(
+  recordId: number
+): Promise<{ event_id: number; title: string | null; event_date: string | null }[]> {
+  return query(
+    `SELECT e.id AS event_id, e.title, e.event_date
+       FROM record_link_verdicts v
+       JOIN events e ON e.id = v.peristiwa_id
+      WHERE v.record_id = $1 AND v.verdict = 'confirmed'
+        AND e.kind = 'peristiwa' AND ${LIVE("e")}
+      ORDER BY e.event_date`,
+    [recordId]
+  );
 }
 
 /**

@@ -409,7 +409,15 @@ def promote_peristiwa(conn: sqlite3.Connection) -> dict[str, int]:
         conn.execute(
             "UPDATE events SET impact = ? WHERE id = ?", (_impact_for(outlets), eid)
         )
+        # A figure a curator struck from this event stays struck: the alias
+        # that matched is still in the coverage and would match again.
+        struck = {r["figure_id"] for r in conn.execute(
+            "SELECT figure_id FROM event_figure_rejections WHERE event_id = ?",
+            (eid,),
+        )}
         for fid in _figures_mentioned(combined):
+            if fid in struck:
+                continue
             conn.execute(
                 "INSERT OR IGNORE INTO event_figures (event_id, figure_id) VALUES (?, ?)",
                 (eid, fid),

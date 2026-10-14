@@ -79,6 +79,41 @@ CREATE TABLE IF NOT EXISTS event_figures (
 );
 CREATE INDEX IF NOT EXISTS idx_event_figures_figure ON event_figures(figure_id);
 
+-- A record that is part of a peristiwa: the figure's own action inside a
+-- national story ("Presiden menyerahkan trofi" inside "Indonesia juara Piala
+-- AFF"). Clustering cannot produce this — every article lands in exactly one
+-- event, attributed ones in a record and the rest in a peristiwa — so
+-- jejak/link.py proposes pairs afterwards and a curator rules on them.
+--   origin  'pipeline' — proposed by link.py; 'curator' — added by hand
+--   verdict NULL = proposed only, 'confirmed', 'rejected'. Owned by the
+--           curator in Postgres and copied here by scripts/apply_curation.py,
+--           so link.py never re-proposes a rejected pair and the public site
+--           shows only confirmed ones.
+CREATE TABLE IF NOT EXISTS record_links (
+    record_id    INTEGER NOT NULL,
+    peristiwa_id INTEGER NOT NULL,
+    score        REAL,
+    evidence     TEXT,                      -- JSON array of the shared terms
+    origin       TEXT NOT NULL DEFAULT 'pipeline',
+    verdict      TEXT,
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (record_id, peristiwa_id),
+    FOREIGN KEY (record_id) REFERENCES events(id),
+    FOREIGN KEY (peristiwa_id) REFERENCES events(id)
+);
+CREATE INDEX IF NOT EXISTS idx_record_links_peristiwa ON record_links(peristiwa_id);
+
+-- Related figures a curator struck from a peristiwa. promote_peristiwa
+-- re-derives event_figures from the coverage every run, and an alias that
+-- also names someone else would put the wrong person straight back; this is
+-- what it checks first.
+CREATE TABLE IF NOT EXISTS event_figure_rejections (
+    event_id   INTEGER NOT NULL,
+    figure_id  TEXT NOT NULL,
+    decided_at TEXT,
+    PRIMARY KEY (event_id, figure_id)
+);
+
 CREATE TABLE IF NOT EXISTS event_summaries (
     event_id            INTEGER PRIMARY KEY,
     summary_text        TEXT NOT NULL,

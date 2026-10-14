@@ -10,6 +10,7 @@ import {
   getEvent,
   getEventComments,
   getEventNeighbours,
+  getRecordPeristiwa,
 } from "@/lib/data";
 import {
   formatCount,
@@ -51,10 +52,11 @@ export default async function DetailCatatan({
   const record = await getEvent(numericId);
   if (!record || record.figure_id !== id) notFound();
 
-  const [comments, buzzer, neighbours] = await Promise.all([
+  const [comments, buzzer, neighbours, partOf] = await Promise.all([
     getEventComments(numericId),
     getBuzzerSignal(numericId),
     getEventNeighbours(id, record.event_date),
+    getRecordPeristiwa(numericId),
   ]);
 
   const display = toDisplayScore(record.sentiment_score);
@@ -106,6 +108,23 @@ export default async function DetailCatatan({
             {record.figure_name}
           </Link>
         </p>
+
+        {partOf.length > 0 ? (
+          // The national story this action belongs to. Confirmed by a curator:
+          // clustering keeps a figure's coverage and the general coverage of
+          // the same event apart, so nothing else connects the two.
+          <div style={{ borderLeft: "3px solid var(--color-parchment)", paddingLeft: 12, margin: "-12px 0 26px" }}>
+            <div className="section-label" style={{ marginBottom: 4 }}>Bagian dari peristiwa</div>
+            {partOf.map((p) => (
+              <div key={p.event_id} style={{ fontFamily: "var(--font-serif)", fontSize: 15.5, lineHeight: 1.45 }}>
+                {p.title ?? "Tanpa judul"}
+                <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: "var(--color-stone)", marginLeft: 8 }}>
+                  {formatDateShort(p.event_date)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {display !== null ? (
           <section className="rule-heavy" style={{ paddingBottom: 22, marginBottom: 26 }}>

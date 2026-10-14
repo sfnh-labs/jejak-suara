@@ -24,7 +24,7 @@ archives ─▶ backfill   bodies    to Indonesian  who to      events      draf
 | 1c. YouTube | `jejak/youtube_ingest.py` | Search news videos, pull transcripts as additional articles. |
 | 1.5 Fetch | `jejak/fetch.py` | Backfill full article text (trafilatura, stdlib fallback). Fail-soft, rate-limited. |
 | 1.7 Translate | `jejak/translate.py` | Translate non-Indonesian sources to Indonesian; original kept in `body_original`. |
-| 1.8 Mentions | `jejak/mentions.py` | Mine `<office> <name>` mentions out of the coverage; promote anyone named by 3+ distinct outlets to a tracked figure. This is what grows the roster — records can only be written about figures it holds. |
+| 1.8 Mentions | `jejak/mentions.py` | Mine `<office> <name>` mentions out of the coverage; anyone named by 3+ distinct outlets goes to the review queue at `/kurasi/kandidat`, and accepting them there is what grows the roster — records can only be written about figures it holds. Only longer spellings of a tracked name ("Presiden Prabowo Subianto") are folded in automatically, as aliases. |
 | 2. Cluster | `jejak/cluster.py` | Group articles about one activity into a single **event** (embedding similarity + a shared-content-word guard). |
 | 3. Summarize | `jejak/summarize.py` | Neutral, attributed summary grounded in the event's articles, with `[Sumber N]` citation markers. |
 | 4. Sentiment | `jejak/sentiment.py` | Public reaction per event: YouTube and Reddit comments classified by stance, aggregated. |
@@ -247,7 +247,29 @@ truncate and reapplies it afterwards.
 Rejecting takes effect on the public site immediately — the pages are
 `force-dynamic` and read Neon directly, so no sync step is involved.
 
-**Adding the column to an existing Neon database must happen before deploying a web
+`/kurasi` is a queue of records and peristiwa; each opens one page, `/kurasi/<id>`,
+where everything hanging off that event is decided in one place:
+
+- **the verdict** — keep, take down, or restore, then straight on to the next
+  unreviewed item;
+- **the actor** — the record's figure: display name, office, aliases, or retire a
+  mis-mined or duplicate figure, or merge a duplicate into the figure it repeats
+  (its records move over and its names become aliases);
+- **who else the coverage names** — tracked figures to correct, and discovered names
+  to accept or reject on the spot (the same verdicts as `/kurasi/kandidat`); on a
+  peristiwa, related figures can be struck when an alias matched the wrong person;
+- **which peristiwa a record belongs to** — clustering never connects the two, so
+  the `link` stage (`jejak/link.py`) proposes pairs by shared rare words, and the
+  curator confirms, rejects, or adds one. Only confirmed links appear on the site.
+
+Each of these is a Postgres-only table no sync writes (`record_link_verdicts`,
+`figure_edits`, `figure_merges`, `event_figure_rejections`), and takes effect on the site at once.
+`scripts/apply_curation.py --apply` then carries them into SQLite — corrected aliases
+drive the next run's attribution, rejected links are never proposed again, struck
+figures stay struck — and stamps each `applied_at`. `publish_local` runs it ahead of
+the stages on the runs that push.
+
+**Adding new curation columns and tables to an existing Neon database must happen before deploying a web
 build that reads it**, or every page query fails on the missing column:
 
 ```bash
