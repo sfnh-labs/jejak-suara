@@ -7,7 +7,7 @@ Requires WebUI running with --api (see D:\\Tools\\stable-diffusion\\webui-user.b
 
 Usage: python scripts/gen_event_images_webui.py [--smoke]
 """
-import json, os, re, sys, time, base64, urllib.request
+import glob, json, os, re, sys, time, base64, urllib.request
 
 API = "http://127.0.0.1:7860"
 STYLE_SUFFIX = (
@@ -75,7 +75,7 @@ def slug(text, n=60):
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:n]
 
 
-def post(path, payload, timeout=1800):
+def post(path, payload, timeout=3600):
     req = urllib.request.Request(
         f"{API}{path}", data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"}, method="POST",
@@ -136,8 +136,7 @@ if __name__ == "__main__":
         for eid, title, scene in EVENTS:
             if limit is not None and done >= limit:
                 break
-            out = os.path.join(OUT_DIR, f"{eid}-{slug(title)}.png")
-            if os.path.exists(out):
+            if glob.glob(os.path.join(OUT_DIR, f"{eid}-*.*")):
                 print(f"[{eid}] {title} -- already done, skipping")
                 continue
             generate(eid, title, scene)
