@@ -1,0 +1,56 @@
+{
+  "bio": "Wakil Ketua Komisi III DPR dan Bendahara Umum Partai NasDem. Anggota DPR dari Jakarta sejak 2014.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jakarta Utara, 8 Agustus 1977"
+    },
+    {
+      "label": "Partai",
+      "value": "NasDem (sejak 2013)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Ketua Komisi III DPR",
+      "org": "",
+      "period": "2026 – kini"
+    },
+    {
+      "role": "Bendahara Umum",
+      "org": "Partai NasDem",
+      "period": "2019 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil DKI Jakarta III",
+      "period": "2014 – kini"
+    },
+    {
+      "role": "Ketua Pelaksana",
+      "org": "Formula E Jakarta 2022",
+      "period": "2021 – 2022"
+    }
+  ],
+  "education": [
+    {
+      "year": "2024",
+      "detail": "Doktor Ilmu Hukum, Universitas Borobudur"
+    },
+    {
+      "year": "2020",
+      "detail": "Magister, Stikom InterStudi"
+    },
+    {
+      "year": "2009",
+      "detail": "Sarjana, STIE Pelita Bangsa"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Ahmad_Sahroni"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

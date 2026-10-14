@@ -1,0 +1,57 @@
+{
+  "bio": "Presiden Rusia sejak 2012, setelah masa jabatan pertama 2000–2008. Di antaranya menjabat Perdana Menteri, dan sebelumnya Direktur Dinas Keamanan Federal (FSB).",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Vladimir Vladimirovich Putin"
+    },
+    {
+      "label": "Lahir",
+      "value": "Leningrad (kini Sankt-Peterburg), 7 Oktober 1952"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Presiden Rusia",
+      "org": "",
+      "period": "2012 – kini"
+    },
+    {
+      "role": "Perdana Menteri Rusia",
+      "org": "",
+      "period": "2008 – 2012"
+    },
+    {
+      "role": "Presiden Rusia",
+      "org": "",
+      "period": "2000 – 2008"
+    },
+    {
+      "role": "Perdana Menteri Rusia",
+      "org": "",
+      "period": "1999 – 2000"
+    },
+    {
+      "role": "Direktur",
+      "org": "Dinas Keamanan Federal (FSB)",
+      "period": "1998 – 1999"
+    }
+  ],
+  "education": [
+    {
+      "year": "1997",
+      "detail": "Kandidat Ilmu Ekonomi, Institut Pertambangan Sankt-Peterburg"
+    },
+    {
+      "year": "1975",
+      "detail": "Hukum, Universitas Negeri Leningrad"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Vladimir_Putin"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

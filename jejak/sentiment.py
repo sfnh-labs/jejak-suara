@@ -41,14 +41,17 @@ SEARCH_BEFORE_DAYS = 1
 SEARCH_AFTER_DAYS = 14
 
 
-def _ollama_chat(messages: list[dict]) -> dict:
+def _ollama_chat(messages: list[dict], temperature: float | None = None) -> dict:
     """Call the Ollama chat API and return the parsed response."""
+    options: dict = {"num_predict": 2048}
+    if temperature is not None:
+        options["temperature"] = temperature
     url = f"{OLLAMA_BASE_URL}/api/chat"
     payload = json.dumps({
         "model": OLLAMA_MODEL,
         "messages": messages,
         "stream": False,
-        "options": {"num_predict": 2048},
+        "options": options,
     }).encode()
     req = urllib.request.Request(
         url, data=payload, headers={"Content-Type": "application/json"},
@@ -337,6 +340,16 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
     except Exception as e:
         results.append({"event_id": event_id, "query": query,
                         "channel": "reddit", "note": str(e)})
+
+    # The stance above is toward "the figure/event" at once; this adds the
+    # stance toward the figure alone, for the comments that name them. See
+    # jejak/figure_stance.py.
+    from . import figure_stance
+    try:
+        figure_stance.label_event(conn, event_id)
+    except RuntimeError as e:
+        results.append({"event_id": event_id, "channel": "figure",
+                        "note": str(e)})
 
     return results
 

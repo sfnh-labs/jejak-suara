@@ -1,0 +1,51 @@
+{
+  "bio": "Wakil Ketua Komisi VI DPR dari Fraksi Gerindra, anggota DPR dari Sumatera Barat sejak 2019, dan Ketua DPD Partai Gerindra Sumatera Barat.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Padang, 7 November 1978"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Ketua Komisi VI DPR",
+      "org": "",
+      "period": "kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Sumatera Barat I",
+      "period": "2019 – kini"
+    },
+    {
+      "role": "Ketua DPD",
+      "org": "Partai Gerindra Sumatera Barat",
+      "period": "2019 – kini"
+    },
+    {
+      "role": "Juru bicara",
+      "org": "BPN Prabowo–Sandiaga",
+      "period": "2019"
+    }
+  ],
+  "education": [
+    {
+      "year": "2002",
+      "detail": "Sarjana Ekonomi (Akuntansi), Universitas Trisakti"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Andre_Rosiade"
+    },
+    {
+      "label": "pemberitaan yang dihimpun Jejak Suara"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

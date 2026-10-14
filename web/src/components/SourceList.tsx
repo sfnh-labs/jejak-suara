@@ -17,7 +17,7 @@ export default function SourceList({ sources, large = false }: { sources: Source
           <a href={s.url} target="_blank" rel="noopener noreferrer" className="source-row">
             {/* The tile's own negative margin is for overlapping stacks. */}
             <span style={{ flex: "none", display: "flex", paddingLeft: 5 }}>
-              <OutletTile source={s.source} size={large ? 24 : 20} ring="#f6f2e9" />
+              <OutletTile source={s.source} size={large ? 24 : 20} ring="var(--color-cream)" />
             </span>
             <span
               className="source-row-title"
@@ -27,7 +27,7 @@ export default function SourceList({ sources, large = false }: { sources: Source
               {s.title}
               <span className="sr-only"> (membuka tab baru)</span>
             </span>
-            <span style={{ flex: "none", fontSize: large ? 12 : 11.5, color: "#7a7264", whiteSpace: "nowrap" }}>
+            <span style={{ flex: "none", fontSize: large ? 12 : 11.5, color: "var(--color-stone)", whiteSpace: "nowrap" }}>
               {formatDateShort(s.published_at)}
             </span>
           </a>
@@ -53,7 +53,7 @@ export function SourcesDisclosure({ sources }: { sources: Source[] }) {
           alignItems: "center",
           fontSize: 11.5,
           fontWeight: 700,
-          color: "#8b2e1f",
+          color: "var(--color-clay)",
           padding: "3px 0",
         }}
       >
@@ -66,6 +66,57 @@ export function SourcesDisclosure({ sources }: { sources: Source[] }) {
         </span>
       </summary>
       <div style={{ marginTop: 8 }}>
+        <SourceList sources={sources} />
+      </div>
+    </details>
+  );
+}
+
+/** Room the corner toggle takes, so the header row can keep clear of it. */
+export function sourcesCornerWidth(count: number): number {
+  const marks = Math.min(count, 5);
+  return marks ? 15 * marks + 5 + 6 + 14 : 0;
+}
+
+/**
+ * The same disclosure, compact: only the outlets' marks and a chevron, pinned
+ * to the card's top-right corner (the card must be positioned). Open, the
+ * chevron turns into a close mark and the list opens in flow wherever this
+ * element sits, so the corner stays light and the list keeps its full width.
+ */
+export function SourcesCorner({ sources }: { sources: Source[] }) {
+  if (!sources.length) return null;
+  return (
+    <details className="sources-corner">
+      <summary
+        className="sources-toggle"
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          zIndex: 2,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          height: 24,
+          color: "var(--color-stone)",
+        }}
+      >
+        <span className="sr-only when-closed">Tampilkan {sources.length} sumber</span>
+        <span className="sr-only when-open">Sembunyikan sumber</span>
+        <span aria-hidden style={{ display: "flex", alignItems: "center", paddingLeft: 5 }}>
+          {sources.slice(0, 5).map((s) => (
+            <OutletTile key={s.url} source={s.source} size={20} />
+          ))}
+        </span>
+        <svg aria-hidden className="when-closed" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 5.5 7 9.5l4-4" />
+        </svg>
+        <svg aria-hidden className="when-open" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <path d="M3.5 3.5l7 7M10.5 3.5l-7 7" />
+        </svg>
+      </summary>
+      <div style={{ marginBottom: 16 }}>
         <SourceList sources={sources} />
       </div>
     </details>

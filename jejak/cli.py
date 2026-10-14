@@ -9,6 +9,7 @@
     python -m jejak.cli link                 # propose record -> peristiwa links
     python -m jejak.cli summarize            # grounded drafts for new events
     python -m jejak.cli sentiment            # public-reaction scores for approved events
+    python -m jejak.cli figure-stance        # stance toward the figure, from comments naming them
     python -m jejak.cli buzzer               # coordinated-engagement detection
     python -m jejak.cli timeline <figure_id> # approved, publishable events
 
@@ -31,7 +32,7 @@ from datetime import date
 from . import backfill as backfill_mod
 from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
-from . import db, fetch, ingest, link, mentions, quotes, sentiment, summarize, timeline as timeline_mod
+from . import db, fetch, figure_stance, ingest, link, mentions, quotes, sentiment, summarize, timeline as timeline_mod
 from . import translate
 from . import youtube_ingest
 
@@ -91,6 +92,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("summarize")
     sub.add_parser("quotes")
     sub.add_parser("sentiment")
+    p_fs = sub.add_parser("figure-stance")
+    p_fs.add_argument("--limit", type=int, default=None)
+    p_fs.add_argument("--audit", action="store_true",
+                      help="print which words matched each figure, then stop")
     sub.add_parser("buzzer")
     sub.add_parser("translate")
     sub.add_parser("run")
@@ -177,6 +182,12 @@ def main(argv: list[str] | None = None) -> int:
                       f"{res.get('label','?')} "
                       f"(score={score_str}, "
                       f"n={n}){flag}")
+        if args.cmd == "figure-stance":
+            if args.audit:
+                figure_stance.audit(conn)
+            else:
+                for res in figure_stance.label_pending(conn, args.limit):
+                    print("figure-stance:", res)
         if args.cmd in ("buzzer", "run"):
             results = buzzer_mod.analyze_all(conn)
             if not results:

@@ -1,0 +1,66 @@
+{
+  "bio": "Menteri Pemuda dan Olahraga sejak September 2025 dan Ketua Umum PSSI sejak 2023. Pengusaha media dan olahraga; sebelumnya Menteri BUMN selama hampir enam tahun.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 30 Mei 1970"
+    },
+    {
+      "label": "Partai",
+      "value": "Tidak berpartai"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Pemuda dan Olahraga",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "PSSI",
+      "period": "2023 – kini"
+    },
+    {
+      "role": "Menteri Badan Usaha Milik Negara",
+      "org": "",
+      "period": "2019 – 2025"
+    },
+    {
+      "role": "Anggota",
+      "org": "Komite Olimpiade Internasional",
+      "period": "2019 – 2025"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Komite Olimpiade Indonesia",
+      "period": "2015 – 2019"
+    },
+    {
+      "role": "Ketua Panitia Pelaksana Asian Games 2018",
+      "org": "INASGOC",
+      "period": "2018"
+    },
+    {
+      "role": "Presiden klub",
+      "org": "Inter Milan",
+      "period": "2013 – 2018"
+    }
+  ],
+  "education": [
+    {
+      "year": "1993",
+      "detail": "Master of Business Administration, National University, California"
+    },
+    {
+      "detail": "Bachelor of Arts, Glendale Community College, California"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Erick_Thohir"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

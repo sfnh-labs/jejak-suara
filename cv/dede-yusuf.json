@@ -1,0 +1,70 @@
+{
+  "bio": "Wakil Ketua Komisi II DPR dan Wakil Ketua Umum Partai Demokrat. Sebelumnya Wakil Gubernur Jawa Barat dan dikenal sebagai aktor.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Dede Yusuf Macan Effendi"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 14 September 1966"
+    },
+    {
+      "label": "Partai",
+      "value": "Demokrat; sebelumnya PAN"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Ketua Umum",
+      "org": "Partai Demokrat",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Wakil Ketua Komisi II DPR",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Wakil Ketua Komisi X DPR",
+      "org": "",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Ketua Komisi IX DPR",
+      "org": "",
+      "period": "2014 – 2019"
+    },
+    {
+      "role": "Wakil Gubernur Jawa Barat",
+      "org": "",
+      "period": "2008 – 2013"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "PAN, Dapil Jawa Barat IX",
+      "period": "2004 – 2008"
+    }
+  ],
+  "education": [
+    {
+      "year": "2017",
+      "detail": "Doktor Ilmu Administrasi, Universitas Padjadjaran"
+    },
+    {
+      "year": "2011",
+      "detail": "Magister Ilmu Politik, Universitas Padjadjaran"
+    },
+    {
+      "year": "2005",
+      "detail": "Sarjana Teknik Industri, Universitas Muhammadiyah Jakarta"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Dede_Yusuf"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

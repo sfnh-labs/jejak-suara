@@ -1,0 +1,58 @@
+{
+  "bio": "Menteri Lingkungan Hidup sejak 2026. Aktivis buruh dan Ketua Umum KSPSI; sebelumnya Kepala BNP2TKI.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Mohammad Jumhur Hidayat"
+    },
+    {
+      "label": "Lahir",
+      "value": "Bandung, 18 Februari 1968"
+    },
+    {
+      "label": "Partai",
+      "value": "Tidak berpartai"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Lingkungan Hidup/Kepala Badan Pengendalian Lingkungan Hidup",
+      "org": "",
+      "period": "2026 – kini"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Konfederasi Serikat Pekerja Seluruh Indonesia (KSPSI)",
+      "period": "2022 – kini"
+    },
+    {
+      "role": "Kepala BNP2TKI",
+      "org": "",
+      "period": "2007 – 2014"
+    },
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "Partai Sarikat Indonesia",
+      "period": "2002 – 2005"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister Sains Sosiologi, Universitas Indonesia"
+    },
+    {
+      "year": "1996",
+      "detail": "Insinyur Teknik Fisika, Universitas Nasional"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Jumhur_Hidayat"
+    },
+    {
+      "label": "pemberitaan yang dihimpun Jejak Suara"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

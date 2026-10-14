@@ -6,7 +6,10 @@ import {
   isLinkVerdict,
   isVerdict,
   mergeFigure,
+  positionTitle,
   saveFigureEdit,
+  type Position,
+  type Profile,
   setCuration,
   setLinkVerdict,
   setRelatedFigure,
@@ -83,7 +86,19 @@ export async function editFigure(formData: FormData): Promise<void> {
   const figureId = text(formData, "figure_id", 120);
   const name = text(formData, "name", 120);
   if (!figureId || !name) throw new Error("figure_id and name are required");
-  const role = text(formData, "role", 200) || null;
+
+  // Offices arrive as parallel columns, one row per office; a row left blank
+  // is dropped, which is how one is deleted. The first is the main one, and
+  // the one-line title everywhere else on the site is taken from it.
+  const column = (field: string, max = 300) => formData.getAll(field).map((v) => String(v).trim().slice(0, max));
+  const roles = column("pos_role");
+  const orgs = column("pos_org");
+  const periods = column("pos_period");
+  const positions: Position[] = roles
+    .map((role, i) => ({ role, org: orgs[i] ?? "", period: periods[i] ?? "" }))
+    .filter((p) => p.role || p.org);
+  if (positions.length > 20) throw new Error("too many positions");
+  const role = positions.length > 0 ? positionTitle(positions[0]) : null;
 
   // One alias per line, or separated by "|" as on the candidate page. The
   // name is always a match term, and attribution lowercases anyway, so
@@ -104,7 +119,32 @@ export async function editFigure(formData: FormData): Promise<void> {
   if (tooShort) throw new Error(`alias too short to match safely: ${tooShort}`);
 
   // Unticking "aktif" retires a mis-mined or duplicate figure.
-  await saveFigureEdit(figureId, name, role, aliases, formData.get("active") === "1");
+  // The rest of the CV is only on the record owner's form; elsewhere it is
+  // left as it is.
+  let profile: Profile | null = null;
+  if (formData.get("has_cv") === "1") {
+    const factLabels = column("fact_label");
+    const factValues = column("fact_value");
+    const eduYears = column("edu_year");
+    const eduDetails = column("edu_detail");
+    const srcLabels = column("src_label");
+    const srcUrls = column("src_url", 1000);
+    const bio = text(formData, "bio", 2000);
+    profile = {
+      bio,
+      facts: factLabels
+        .map((label, i) => ({ label, value: factValues[i] ?? "" }))
+        .filter((f) => f.label && f.value),
+      education: eduDetails
+        .map((detail, i) => (eduYears[i] ? { year: eduYears[i], detail } : { detail }))
+        .filter((e) => e.detail),
+      sources: srcUrls
+        .map((url, i) => ({ label: srcLabels[i] || url, url }))
+        .filter((s) => /^https?:\/\//.test(s.url)),
+    };
+  }
+
+  await saveFigureEdit(figureId, name, role, aliases, formData.get("active") === "1", positions, profile);
   done(eventId(formData));
 }
 

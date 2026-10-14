@@ -104,6 +104,10 @@ if [ "$do_push" = 1 ]; then
         || log "apply curation failed - the decisions stay pending for the next push run."
 fi
 
+# Generated CVs (cv/<figure-id>.json) into the roster. After apply curation, so
+# a figure a curator just edited is already marked and is not overwritten.
+run_stage "import cv" scripts/import_cv.py --apply
+
 run_stage "ingest" -m jejak.cli ingest
 run_stage "backfill" -m jejak.cli backfill --days 6
 run_stage "fetch" -m jejak.cli fetch --limit 200

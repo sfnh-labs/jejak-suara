@@ -1,0 +1,62 @@
+{
+  "bio": "CEO Danantara sejak 2025 dan Menteri Investasi dan Hilirisasi/Kepala BKPM sejak 2024. Sebelumnya Duta Besar RI untuk Amerika Serikat dan Ketua Umum Kadin.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Rosan Perkasa Roeslani"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 31 Desember 1968"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Chief Executive Officer",
+      "org": "Danantara",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Menteri Investasi dan Hilirisasi/Kepala BKPM",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Ketua",
+      "org": "Tim Kampanye Nasional Prabowo–Gibran",
+      "period": "2023 – 2024"
+    },
+    {
+      "role": "Wakil Menteri BUMN",
+      "org": "",
+      "period": "2023"
+    },
+    {
+      "role": "Duta Besar RI untuk Amerika Serikat",
+      "org": "",
+      "period": "2021 – 2023"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Kamar Dagang dan Industri Indonesia",
+      "period": "2015 – 2020"
+    }
+  ],
+  "education": [
+    {
+      "year": "1995",
+      "detail": "Antwerp European University, Belgia"
+    },
+    {
+      "year": "1992",
+      "detail": "Oklahoma State University, Amerika Serikat"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Rosan_Roeslani"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

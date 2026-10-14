@@ -1,0 +1,48 @@
+{
+  "bio": "Presiden Partai Buruh sejak 2021 dan Presiden Konfederasi Serikat Pekerja Indonesia (KSPI). Sejak 2026 juga Penasihat Khusus Presiden bidang ketenagakerjaan.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 5 Juli 1968"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Buruh"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Penasihat Khusus Presiden Bidang Ketenagakerjaan dan Kesejahteraan Buruh",
+      "org": "",
+      "period": "2026 – kini"
+    },
+    {
+      "role": "Presiden",
+      "org": "Partai Buruh",
+      "period": "2021 – kini"
+    },
+    {
+      "role": "Presiden",
+      "org": "Konfederasi Serikat Pekerja Indonesia (KSPI)",
+      "period": "2012 – kini"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister Ekonomi, Universitas Indonesia"
+    },
+    {
+      "detail": "Sarjana Teknik Mesin, Universitas Jayabaya"
+    },
+    {
+      "detail": "Politeknik Teknik Mesin, Universitas Indonesia"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Said_Iqbal"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -1,0 +1,62 @@
+{
+  "bio": "Menteri Koordinator Bidang Pangan sejak Oktober 2024 dan Ketua Umum PAN sejak 2015. Sebelumnya Menteri Perdagangan, Ketua MPR, dan Menteri Kehutanan.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Lampung Selatan, 31 Agustus 1962"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Amanat Nasional (PAN)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Koordinator Bidang Pangan",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Menteri Perdagangan",
+      "org": "Kabinet Indonesia Maju",
+      "period": "2022 – 2024"
+    },
+    {
+      "role": "Wakil Ketua MPR",
+      "org": "",
+      "period": "2019 – 2022"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "PAN",
+      "period": "2015 – kini"
+    },
+    {
+      "role": "Ketua MPR",
+      "org": "",
+      "period": "2014 – 2019"
+    },
+    {
+      "role": "Menteri Kehutanan",
+      "org": "Kabinet Indonesia Bersatu II",
+      "period": "2009 – 2014"
+    }
+  ],
+  "education": [
+    {
+      "year": "2003",
+      "detail": "Magister Manajemen, STM PPM"
+    },
+    {
+      "year": "1996",
+      "detail": "Sarjana Ekonomi, Universitas Krisnadwipayana"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Zulkifli_Hasan"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

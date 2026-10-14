@@ -1,11 +1,14 @@
 import Link from "next/link";
 import FigurePortrait from "./FigurePortrait";
+import ActorText from "./ActorText";
 import SentimentTrack from "./SentimentTrack";
-import { SourcesDisclosure } from "./SourceList";
+import { SourcesCorner, SourcesDisclosure, sourcesCornerWidth } from "./SourceList";
 import SummaryList, { withoutTitleRepeats } from "./SummaryList";
+import { topicLabel, topicOf } from "@/lib/topics";
 import {
   dayBadge,
-  eventTypeChip,
+  figureDisplayScore,
+  firstName,
   formatCount,
   percent,
   toDisplayScore,
@@ -38,12 +41,17 @@ export default function RecordCard({
   marker?: "badge" | "dot" | "none";
   bare?: boolean;
 }) {
-  const display = toDisplayScore(record.sentiment_score);
-  const { positive, neutral, negative, total } = record.stance;
-  const chip = eventTypeChip(record.event_type);
+  // Stance toward the figure where enough comments name them; otherwise every
+  // comment's stance toward "the figure or the event". The label says which.
+  const figureDisplay = figureDisplayScore(record.figure_stance);
+  const aboutFigure = figureDisplay !== null;
+  const display = aboutFigure ? figureDisplay : toDisplayScore(record.sentiment_score);
+  const { positive, neutral, negative, total } = aboutFigure ? record.figure_stance : record.stance;
+  // The topic, like a peristiwa's — the highest-level tag — not KATEGORI.
+  const topic = topicOf(record);
   const href = `/tokoh/${record.figure_id}/${record.event_id}`;
   const sources = record.sources ?? [];
-  const { title, summary } = withoutTitleRepeats(record.title, record.summary);
+  const { title, summary } = withoutTitleRepeats(record.title, record.summary, record.figure_name);
 
   return (
     <article
@@ -53,12 +61,12 @@ export default function RecordCard({
         // body has to start clear of it or the dateline sits on the chip.
         paddingLeft: bare ? 0 : 68,
         paddingBottom: 34,
-        borderLeft: bare ? undefined : "1.5px solid #d8cfba",
+        borderLeft: bare ? undefined : "1.5px solid var(--color-parchment)",
       }}
     >
       {bare ? (
         marker === "badge" ? (
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: "#7a7264", marginBottom: 9 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: "var(--color-stone)", marginBottom: 9 }}>
             {dayBadge(record.event_date)}
           </div>
         ) : null
@@ -76,7 +84,7 @@ export default function RecordCard({
                 padding: "4px 12px",
                 borderRadius: 99,
                 whiteSpace: "nowrap",
-                boxShadow: "0 0 0 4px #f6f2e9",
+                boxShadow: "0 0 0 2px var(--color-cream)",
               }}
             >
               {dayBadge(record.event_date)}
@@ -90,9 +98,9 @@ export default function RecordCard({
                 height: 9,
                 marginLeft: 9,
                 marginTop: 7,
-                background: "#c9bfa8",
+                background: "var(--color-parchment-faded)",
                 borderRadius: "50%",
-                boxShadow: "0 0 0 4px #f6f2e9",
+                boxShadow: "0 0 0 4px var(--color-cream)",
               }}
             />
           )}
@@ -100,7 +108,8 @@ export default function RecordCard({
       )}
 
       {showFigure ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10, flexWrap: "wrap" }}>
+        // Kept clear of the sources toggle pinned in the top-right corner.
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10, flexWrap: "wrap", paddingRight: sourcesCornerWidth(sources.length) + 12 }}>
           <Link
             href={`/tokoh/${record.figure_id}`}
             className="fig-link"
@@ -120,20 +129,17 @@ export default function RecordCard({
               {record.figure_name}
             </span>
           </Link>
-          {record.event_type ? (
+          {topic !== "lainnya" ? (
             <>
-              <span aria-hidden style={{ color: "#cbc0aa" }}>·</span>
-              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: chip.color }}>
-                {record.event_type}
+              <span aria-hidden style={{ color: "var(--color-parchment-faded)" }}>·</span>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-clay)" }}>
+                {topicLabel(topic)}
               </span>
             </>
           ) : null}
-          {sources[0] ? (
-            <span style={{ marginLeft: "auto", fontSize: 12.5, color: "#7a7264" }}>{sources[0].source}</span>
-          ) : null}
         </div>
       ) : (
-        record.event_type && (
+        topic !== "lainnya" && (
           <div style={{ marginBottom: 8 }}>
             <span
               style={{
@@ -141,27 +147,34 @@ export default function RecordCard({
                 fontWeight: 700,
                 letterSpacing: "0.14em",
                 textTransform: "uppercase",
-                color: chip.color,
+                color: "var(--color-clay)",
               }}
             >
-              {record.event_type}
+              {topicLabel(topic)}
             </span>
           </div>
         )
       )}
 
       <h3
+        className="card-title"
         style={{
           fontFamily: "var(--font-serif)",
           fontWeight: 600,
-          fontSize: "clamp(21px, 3.4vw, 25px)",
+          fontSize: "clamp(21px, 3.4vw, 26px)",
           lineHeight: 1.16,
           margin: "0 0 10px",
           letterSpacing: "-0.01em",
         }}
       >
-        <Link href={href} className="card-link">
-          {title || "Tanpa judul"}
+        {/* The title text sits outside the card's link so that the names of
+            other figures in it can be links of their own; links cannot nest.
+            The card link stretches over the whole card as before, and the
+            title takes its hover state from it (.card-title in globals.css). */}
+        <span className="card-title-text">
+          <ActorText text={title || "Tanpa judul"} exclude={record.figure_id} quiet />
+        </span>
+        <Link href={href} className="card-link" aria-label={title || "Tanpa judul"}>
           {/* Non-breaking, so the arrow never wraps onto a line of its own. */}
           <span aria-hidden className="card-arrow">{"\u00a0→"}</span>
         </Link>
@@ -170,12 +183,17 @@ export default function RecordCard({
       {record.quote ? <Quote record={record} sources={sources} /> : null}
 
       {showSummary && summary ? (
-        <SummaryList summary={summary} sources={sources} />
+        <SummaryList summary={summary} sources={sources} figureId={record.figure_id} />
       ) : null}
 
-      <div style={{ marginBottom: 16 }}>
-        <SourcesDisclosure sources={sources} />
-      </div>
+      {showFigure ? (
+        // The toggle sits in the header row's corner; the list opens here.
+        <SourcesCorner sources={sources} />
+      ) : (
+        <div style={{ marginBottom: 16 }}>
+          <SourcesDisclosure sources={sources} />
+        </div>
+      )}
 
       {/* No corroboration badge either way. The sources disclosure above
           already names every outlet and counts them, so a strip repeating the
@@ -184,17 +202,19 @@ export default function RecordCard({
       {display === null ? null : (
         <>
           <div style={{ marginBottom: 7 }}>
-            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9b9285" }}>
-              Sentimen Publik
+            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-stone-light)" }}>
+              {aboutFigure ? `Sentimen terhadap ${firstName(record.figure_name)}` : "Sentimen Publik"}
             </span>
           </div>
           <SentimentTrack display={display} />
-          <div style={{ display: "flex", gap: 18, alignItems: "baseline", marginTop: 7, fontSize: 11.5, color: "#7a7264", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 18, alignItems: "baseline", marginTop: 7, fontSize: 11.5, color: "var(--color-stone)", flexWrap: "wrap" }}>
             <span>{percent(positive, total)}% positif</span>
             <span>{percent(neutral, total)}% netral</span>
             <span>{percent(negative, total)}% negatif</span>
-            <span style={{ marginLeft: "auto", color: "#9b9285" }}>
-              {formatCount(record.sentiment_sample_size ?? total)} komentar
+            <span style={{ marginLeft: "auto", color: "var(--color-stone-light)" }}>
+              {aboutFigure
+                ? `${formatCount(total)} komentar menyebut namanya`
+                : `${formatCount(record.sentiment_sample_size ?? total)} komentar`}
             </span>
           </div>
         </>
@@ -210,7 +230,7 @@ export default function RecordCard({
 export function Quote({ record, sources }: { record: EventRecord; sources: EventRecord["sources"] }) {
   const outlet = sources.find((s) => s.url === record.quote_url)?.source;
   return (
-    <figure style={{ margin: "4px 0 14px", paddingLeft: 14, borderLeft: "3px solid #8b2e1f" }}>
+    <figure style={{ margin: "4px 0 14px", paddingLeft: 14, borderLeft: "3px solid var(--color-clay)" }}>
       <blockquote
         style={{
           margin: 0,
@@ -218,13 +238,13 @@ export function Quote({ record, sources }: { record: EventRecord; sources: Event
           fontStyle: "italic",
           fontSize: 17,
           lineHeight: 1.5,
-          color: "#16130f",
+          color: "var(--color-ink)",
         }}
       >
         “{record.quote}”
       </blockquote>
       {record.quote_url ? (
-        <figcaption style={{ marginTop: 6, fontSize: 12, color: "#7a7264" }}>
+        <figcaption style={{ marginTop: 6, fontSize: 12, color: "var(--color-stone)" }}>
           <a
             href={record.quote_url}
             target="_blank"

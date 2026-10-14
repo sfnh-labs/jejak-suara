@@ -24,9 +24,9 @@ const PRINSIP = [
 ];
 
 const PETA_JALAN = [
-  { status: "Sedang dikerjakan", warna: "#8b2e1f", isi: "Sentimen dari platform kedua, agar tidak bergantung pada satu sumber reaksi." },
+  { status: "Sedang dikerjakan", warna: "var(--color-clay)", isi: "Sentimen dari platform kedua, agar tidak bergantung pada satu sumber reaksi." },
   { status: "Terdekat", warna: "#e0a53b", isi: "Notifikasi dan langganan untuk tokoh yang diikuti." },
-  { status: "Direncanakan", warna: "#7a7264", isi: "API publik dan ekspor data terbuka." },
+  { status: "Direncanakan", warna: "var(--color-stone)", isi: "API publik dan ekspor data terbuka." },
 ];
 
 export default function Tentang() {
@@ -48,7 +48,7 @@ export default function Tentang() {
           >
             Catatan yang bisa ditelusuri, bukan penilaian.
           </h1>
-          <p style={{ fontSize: 16, lineHeight: 1.65, color: "#4a443d", margin: 0 }}>
+          <p style={{ fontSize: 16, lineHeight: 1.65, color: "var(--color-mud)", margin: 0 }}>
             Jejak Suara menyusun rekam jejak tokoh publik dari pemberitaan media,
             merangkumnya per peristiwa, dan menampilkan reaksi publik apa adanya.
           </p>
@@ -56,7 +56,7 @@ export default function Tentang() {
 
         <section style={{ padding: "34px 0 0" }}>
           <h2 className="section-label" style={{ marginBottom: 14 }}>Latar Belakang</h2>
-          <p style={{ fontFamily: "var(--font-serif)", fontSize: 19, lineHeight: 1.6, color: "#3e382f", margin: 0 }}>
+          <p style={{ fontFamily: "var(--font-serif)", fontSize: 19, lineHeight: 1.6, color: "var(--color-body)", margin: 0 }}>
             Rekam jejak pejabat publik tersebar di ribuan berita yang cepat
             tenggelam. Ketika sebuah isu muncul lagi, hampir tidak ada cara
             praktis untuk melihat urutan kejadiannya. Jejak Suara mengumpulkan
@@ -70,22 +70,22 @@ export default function Tentang() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 28 }}>
             {PRINSIP.map((p) => (
               <div key={p.no}>
-                <div style={{ fontFamily: "var(--font-serif)", fontSize: 26, color: "#8b2e1f", lineHeight: 1 }}>{p.no}</div>
+                <div style={{ fontFamily: "var(--font-serif)", fontSize: 26, color: "var(--color-clay)", lineHeight: 1 }}>{p.no}</div>
                 <h3 style={{ fontFamily: "var(--font-serif)", fontSize: 19, fontWeight: 600, margin: "10px 0 8px" }}>{p.judul}</h3>
-                <p style={{ fontSize: 14, lineHeight: 1.6, color: "#4a443d", margin: 0 }}>{p.isi}</p>
+                <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--color-mud)", margin: 0 }}>{p.isi}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <section style={{ background: "#16130f", color: "#f6f2e9", padding: "34px clamp(20px, 5vw, 40px)", margin: "48px 0 0" }}>
+        <section style={{ background: "var(--color-ink)", color: "var(--color-cream)", padding: "34px clamp(20px, 5vw, 40px)", margin: "48px 0 0" }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: "#e0a53b", marginBottom: 14 }}>
             Dukung Kami
           </div>
           <h2 style={{ fontFamily: "var(--font-serif)", fontWeight: 500, fontSize: "clamp(24px, 4vw, 32px)", lineHeight: 1.15, margin: "0 0 14px" }}>
             100% untuk operasional.
           </h2>
-          <p style={{ fontSize: 15, lineHeight: 1.65, color: "#d8cfba", margin: "0 0 22px" }}>
+          <p style={{ fontSize: 15, lineHeight: 1.65, color: "var(--color-parchment)", margin: "0 0 22px" }}>
             Jejak Suara tidak memasang iklan dan tidak menerima dana dari partai
             maupun tokoh yang dipantau. Biaya server dan pengumpulan data
             ditanggung dari donasi pembaca.
@@ -93,8 +93,8 @@ export default function Tentang() {
           <span
             style={{
               display: "inline-block",
-              background: "#f6f2e9",
-              color: "#16130f",
+              background: "var(--color-cream)",
+              color: "var(--color-ink)",
               fontSize: 12,
               fontWeight: 700,
               letterSpacing: "0.1em",
@@ -108,7 +108,7 @@ export default function Tentang() {
 
         <section style={{ padding: "44px 0 0" }}>
           <h2 className="section-label" style={{ marginBottom: 16 }}>Peta Jalan</h2>
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, borderLeft: "1.5px solid #d8cfba" }}>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, borderLeft: "1.5px solid var(--color-parchment)" }}>
             {PETA_JALAN.map((r) => (
               <li key={r.status} style={{ position: "relative", padding: "0 0 22px 26px" }}>
                 <span
@@ -118,7 +118,7 @@ export default function Tentang() {
                 <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: r.warna }}>
                   {r.status}
                 </div>
-                <div style={{ fontSize: 14.5, lineHeight: 1.6, color: "#3e382f", marginTop: 4 }}>{r.isi}</div>
+                <div style={{ fontSize: 14.5, lineHeight: 1.6, color: "var(--color-body)", marginTop: 4 }}>{r.isi}</div>
               </li>
             ))}
           </ul>

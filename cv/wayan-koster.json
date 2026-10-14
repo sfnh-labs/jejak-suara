@@ -1,0 +1,55 @@
+{
+  "bio": "Gubernur Bali untuk periode kedua sejak 2025, setelah menjabat 2018–2023. Politikus PDI Perjuangan; sebelumnya anggota DPR selama tiga periode.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "I Wayan Koster"
+    },
+    {
+      "label": "Lahir",
+      "value": "Buleleng, 20 Oktober 1962"
+    },
+    {
+      "label": "Partai",
+      "value": "PDI Perjuangan"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Gubernur Bali",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Gubernur Bali",
+      "org": "",
+      "period": "2018 – 2023"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "2004 – 2018"
+    }
+  ],
+  "education": [
+    {
+      "year": "1999",
+      "detail": "Doktor, Universitas Negeri Jakarta"
+    },
+    {
+      "year": "1995",
+      "detail": "Magister Manajemen, International Golden Institute"
+    },
+    {
+      "year": "1987",
+      "detail": "Sarjana Matematika, Institut Teknologi Bandung"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Wayan_Koster"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

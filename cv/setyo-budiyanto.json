@@ -1,0 +1,61 @@
+{
+  "bio": "Ketua Komisi Pemberantasan Korupsi sejak Desember 2024. Perwira tinggi Polri; sebelumnya Direktur Penyidikan KPK, Kapolda Sulawesi Utara, dan Kapolda NTT.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Surabaya, 29 Juni 1967"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Ketua",
+      "org": "Komisi Pemberantasan Korupsi",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Inspektur Jenderal",
+      "org": "Kementerian Pertanian",
+      "period": "2024"
+    },
+    {
+      "role": "Kapolda Sulawesi Utara",
+      "org": "",
+      "period": "2022 – 2023"
+    },
+    {
+      "role": "Kapolda Nusa Tenggara Timur",
+      "org": "",
+      "period": "2021 – 2022"
+    },
+    {
+      "role": "Direktur Penyidikan",
+      "org": "Komisi Pemberantasan Korupsi",
+      "period": "2020 – 2021"
+    }
+  ],
+  "education": [
+    {
+      "year": "2005",
+      "detail": "Magister Hukum, Universitas Lampung"
+    },
+    {
+      "year": "2005",
+      "detail": "Sarjana Hukum, Universitas Muhammadiyah Kotabumi"
+    },
+    {
+      "year": "1999",
+      "detail": "Perguruan Tinggi Ilmu Kepolisian"
+    },
+    {
+      "year": "1989",
+      "detail": "Akademi Kepolisian"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Setyo_Budiyanto"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

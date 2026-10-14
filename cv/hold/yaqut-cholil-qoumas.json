@@ -1,0 +1,47 @@
+{
+  "bio": "Menteri Agama 2020–2024 dan Ketua Umum GP Ansor 2015–2020. Politikus PKB; sebelumnya anggota DPR dan Wakil Bupati Rembang.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Rembang, 4 Januari 1975"
+    },
+    {
+      "label": "Partai",
+      "value": "PKB"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Agama",
+      "org": "Kabinet Indonesia Maju",
+      "period": "2020 – 2024"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "GP Ansor",
+      "period": "2015 – 2020"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Jawa Tengah X",
+      "period": "2015 – 2020"
+    },
+    {
+      "role": "Wakil Bupati Rembang",
+      "org": "",
+      "period": "2005 – 2010"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Sosiologi, Universitas Indonesia (tidak selesai)"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Yaqut_Cholil_Qoumas"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

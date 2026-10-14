@@ -5,7 +5,8 @@ import {
   type CandidateFilter,
   type CandidateRow,
 } from "@/lib/candidates";
-import { annotate, decide } from "./actions";
+import { AcceptCandidateForm } from "../AcceptCandidateForm";
+import { annotate, decide, rejectMany } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +22,12 @@ const TABS: { key: CandidateFilter; label: string }[] = [
   { key: "all", label: "Semua" },
 ];
 
-const INK = "#16130f";
-const MUTED = "#7a7264";
-const RULE = "#d8cfba";
+const INK = "var(--color-ink)";
+const MUTED = "var(--color-stone)";
+const RULE = "var(--color-parchment)";
 
 function button(tone: "accept" | "danger" | "quiet") {
-  const bg = { accept: "#3d6b4a", danger: "#8b2e1f", quiet: "transparent" }[tone];
+  const bg = { accept: "#3d6b4a", danger: "var(--color-clay)", quiet: "transparent" }[tone];
   return {
     fontSize: 12.5,
     fontWeight: 600,
@@ -35,7 +36,7 @@ function button(tone: "accept" | "danger" | "quiet") {
     cursor: "pointer",
     border: `1px solid ${tone === "quiet" ? RULE : bg}`,
     background: bg,
-    color: tone === "quiet" ? MUTED : "#f6f2e9",
+    color: tone === "quiet" ? MUTED : "var(--color-cream)",
   } as const;
 }
 
@@ -81,13 +82,13 @@ export default async function KandidatTokoh({
           >
             Kandidat Tokoh
           </h1>
-          <p style={{ fontSize: 14.5, lineHeight: 1.6, color: "#4a443d", margin: 0, maxWidth: 620 }}>
-            Nama-nama yang cukup sering disebut media, tapi <strong>tidak bisa
-            diputus otomatis</strong> — sebagian besar bernama satu kata, dan
-            dalam kalimat bahasa Indonesia kata pertama selalu berhuruf besar,
-            sehingga &ldquo;Dasar&rdquo; terlihat sama seperti &ldquo;Dasco&rdquo;.
-            Keputusan di sini <strong>belum langsung berlaku</strong>: pipeline
-            menerapkannya lewat{" "}
+          <p style={{ fontSize: 14.5, lineHeight: 1.6, color: "var(--color-mud)", margin: 0, maxWidth: 620 }}>
+            Nama-nama yang cukup sering disebut media tapi belum menjadi tokoh.
+            Di sini cukup <strong>menyaring</strong>: centang yang jelas bukan
+            orang (&ldquo;Dasar&rdquo;, &ldquo;Lalu&rdquo;, separuh jabatan)
+            lalu tolak sekaligus. Yang mungkin orang, buka{" "}
+            <strong>Periksa di catatan</strong> — diterima di sana, di samping
+            liputannya. Keputusan baru berlaku setelah pipeline menjalankan{" "}
             <code style={{ fontSize: 13 }}>scripts/apply_candidate_verdicts.py</code>.
           </p>
         </header>
@@ -101,7 +102,7 @@ export default async function KandidatTokoh({
                 color: filter === tab.key ? INK : MUTED,
                 textDecoration: "none",
                 paddingBottom: 2,
-                borderBottom: `2px solid ${filter === tab.key ? "#8b2e1f" : "transparent"}`,
+                borderBottom: `2px solid ${filter === tab.key ? "var(--color-clay)" : "transparent"}`,
               }}
             >
               {tab.label} <span style={{ color: MUTED, fontWeight: 400 }}>{counts[tab.key]}</span>
@@ -117,6 +118,29 @@ export default async function KandidatTokoh({
           </p>
         ) : (
           <div style={{ paddingBottom: 60 }}>
+            {filter === "undecided" ? (
+              <form
+                id={BULK}
+                action={rejectMany}
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 2,
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  padding: "10px 0",
+                  background: "var(--color-cream)",
+                  borderBottom: `1px solid ${RULE}`,
+                }}
+              >
+                <button type="submit" style={button("danger")}>Tolak yang dicentang</button>
+                <span style={{ fontSize: 12, color: MUTED }}>
+                  Urut dari yang paling banyak disebut media.
+                </span>
+              </form>
+            ) : null}
             {rows.map((r) => (
               <CandidateItem key={r.slug} row={r} />
             ))}
@@ -142,190 +166,165 @@ function highlight(text: string, name: string) {
   );
 }
 
+/** The bulk-reject form. Rows tick into it from outside, by `form=`, because
+ *  each row already holds forms of its own and forms cannot nest. */
+const BULK = "tolak-massal";
+
+/**
+ * One name, as a line to triage rather than a form to fill.
+ *
+ * Accepting happens on the record page, beside the coverage the name came
+ * from; this row only says whether that is worth opening. A name no record
+ * carries has nowhere to send the curator, so it keeps the form here.
+ */
 function CandidateItem({ row: r }: { row: CandidateRow }) {
   const decided = r.verdict !== null;
-  const contexts = r.headlines
-    .map((h) => h.context)
-    .filter((c): c is string => Boolean(c))
-    .slice(0, 2);
+  const context = r.headlines.map((h) => h.context).find((c): c is string => Boolean(c));
+  const [first, ...others] = r.records;
   return (
-    <article style={{ padding: "18px 0", borderBottom: `1px solid ${RULE}` }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
-        <h2 style={{ fontFamily: "var(--font-serif)", fontWeight: 600, fontSize: 19, margin: 0 }}>
-          {r.name}
-        </h2>
-        <span style={{ fontSize: 12, color: MUTED }}>{r.slug}</span>
-        {r.verdict ? (
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: r.verdict === "promote" ? "#3d6b4a" : "#8b2e1f",
-            }}
-          >
-            {r.verdict === "promote" ? "diterima" : "ditolak"}
-            {r.applied_at ? " · sudah diterapkan" : " · menunggu pipeline"}
-          </span>
-        ) : null}
-      </div>
-
-      <div style={{ fontSize: 12.5, color: MUTED, marginBottom: 8, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <span>{r.outlets} media</span>
-        <span>·</span>
-        <span>{r.mentions} penyebutan</span>
-        <span>·</span>
-        <span>{r.role ? `disebut sebagai ${r.role}` : "tidak pernah disebut jabatannya"}</span>
-      </div>
-
-      {contexts.length > 0 ? (
-        // The only evidence that answers "is this a person?". The name is
-        // mined from article bodies, so this is the sentence that produced
-        // it — "Jaksa Agung ST Burhanuddin" says at once that "Agung" is half
-        // an office, which no headline or record title would have revealed.
-        <div style={{ margin: "0 0 12px", borderLeft: `3px solid ${RULE}`, paddingLeft: 12 }}>
-          {contexts.map((c, i) => (
-            <p key={i} style={{ fontSize: 13.5, lineHeight: 1.6, color: "#4a443d", margin: i ? "8px 0 0" : 0 }}>
-              {highlight(c, r.name)}
-            </p>
-          ))}
-        </div>
-      ) : null}
-
-      {r.records.length > 0 ? (
-        // What the coverage became on the site. This is the thing accepting a
-        // candidate really creates — the articles below are only the evidence
-        // it was built from.
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9b9285", marginBottom: 5 }}>
-            Catatan terkait
-          </div>
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14, lineHeight: 1.55, fontFamily: "var(--font-serif)" }}>
-            {r.records.map((rec) => (
-              <li key={rec.id}>
-                {rec.figure_id ? (
-                  <Link
-                    href={`/tokoh/${rec.figure_id}/${rec.id}`}
-                    target="_blank"
-                    style={{ color: INK }}
-                  >
-                    {rec.title}
-                  </Link>
-                ) : (
-                  // A peristiwa belongs to no figure and has no detail page.
-                  <span style={{ color: INK }}>{rec.title}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {r.headlines.length > 0 ? (
-        // Openable, because a name mined from an article's body often does not
-        // appear in its headline at all — judging "Agung" needs the sentence,
-        // not the title.
-        <details style={{ marginBottom: 12 }}>
-          <summary style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, cursor: "pointer" }}>
-            Artikel bukti ({r.headlines.length})
-          </summary>
-        <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.6, color: "#4a443d" }}>
-          {r.headlines.map((h, i) => (
-            <li key={i}>
-              {h.source ? (
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginRight: 6 }}>
-                  {h.source}
-                </span>
-              ) : null}
-              {h.url ? (
-                <a href={h.url} target="_blank" rel="noreferrer" style={{ color: "#4a443d" }}>
-                  {h.title}
-                </a>
-              ) : (
-                h.title
-              )}
-            </li>
-          ))}
-        </ul>
-        </details>
-      ) : null}
-
-      <form action={annotate} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 12, flexWrap: "wrap" }}>
-        <input type="hidden" name="slug" value={r.slug} />
-        <label style={{ fontSize: 11.5, color: MUTED, display: "grid", gap: 3, flex: "1 1 420px", minWidth: 0 }}>
-          Catatan — apa yang kamu lihat di sini
-          <textarea
-            name="notes"
-            rows={2}
-            defaultValue={r.notes ?? ""}
-            placeholder="mis. ini pangkat polisi, bukan nama · orang yang sama dengan tokoh X · cuma pernah dikutip, tidak pernah jadi pelaku"
-            style={{ ...input, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
-            aria-label={`Catatan untuk ${r.name}`}
+    <article style={{ display: "flex", gap: 12, padding: "16px 0", borderBottom: `1px solid ${RULE}` }}>
+      <div style={{ width: 20, flex: "none", paddingTop: 4 }}>
+        {decided ? null : (
+          <input
+            type="checkbox"
+            name="slug"
+            value={r.slug}
+            form={BULK}
+            aria-label={`Tolak ${r.name}`}
+            style={{ width: 16, height: 16, cursor: "pointer" }}
           />
-        </label>
-        <button type="submit" style={button("quiet")}>Simpan catatan</button>
-      </form>
-
-      {decided ? (
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          {r.verdict === "promote" ? (
-            <span style={{ fontSize: 13, color: "#4a443d" }}>
-              Akan tampil sebagai <strong>{r.full_name || r.name}</strong>
-              {r.curated_role || r.role ? ` · ${r.curated_role || r.role}` : ""}
-              {r.aliases ? ` · alias: ${r.aliases.split("|").join(", ")}` : ""}
+        )}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
+          <h2 style={{ fontFamily: "var(--font-serif)", fontWeight: 600, fontSize: 18, margin: 0 }}>
+            {r.name}
+          </h2>
+          <span style={{ fontSize: 12, color: MUTED }}>
+            {r.outlets} media · {r.mentions} penyebutan
+            {r.role ? ` · disebut sebagai ${r.role}` : ""}
+          </span>
+          {r.verdict ? (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: r.verdict === "promote" ? "#3d6b4a" : "var(--color-clay)",
+              }}
+            >
+              {r.verdict === "promote" ? "diterima" : "ditolak"}
+              {r.applied_at ? " · sudah diterapkan" : " · menunggu pipeline"}
             </span>
           ) : null}
-          <form action={decide}>
-            <input type="hidden" name="slug" value={r.slug} />
-            <input type="hidden" name="verdict" value="" />
-            <button type="submit" style={button("quiet")}>Batalkan keputusan</button>
-          </form>
         </div>
-      ) : (
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-          {/* One form for accepting, because the name and aliases have to
-              travel with the verdict; rejecting needs neither. */}
-          <form action={decide} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <input type="hidden" name="slug" value={r.slug} />
-            <input type="hidden" name="verdict" value="promote" />
-            <label style={{ fontSize: 11.5, color: MUTED, display: "grid", gap: 3 }}>
-              Nama lengkap
-              <input
-                name="full_name"
-                defaultValue={r.name}
-                style={{ ...input, width: 200 }}
-                aria-label={`Nama lengkap untuk ${r.name}`}
-              />
-            </label>
-            <label style={{ fontSize: 11.5, color: MUTED, display: "grid", gap: 3 }}>
-              Jabatan
-              <input
-                name="curated_role"
-                defaultValue={r.role ?? ""}
-                placeholder="mis. Menteri Ketenagakerjaan"
-                style={{ ...input, width: 210 }}
-                aria-label={`Jabatan untuk ${r.name}`}
-              />
-            </label>
-            <label style={{ fontSize: 11.5, color: MUTED, display: "grid", gap: 3 }}>
-              Alias lain (pisahkan dengan |)
-              <input
-                name="aliases"
-                placeholder="Jokowi|Mulyono"
-                style={{ ...input, width: 220 }}
-                aria-label={`Alias untuk ${r.name}`}
-              />
-            </label>
-            <button type="submit" style={button("accept")}>Terima</button>
-          </form>
-          <form action={decide}>
-            <input type="hidden" name="slug" value={r.slug} />
-            <input type="hidden" name="verdict" value="reject" />
-            <button type="submit" style={button("danger")}>Tolak</button>
-          </form>
+
+        {context ? (
+          // The sentence that produced the name — usually enough on its own:
+          // "Jaksa Agung ST Burhanuddin" says at once that "Agung" is half an
+          // office.
+          <p style={{ fontSize: 13.5, lineHeight: 1.55, color: "var(--color-mud)", margin: "4px 0 8px", borderLeft: `3px solid ${RULE}`, paddingLeft: 10 }}>
+            {highlight(context, r.name)}
+          </p>
+        ) : null}
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {decided ? (
+            <>
+              {r.verdict === "promote" ? (
+                <span style={{ fontSize: 13, color: "var(--color-mud)" }}>
+                  Akan tampil sebagai <strong>{r.full_name || r.name}</strong>
+                  {r.curated_role || r.role ? ` · ${r.curated_role || r.role}` : ""}
+                </span>
+              ) : null}
+              <form action={decide}>
+                <input type="hidden" name="slug" value={r.slug} />
+                <input type="hidden" name="verdict" value="" />
+                <button type="submit" style={button("quiet")}>Batalkan keputusan</button>
+              </form>
+            </>
+          ) : (
+            <>
+              {first ? (
+                <Link href={`/kurasi/${first.id}#nama-${r.slug}`} style={{ ...button("accept"), textDecoration: "none" }}>
+                  Periksa di catatan →
+                </Link>
+              ) : null}
+              <form action={decide}>
+                <input type="hidden" name="slug" value={r.slug} />
+                <input type="hidden" name="verdict" value="reject" />
+                <button type="submit" style={button("danger")}>Tolak</button>
+              </form>
+            </>
+          )}
+          {first ? (
+            <span style={{ fontSize: 12, color: MUTED, minWidth: 0 }}>
+              {first.title}
+              {others.length ? ` · +${others.length} catatan lain` : ""}
+            </span>
+          ) : null}
         </div>
-      )}
+
+        {!decided && !first ? (
+          <details style={{ marginTop: 10 }}>
+            <summary style={{ fontSize: 12, fontWeight: 700, color: MUTED, cursor: "pointer" }}>
+              Tidak ada di catatan mana pun — terima di sini
+            </summary>
+            <div style={{ marginTop: 10 }}>
+              <AcceptCandidateForm slug={r.slug} name={r.name} role={r.role} withReject={false} />
+            </div>
+          </details>
+        ) : null}
+
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, cursor: "pointer" }}>
+            Bukti dan catatan{r.notes ? " · ada catatan" : ""}
+          </summary>
+          {others.length ? (
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.55, fontFamily: "var(--font-serif)" }}>
+              {r.records.map((rec) => (
+                <li key={rec.id}>
+                  <Link href={`/kurasi/${rec.id}#nama-${r.slug}`} style={{ color: INK }}>{rec.title}</Link>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {r.headlines.length > 0 ? (
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: "var(--color-mud)" }}>
+              {r.headlines.map((h, i) => (
+                <li key={i}>
+                  {h.source ? (
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginRight: 6 }}>{h.source}</span>
+                  ) : null}
+                  {h.url ? (
+                    <a href={h.url} target="_blank" rel="noreferrer" style={{ color: "var(--color-mud)" }}>{h.title}</a>
+                  ) : (
+                    h.title
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {/* Kept apart from the verdict: the note is what the next round of
+              extractor tuning reads, so it outlives a cleared decision. */}
+          <form action={annotate} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
+            <input type="hidden" name="slug" value={r.slug} />
+            <label style={{ fontSize: 11.5, color: MUTED, display: "grid", gap: 3, flex: "1 1 360px", minWidth: 0 }}>
+              Catatan — apa yang kamu lihat di sini
+              <textarea
+                name="notes"
+                rows={2}
+                defaultValue={r.notes ?? ""}
+                placeholder="mis. ini pangkat polisi, bukan nama · orang yang sama dengan tokoh X"
+                style={{ ...input, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+                aria-label={`Catatan untuk ${r.name}`}
+              />
+            </label>
+            <button type="submit" style={button("quiet")}>Simpan catatan</button>
+          </form>
+        </details>
+      </div>
     </article>
   );
 }

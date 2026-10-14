@@ -1,0 +1,49 @@
+{
+  "bio": "Gubernur Sumatera Utara sejak Februari 2025. Sebelumnya Wali Kota Medan; menantu Presiden ke-7 Joko Widodo.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Muhammad Bobby Afif Nasution"
+    },
+    {
+      "label": "Lahir",
+      "value": "Medan, 5 Juli 1991"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra (sejak 2024)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Gubernur Sumatera Utara",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Wali Kota Medan",
+      "org": "",
+      "period": "2021 – 2025"
+    },
+    {
+      "role": "Wakil Ketua Umum",
+      "org": "HIPMI",
+      "period": "2019 – kini"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister Agribisnis, Institut Pertanian Bogor"
+    },
+    {
+      "detail": "Sarjana Agribisnis, Institut Pertanian Bogor"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Bobby_Nasution"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

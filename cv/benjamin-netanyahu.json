@@ -1,0 +1,60 @@
+{
+  "bio": "Perdana Menteri Israel sejak 2022, masa jabatan ketiganya setelah 1996–1999 dan 2009–2021. Ketua Partai Likud sejak 2005.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Tel Aviv, 21 Oktober 1949"
+    },
+    {
+      "label": "Partai",
+      "value": "Likud"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Perdana Menteri Israel",
+      "org": "Juga 1996–1999 dan 2009–2021",
+      "period": "2022 – kini"
+    },
+    {
+      "role": "Pemimpin Oposisi",
+      "org": "Knesset",
+      "period": "2021 – 2022"
+    },
+    {
+      "role": "Ketua",
+      "org": "Partai Likud",
+      "period": "2005 – kini"
+    },
+    {
+      "role": "Menteri Keuangan",
+      "org": "",
+      "period": "2003 – 2005"
+    },
+    {
+      "role": "Menteri Luar Negeri",
+      "org": "",
+      "period": "2002 – 2003"
+    },
+    {
+      "role": "Duta Besar Israel untuk PBB",
+      "org": "",
+      "period": "1984 – 1988"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Massachusetts Institute of Technology"
+    },
+    {
+      "detail": "Harvard University"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Benjamin_Netanyahu"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

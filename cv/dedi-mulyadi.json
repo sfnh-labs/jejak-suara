@@ -1,0 +1,65 @@
+{
+  "bio": "Gubernur Jawa Barat sejak Februari 2025, dikenal sebagai “Kang Dedi” atau KDM. Sebelumnya dua periode Bupati Purwakarta dan anggota DPR.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Subang, April 1971"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra (sejak 2023); sebelumnya Golkar"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Gubernur Jawa Barat",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Jawa Barat VII",
+      "period": "2019 – 2023"
+    },
+    {
+      "role": "Ketua DPD Partai Golkar Jawa Barat",
+      "org": "",
+      "period": "2016"
+    },
+    {
+      "role": "Bupati Purwakarta",
+      "org": "",
+      "period": "2008 – 2018"
+    },
+    {
+      "role": "Wakil Bupati Purwakarta",
+      "org": "",
+      "period": "2003 – 2008"
+    },
+    {
+      "role": "Anggota DPRD Kabupaten Purwakarta",
+      "org": "",
+      "period": "1999 – 2003"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister Manajemen, Universitas Widyatama, Bandung"
+    },
+    {
+      "year": "1999",
+      "detail": "Sarjana Hukum, STH Purnawarman Purwakarta"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Dedi_Mulyadi"
+    },
+    {
+      "label": "Akurat.co, profil Dedi Mulyadi",
+      "url": "https://www.akurat.co/selebriti/1306212334/profil-dan-agama-dedi-mulyadi-cek-perjalanan-karier-gubernur-jawa-barat"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

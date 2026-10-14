@@ -1,0 +1,51 @@
+{
+  "bio": "Kepala Otorita Ibu Kota Nusantara sejak 2024. Sebelumnya Menteri Pekerjaan Umum dan Perumahan Rakyat selama sepuluh tahun.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Mochamad Basuki Hadimuljono"
+    },
+    {
+      "label": "Lahir",
+      "value": "Surakarta, 5 November 1954"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Kepala Otorita Ibu Kota Nusantara",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Menteri Pekerjaan Umum dan Perumahan Rakyat",
+      "org": "",
+      "period": "2014 – 2024"
+    },
+    {
+      "role": "Wakil Presiden",
+      "org": "International Commission on Irrigation and Drainage",
+      "period": "2013 – 2016"
+    },
+    {
+      "role": "Kepala Badan Penelitian dan Pengembangan",
+      "org": "Kementerian Pekerjaan Umum",
+      "period": "2005 – 2007"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister dan doktor, Colorado State University"
+    },
+    {
+      "year": "1979",
+      "detail": "Geologi, Universitas Gadjah Mada"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Basuki_Hadimuljono"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

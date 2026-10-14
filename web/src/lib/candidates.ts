@@ -175,13 +175,16 @@ export async function setCandidateVerdict(
   verdict: CandidateVerdict | null,
   fullName?: string | null,
   aliases?: string | null,
-  curatedRole?: string | null
+  curatedRole?: string | null,
+  curatedSlug?: string | null,
+  curatedPositions?: string | null
 ): Promise<void> {
   if (verdict === null) {
     await query(
       `UPDATE figure_candidates
           SET verdict = NULL, full_name = NULL, aliases = NULL,
-              curated_role = NULL, decided_at = NULL, applied_at = NULL
+              curated_role = NULL, curated_slug = NULL, curated_positions = NULL,
+              decided_at = NULL, applied_at = NULL
         WHERE slug = $1`,
       [slug]
     );
@@ -193,10 +196,12 @@ export async function setCandidateVerdict(
             full_name = $3,
             aliases = $4,
             curated_role = $5,
+            curated_slug = $6,
+            curated_positions = $7,
             decided_at = now()::text,
             applied_at = NULL
       WHERE slug = $1`,
-    [slug, verdict, fullName || null, aliases || null, curatedRole || null]
+    [slug, verdict, fullName || null, aliases || null, curatedRole || null, curatedSlug || null, curatedPositions || null]
   );
 }
 
@@ -213,4 +218,19 @@ export async function setCandidateNote(slug: string, notes: string | null): Prom
     slug,
     notes && notes.trim() ? notes.trim() : null,
   ]);
+}
+
+/**
+ * Reject several names at once — the queue's triage, where most rows are a
+ * sentence-start word or half an office and need no form. Rows already
+ * decided keep their verdict.
+ */
+export async function rejectCandidates(slugs: string[]): Promise<void> {
+  if (slugs.length === 0) return;
+  await query(
+    `UPDATE figure_candidates
+        SET verdict = 'reject', decided_at = now()::text, applied_at = NULL
+      WHERE slug = ANY($1) AND verdict IS NULL`,
+    [slugs]
+  );
 }

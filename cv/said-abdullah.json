@@ -1,0 +1,40 @@
+{
+  "bio": "Ketua DPP PDI Perjuangan dan anggota DPR dari Madura sejak 2004.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Muhammad Said Abdullah"
+    },
+    {
+      "label": "Lahir",
+      "value": "Sumenep, 22 Oktober 1962"
+    },
+    {
+      "label": "Partai",
+      "value": "PDI Perjuangan"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Ketua DPP",
+      "org": "PDI Perjuangan",
+      "period": "kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Jawa Timur XI (sebelumnya Jawa Timur X)",
+      "period": "2004 – kini"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Said_Abdullah"
+    },
+    {
+      "label": "pemberitaan yang dihimpun Jejak Suara"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

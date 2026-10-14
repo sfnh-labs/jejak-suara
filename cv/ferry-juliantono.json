@@ -1,0 +1,56 @@
+{
+  "bio": "Menteri Koperasi sejak 2025, setelah sebelumnya Wakil Menteri Koperasi. Politikus Gerindra dan Ketua Umum Dewan Tani Indonesia.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Ferry Joko Juliantono"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 27 Juli 1967"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Koperasi",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Wakil Menteri Koperasi",
+      "org": "",
+      "period": "2024 – 2025"
+    },
+    {
+      "role": "Wakil Ketua Umum",
+      "org": "Partai Gerindra",
+      "period": "2020 – 2025"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Dewan Tani Indonesia",
+      "period": "2005 – kini"
+    }
+  ],
+  "education": [
+    {
+      "year": "2006",
+      "detail": "Magister Hubungan Internasional, Universitas Indonesia"
+    },
+    {
+      "year": "1993",
+      "detail": "Sarjana Ekonomi (Akuntansi), Universitas Padjadjaran"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Ferry_Juliantono"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

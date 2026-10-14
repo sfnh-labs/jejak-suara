@@ -108,6 +108,12 @@ export interface EventRecord {
   sentiment_label: string | null;
   sentiment_sample_size: number | null;
   stance: StanceCounts;
+  /**
+   * Stance toward the figure, counted only over comments that name them. The
+   * stance above is toward "the figure or the event" at once, so under a
+   * record of a minister praising a team it mostly measures the team.
+   */
+  figure_stance: StanceCounts;
 }
 
 export interface FigureSummary extends Figure {

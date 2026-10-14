@@ -1,0 +1,49 @@
+{
+  "bio": "Gubernur Jawa Tengah sejak Februari 2025. Purnawirawan perwira tinggi Polri; sebelumnya Kapolda Jawa Tengah dan Inspektur Jenderal Kementerian Perdagangan.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Surabaya, 22 November"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Gubernur Jawa Tengah",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Inspektur Jenderal",
+      "org": "Kementerian Perdagangan",
+      "period": "2024"
+    },
+    {
+      "role": "Kepala Kepolisian Daerah Jawa Tengah",
+      "org": "",
+      "period": "2020 – 2024"
+    },
+    {
+      "role": "Wakil Kepala Kepolisian Daerah Jawa Tengah",
+      "org": "",
+      "period": "2018 – 2020"
+    },
+    {
+      "role": "Kapolresta Surakarta",
+      "org": "",
+      "period": "2015 – 2017"
+    }
+  ],
+  "education": [
+    {
+      "year": "1990",
+      "detail": "Hukum, IAIN (kini UIN) Sunan Ampel Surabaya"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Ahmad_Luthfi"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

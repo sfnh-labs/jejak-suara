@@ -1,0 +1,52 @@
+{
+  "bio": "Wali Kota Pekanbaru sejak 2025. Politikus Partai Demokrat; sebelumnya Wakil Ketua DPRD Provinsi Riau.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Padang, 14 Oktober 1984"
+    },
+    {
+      "label": "Partai",
+      "value": "Demokrat"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wali Kota Pekanbaru",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Ketua DPD",
+      "org": "Partai Demokrat Riau",
+      "period": "2021 – 2026"
+    },
+    {
+      "role": "Wakil Ketua DPRD Provinsi Riau",
+      "org": "",
+      "period": "2020 – 2024"
+    },
+    {
+      "role": "Ketua DPC",
+      "org": "Partai Demokrat Kota Pekanbaru",
+      "period": "2016 – 2021"
+    }
+  ],
+  "education": [
+    {
+      "year": "2022",
+      "detail": "Magister Manajemen, Universitas Lancang Kuning"
+    },
+    {
+      "year": "2008",
+      "detail": "Sarjana Manajemen, Universitas Islam Riau"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Agung_Nugroho"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

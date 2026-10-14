@@ -1,0 +1,57 @@
+{
+  "bio": "Perdana Menteri Malaysia ke-10 sejak November 2022, merangkap Menteri Keuangan. Ketua Pakatan Harapan; sebelumnya Wakil Perdana Menteri pada 1993–1998.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Bukit Mertajam, 10 Agustus 1947"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Keadilan Rakyat (sejak 1999)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Perdana Menteri Malaysia",
+      "org": "",
+      "period": "2022 – kini"
+    },
+    {
+      "role": "Menteri Keuangan Malaysia",
+      "org": "",
+      "period": "2022 – kini"
+    },
+    {
+      "role": "Ketua Oposisi",
+      "org": "",
+      "period": "2020 – 2022"
+    },
+    {
+      "role": "Ketua",
+      "org": "Pakatan Harapan",
+      "period": "2017 – kini"
+    },
+    {
+      "role": "Wakil Perdana Menteri Malaysia",
+      "org": "",
+      "period": "1993 – 1998"
+    },
+    {
+      "role": "Menteri Keuangan Malaysia",
+      "org": "",
+      "period": "1991 – 1998"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Sarjana Sastra Melayu, Universiti Malaya"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Anwar_Ibrahim"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

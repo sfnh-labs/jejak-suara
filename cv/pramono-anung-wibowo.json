@@ -1,0 +1,63 @@
+{
+  "bio": "Gubernur DKI Jakarta sejak Februari 2025. Politikus PDI Perjuangan; sebelumnya Sekretaris Kabinet selama hampir sembilan tahun dan Wakil Ketua DPR.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Kediri, 11 Juni 1963"
+    },
+    {
+      "label": "Partai",
+      "value": "PDI Perjuangan"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Gubernur DKI Jakarta",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Sekretaris Kabinet",
+      "org": "",
+      "period": "2015 – 2024"
+    },
+    {
+      "role": "Wakil Ketua DPR",
+      "org": "",
+      "period": "2009 – 2014"
+    },
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "PDI Perjuangan",
+      "period": "2005 – 2010"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "1999 – 2015"
+    }
+  ],
+  "education": [
+    {
+      "year": "2013",
+      "detail": "Doktor Komunikasi Politik, Universitas Padjadjaran"
+    },
+    {
+      "detail": "Magister Manajemen, Universitas Gadjah Mada"
+    },
+    {
+      "detail": "Teknik Pertambangan, Institut Teknologi Bandung"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Pramono_Anung"
+    },
+    {
+      "label": "CNBC Indonesia, profil Pramono Anung",
+      "url": "https://www.cnbcindonesia.com/research/20240928170318-128-575368/pilkada-jakarta-2024-profil-pramono-anung-rano-karno"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

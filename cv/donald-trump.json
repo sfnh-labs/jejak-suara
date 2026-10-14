@@ -1,0 +1,47 @@
+{
+  "bio": "Presiden Amerika Serikat ke-47 sejak Januari 2025, setelah sebelumnya menjabat Presiden ke-45 pada 2017–2021. Politikus Partai Republik dan pengusaha properti.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Donald John Trump"
+    },
+    {
+      "label": "Lahir",
+      "value": "Queens, New York, 14 Juni 1946"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Republik"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Presiden Amerika Serikat ke-47",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Presiden Amerika Serikat ke-45",
+      "org": "",
+      "period": "2017 – 2021"
+    },
+    {
+      "role": "Produser dan pembawa acara",
+      "org": "The Apprentice",
+      "period": "2004 – 2015"
+    }
+  ],
+  "education": [
+    {
+      "year": "1968",
+      "detail": "B.S. Ekonomi, Wharton School, University of Pennsylvania"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Donald_Trump"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

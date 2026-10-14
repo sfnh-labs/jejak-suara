@@ -1,0 +1,51 @@
+{
+  "bio": "Menteri Pertanian sejak 2023, jabatan yang juga ia pegang pada 2014–2019. Sejak 2025 merangkap Kepala Badan Pangan Nasional.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Andi Amran Sulaiman"
+    },
+    {
+      "label": "Lahir",
+      "value": "Bone, 27 April 1968"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Kepala Badan Pangan Nasional",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Menteri Pertanian",
+      "org": "",
+      "period": "2023 – kini"
+    },
+    {
+      "role": "Menteri Pertanian",
+      "org": "Kabinet Kerja",
+      "period": "2014 – 2019"
+    }
+  ],
+  "education": [
+    {
+      "year": "2012",
+      "detail": "Doktor Ilmu Pertanian, Universitas Hasanuddin"
+    },
+    {
+      "year": "2003",
+      "detail": "Magister Ilmu Pertanian, Universitas Hasanuddin"
+    },
+    {
+      "year": "1993",
+      "detail": "Sarjana Pertanian, Universitas Hasanuddin"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Andi_Amran_Sulaiman"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

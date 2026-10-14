@@ -26,6 +26,12 @@
   --color-score-neg: #c0392b;
   --color-score-neu: #9b7b3f;
   --color-score-pos: #2e7a52;
+  /* Masthead and event-tile accents, from the Tokyo-E board. Brand red, ink
+     and paper above are the Logo sheet's and stay as they are. */
+  --color-indigo: #22325b;
+  --color-gold: #c9a04e;
+  --color-event: #16130f;
+  --color-callout: #fbf7ee;
   --font-serif: var(--font-newsreader), Georgia, serif;
   --font-sans: var(--font-public-sans), system-ui, sans-serif;
 }
@@ -109,14 +115,25 @@
     border-color: var(--color-clay);
     background: var(--color-warn-bg);
   }
-
-  .nav-link {
-    color: var(--color-stone);
-    text-decoration: none;
-    border-bottom: 2px solid transparent;
+  /* The selected filter: filled, so it reads as the current state. */
+  .pill-link[aria-current="page"] {
+    color: var(--color-cream);
+    background: var(--color-ink);
+    border-color: var(--color-ink);
   }
-  .nav-link:hover { color: var(--color-ink); border-bottom-color: var(--color-parchment-dark); }
-  .nav-link[aria-current="page"] { color: var(--color-ink); border-bottom-color: var(--color-clay); }
+  .pill-count { opacity: 0.6; font-weight: 500; }
+
+  /* The strip's links. The 3px underline overlaps the strip's 1px rule, so
+     the active line sits on the separator rather than above it. */
+  .nav-link {
+    display: block;
+    padding: 11px 0 9px;
+    color: var(--color-ink);
+    text-decoration: none;
+    border-bottom: 3px solid transparent;
+  }
+  .nav-link:hover { color: var(--color-clay); border-bottom-color: var(--color-parchment-dark); }
+  .nav-link[aria-current="page"] { color: var(--color-clay); border-bottom-color: var(--color-clay); }
 
   .tab-link {
     color: var(--color-stone);
@@ -146,12 +163,18 @@
     text-underline-offset: 3px;
   }
 
-  /* Prev/next arrows over the ends of a horizontal row (HScroller.tsx). The
-     paper-coloured fade behind each one tells the row continues past it. */
+  /* Prev/next arrows for a horizontal row (HScroller.tsx). They sit in the
+     page margin, outside the row; the row's edges fade into the paper to show
+     it continues. Where the margin is too narrow for them they move inside,
+     over the faded edge. */
   .hscroller { position: relative; }
+  .hscroller-row {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l), #000 calc(100% - var(--fade-r)), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l), #000 calc(100% - var(--fade-r)), transparent 100%);
+  }
   .hscroller-arrow {
     position: absolute;
-    top: 21px;
+    top: 20px;
     width: 34px;
     height: 34px;
     border-radius: 50%;
@@ -164,10 +187,13 @@
     padding: 0 0 3px;
     cursor: pointer;
     z-index: 2;
-    box-shadow: 0 0 0 10px rgba(246, 242, 233, 0.85), 0 1px 3px rgba(22, 19, 15, 0.12);
   }
-  .hscroller-arrow.is-prev { left: 0; }
-  .hscroller-arrow.is-next { right: 0; }
+  .hscroller-arrow.is-prev { left: -46px; }
+  .hscroller-arrow.is-next { right: -46px; }
+  @media (max-width: 1000px) {
+    .hscroller-arrow.is-prev { left: 0; }
+    .hscroller-arrow.is-next { right: 0; }
+  }
   .hscroller-arrow:hover {
     color: var(--color-clay);
     border-color: var(--color-clay);
@@ -175,7 +201,9 @@
   }
 
   /* Homepage figure bubbles. */
-  .bubble-link { color: inherit; text-decoration: none; }
+  /* Positioned so the trend's .sr-only text is clipped by the scrolling row;
+     anchored to .hscroller instead, it ran 17,000px off the page. */
+  .bubble-link { position: relative; color: inherit; text-decoration: none; }
   .bubble-link > .bubble-ring { transition: transform 0.15s ease; }
   .bubble-link:hover > .bubble-ring { transform: translateY(-2px); }
   .bubble-link:hover .bubble-name { color: var(--color-clay); }
@@ -209,6 +237,73 @@
   }
   .card-link:hover .card-arrow { color: var(--color-clay); transform: translateX(3px); }
 
+  /* The title sits beside the card link rather than inside it (so names in it
+     can be links of their own) and takes the link's hover from here. The
+     overlay covers the card, so this is "the card is hovered". */
+  .card-title:has(.card-link:hover) .card-title-text,
+  .card-title:has(.card-link:focus-visible) .card-title-text {
+    color: var(--color-clay);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
+  }
+  .card-title:has(.card-link:focus-visible) .card-arrow { color: var(--color-clay); }
+
+  /* A tracked figure named in running text (components/ActorText.tsx). Above
+     the card overlay, so it takes its own click. */
+  .actor-link {
+    position: relative;
+    z-index: 2;
+    color: inherit;
+    text-decoration: underline dotted;
+    text-decoration-color: var(--color-parchment-dark);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    border-radius: 2px;
+    transition: background-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  /* In a card title: looks like the title until the card is hovered. */
+  .actor-link--quiet { text-decoration: none; }
+  .card-title:has(.card-link:hover) .actor-link--quiet,
+  .card-title:has(.card-link:focus-visible) .actor-link--quiet {
+    background: color-mix(in srgb, var(--color-clay) 12%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-clay) 12%, transparent);
+  }
+  .actor-link:hover,
+  .actor-link:focus-visible {
+    color: var(--color-clay);
+    text-decoration: underline solid;
+    background: color-mix(in srgb, var(--color-clay) 18%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-clay) 18%, transparent);
+  }
+  .actor-tip {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: calc(100% + 8px);
+    z-index: 30;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 6px;
+    background: var(--color-cream);
+    border: 1px solid var(--color-ink);
+    box-shadow: 3px 3px 0 var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.3;
+    letter-spacing: 0;
+    white-space: nowrap;
+    color: var(--color-stone);
+  }
+  .actor-link:hover .actor-tip,
+  .actor-link:focus-visible .actor-tip { display: flex; }
+  .actor-tip-name { display: block; font-weight: 700; color: var(--color-ink); }
+  .actor-tip-role { display: block; font-size: 11px; }
+  @media (hover: none) {
+    .actor-tip { display: none !important; }
+  }
+
   /* The default marker would sit beside our own ▸ affordance. */
   summary { cursor: pointer; }
   summary::-webkit-details-marker { display: none; }
@@ -222,6 +317,7 @@
   details > summary.sources-toggle::before { content: none; }
   details[open] > summary .when-closed,
   details:not([open]) > summary .when-open { display: none; }
+  .sources-corner > summary.sources-toggle:hover { text-decoration: none; color: var(--color-ink); }
 
   /* A [n] citation links to the article it cites; hover or focus shows which
      one. Above the card's click overlay, like the card's other controls. */
@@ -271,6 +367,167 @@
 }
 
 @layer components {
+  :root {
+    /* Height of the sticky nav strip; sticky headings below it start here. */
+    --strip-h: 41px;
+    /* The content column the chrome lines up with: 1184px less 48px a side. */
+    --frame-pad: max(clamp(16px, 5vw, 48px), calc((100% - 1184px) / 2 + 48px));
+  }
+
+  /* Woodblock waves, for the masthead and image-less event tiles. */
+  .waves {
+    background-color: var(--color-indigo);
+    background-image: radial-gradient(circle at 50% 100%, transparent 14px, rgba(246, 242, 233, 0.16) 15px, rgba(246, 242, 233, 0.16) 16px, transparent 17px, transparent 21px, rgba(246, 242, 233, 0.16) 22px, rgba(246, 242, 233, 0.16) 23px, transparent 24px);
+    background-size: 48px 24px;
+  }
+  /* A printed box: double rule and a hard offset shadow. */
+  .box-stamp {
+    background: var(--color-cream);
+    border: 3px double var(--color-ink);
+    box-shadow: 6px 6px 0 var(--color-ink);
+  }
+
+  .masthead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 28px;
+    padding: 26px var(--frame-pad) 30px;
+    border-bottom: 6px solid var(--color-clay);
+  }
+  .masthead-logo {
+    display: flex;
+    align-items: stretch;
+    color: var(--color-ink);
+    text-decoration: none;
+  }
+  .masthead-mark {
+    flex: none;
+    width: 82px;
+    height: 104px;
+    background: var(--color-clay);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .masthead-words {
+    height: 104px;
+    padding: 0 28px 2px 22px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+  }
+  .masthead-eyebrow {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--color-clay);
+  }
+  .masthead-word {
+    font-family: var(--font-serif);
+    font-weight: 700;
+    font-size: 64px;
+    line-height: 1;
+    letter-spacing: -0.015em;
+    white-space: nowrap;
+  }
+  /* The compact lockup is for phones only. */
+  .masthead-compact { display: none; padding: 10px 14px 8px; }
+  .masthead-edition {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-width: 168px;
+    padding: 10px 16px 12px;
+    font-size: 11px;
+    line-height: 1.4;
+    text-align: right;
+  }
+  .masthead-edition-day { font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--color-clay); }
+  .masthead-edition-stamp { font-family: var(--font-serif); font-weight: 700; font-size: 46px; line-height: 1; }
+  .masthead-edition-month { letter-spacing: 0.1em; }
+  @media (max-width: 760px) {
+    .masthead { padding-top: 16px; padding-bottom: 18px; gap: 14px; }
+    .masthead-mark, .masthead-words { display: none; }
+    .masthead-compact { display: block; }
+    .masthead-edition { min-width: 0; padding: 6px 10px; justify-content: center; }
+    .masthead-edition-day, .masthead-edition-month { display: none; }
+    .masthead-edition-stamp { font-size: 26px; }
+  }
+  @media (max-width: 420px) {
+    .masthead-edition { display: none; }
+  }
+
+  .nav-strip {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--color-cream);
+    padding: 0 var(--frame-pad);
+  }
+  .nav-strip-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: stretch;
+    flex-wrap: wrap;
+    column-gap: 24px;
+    border-bottom: 1px solid var(--color-ink);
+  }
+  .nav-links {
+    display: flex;
+    gap: clamp(16px, 3vw, 24px);
+    margin-bottom: -1px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .nav-stats {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    column-gap: 22px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--color-mud);
+  }
+  .nav-crumbs {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    font-size: 12.5px;
+    color: var(--color-stone);
+    white-space: nowrap;
+  }
+  .nav-crumbs-sep { margin: 0 6px; }
+  .nav-crumbs-here {
+    color: var(--color-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  @media (max-width: 760px) {
+    .nav-stats, .nav-crumbs { display: none; }
+  }
+
+  /* Month heading over a feed; sticks under the nav strip. */
+  .month-heading {
+    position: sticky;
+    top: var(--strip-h);
+    z-index: 5;
+    background: var(--color-cream);
+    box-shadow: 0 -18px 0 var(--color-cream);
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 20px;
+    color: var(--color-stone);
+    padding: 8px 0 6px;
+    border-top: 2px solid var(--color-ink);
+    border-bottom: 1px solid var(--color-parchment);
+  }
+
   .container-page {
     margin: 0 auto;
     padding: 0 clamp(16px, 5vw, 48px) 80px;
@@ -286,7 +543,7 @@
   }
   .tokoh-profile {
     position: sticky;
-    top: 72px;
+    top: calc(var(--strip-h) + 16px);
     align-self: start;
   }
   @media (max-width: 900px) {
@@ -322,9 +579,13 @@
     width: 13px;
     height: 13px;
     border-radius: 50%;
-    box-shadow: 0 0 0 4px #f6f2e9;
+    box-shadow: 0 0 0 4px var(--color-cream);
     z-index: 1;
   }
+  /* The kind, by shape: a peristiwa is a filled square, a record an outlined
+     circle — the same marks as the legend above the feed. */
+  .rail-dot.is-event { border-radius: 0; background: var(--color-event); }
+  .rail-dot.is-record { background: var(--color-cream); border: 2px solid var(--color-ink); }
   /* One dateline per day, and it stays with the reader for as long as that
      day's cards do. The rail column is a zero-width absolute box spanning the
      whole day group, so the pill inside it can be sticky: it travels down the
@@ -348,7 +609,7 @@
   .rail-day > .day-rail { left: 33.3333%; }
   .day-pill {
     position: sticky;
-    top: 126px;
+    top: calc(var(--strip-h) + 66px);
     display: inline-block;
     background: #6b645b;
     color: #fff;
@@ -358,7 +619,7 @@
     padding: 4px 12px;
     border-radius: 99px;
     white-space: nowrap;
-    box-shadow: 0 0 0 4px #f6f2e9;
+    box-shadow: 0 0 0 2px var(--color-cream);
   }
   /* The home rail's line runs between the columns, so its pill straddles it;
      the figure timeline's line is the card's own left border. */
@@ -377,6 +638,195 @@
     .rail-day > .day-rail { left: -14px; }
     .rail-day > .day-rail > .day-pill { transform: none; }
   }
+  /* Home feed peristiwa: a banner tile whose detail opens in a callout in
+     the record column. Hover opens it with no JS; a click pins it open
+     (data-open, EventTileShell.tsx), which is also the keyboard and touch path.
+     The open callout is in flow, so its row grows and the rows below move down
+     rather than being covered. To hold it, the tile's row cell spans both
+     columns and repeats the row's 1fr 2fr split. */
+  .rail-row > .rail-event:has(> .ev-cell) { grid-column: 1 / -1; padding-right: 0; }
+  .ev-cell {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    align-items: start;
+    /* Only the tile and the open callout take the pointer: the empty record
+       column beside a closed tile must not open it. */
+    pointer-events: none;
+  }
+  .ev-tile-button {
+    grid-area: 1 / 1;
+    pointer-events: auto;
+    display: block;
+    width: calc(100% - 32px);
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ev-card {
+    display: block;
+    background: var(--color-event);
+    color: var(--color-cream);
+    overflow: hidden;
+    transition: transform 0.16s ease, box-shadow 0.16s ease;
+  }
+  .ev-banner { position: relative; display: block; aspect-ratio: 4 / 3; }
+  .ev-banner-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    filter: grayscale(0.25) contrast(1.05);
+  }
+  .ev-banner-waves { position: absolute; inset: 0; background-color: transparent; opacity: 0.9; }
+  .ev-banner-shade {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(20, 18, 15, 0) 30%, rgba(20, 18, 15, 0.88) 100%);
+  }
+  .ev-banner-text { position: absolute; left: 0; right: 0; bottom: 0; display: block; padding: 18px 20px; }
+  .ev-kicker {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-gold);
+  }
+  .ev-title {
+    display: block;
+    margin-top: 8px;
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 21px;
+    line-height: 1.22;
+  }
+  .ev-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 20px 12px;
+    border-top: 1px solid #3a352d;
+  }
+  .ev-count { font-size: 11.5px; font-weight: 700; color: #cfc6b2; }
+  .ev-hint {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-gold);
+  }
+
+  /* Closed, it is out of flow and hidden. Open, it takes the record column
+     and starts at the tile's right edge, padding across both 32px gutters
+     either side of the rail, so the pointer never crosses a gap that would
+     close it. The box lands on the record column's content. */
+  .ev-detail {
+    grid-area: 1 / 2;
+    position: relative;
+    margin-left: -32px;
+    padding-left: 64px;
+    pointer-events: auto;
+    /* Above the rows that follow (for its citation tooltips), below the day
+       pill (4): the pill and the row's dot stay on top, as for a record. */
+    z-index: 3;
+    /* Always in flow but zero tall while closed: its one track grows from 0fr
+       to 1fr, so the row eases open and the rows below slide down instead of
+       jumping. The inner box only gets min-height: 0 rather than overflow:
+       hidden, so the shadow, nub and citation tooltips are never clipped. */
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-8px);
+    transition: grid-template-rows 0.24s ease, opacity 0.16s ease, transform 0.16s ease, visibility 0s linear;
+    transition-delay: 0.12s, 0.12s, 0.12s, 0.36s;
+  }
+  .ev-detail-inner {
+    min-height: 0;
+    /* Holds the callout's bottom margin inside the track. */
+    display: flow-root;
+  }
+  /* The same visible gap to the next row as there is above the tile, from a
+     record title's last line (74px): measured from the shadow's edge, which is
+     what the eye reads as the callout's bottom. 52 + 8 shadow + 30 row gap. */
+  .ev-detail .callout { margin-bottom: 52px; }
+  .callout {
+    position: relative;
+    background: var(--color-callout);
+    color: var(--color-ink);
+    border: 1.5px solid var(--color-event);
+    box-shadow: 8px 8px 0 var(--color-event);
+    padding: 22px 26px 18px;
+  }
+  .callout::before {
+    content: "";
+    position: absolute;
+    left: -9px;
+    top: 22px;
+    width: 16px;
+    height: 16px;
+    background: var(--color-callout);
+    border-left: 1.5px solid var(--color-event);
+    border-bottom: 1.5px solid var(--color-event);
+    transform: rotate(45deg);
+  }
+  .ev-cell:focus-within .ev-detail,
+  .ev-cell[data-open] .ev-detail {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition: grid-template-rows 0.24s ease, opacity 0.16s ease 0.06s, transform 0.16s ease 0.06s, visibility 0s;
+  }
+  .ev-cell:focus-within .ev-card,
+  .ev-cell[data-open] .ev-card { transform: translate(-3px, -3px); box-shadow: 3px 3px 0 var(--color-gold); }
+  .ev-cell:focus-within .ev-hint,
+  .ev-cell[data-open] .ev-hint { color: var(--color-cream); }
+  @media (hover: hover) {
+    .ev-cell:hover .ev-detail {
+      grid-template-rows: 1fr;
+      opacity: 1;
+      visibility: visible;
+      transform: none;
+      transition: grid-template-rows 0.24s ease, opacity 0.16s ease 0.06s, transform 0.16s ease 0.06s, visibility 0s;
+    }
+    .ev-cell:hover .ev-card { transform: translate(-3px, -3px); box-shadow: 3px 3px 0 var(--color-gold); }
+    .ev-cell:hover .ev-hint { color: var(--color-cream); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ev-detail,
+    .ev-cell .ev-detail { transition-duration: 0s !important; }
+  }
+
+  /* No record column to sit over: the detail opens in place, under the tile,
+     on a tap only. */
+  @media (max-width: 760px) {
+    .ev-cell { display: block; pointer-events: auto; }
+    .ev-tile-button { width: 100%; }
+    .ev-detail {
+      position: static;
+      width: auto;
+      margin-left: 0;
+      padding: 12px 0 0;
+      display: none;
+      opacity: 1;
+      visibility: visible;
+      transform: none;
+    }
+    .ev-cell[data-open] .ev-detail { display: block; }
+    .ev-detail .callout { margin-bottom: 0; }
+    .callout { padding: 18px 18px 14px; }
+    .callout::before { display: none; }
+  }
+
   .eyebrow {
     font-size: 11px;
     font-weight: 700;

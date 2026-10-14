@@ -1,0 +1,57 @@
+{
+  "bio": "Menteri Koordinator Bidang Politik dan Keamanan sejak Oktober 2026. Purnawirawan jenderal TNI; sebelumnya Kepala Staf Kepresidenan dan Kepala Staf TNI Angkatan Darat.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Bandung, 19 November 1965"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Koordinator Bidang Politik dan Keamanan",
+      "org": "",
+      "period": "2026 – kini"
+    },
+    {
+      "role": "Kepala Staf Kepresidenan",
+      "org": "",
+      "period": "Apr – Okt 2026"
+    },
+    {
+      "role": "Penasihat Khusus Presiden Bidang Pertahanan Nasional",
+      "org": "",
+      "period": "2024 – 2026"
+    },
+    {
+      "role": "Kepala Staf TNI Angkatan Darat",
+      "org": "",
+      "period": "2021 – 2023"
+    },
+    {
+      "role": "Panglima Kostrad",
+      "org": "",
+      "period": "2021"
+    },
+    {
+      "role": "Panglima Kodam Jaya",
+      "org": "",
+      "period": "2020 – 2021"
+    }
+  ],
+  "education": [
+    {
+      "year": "1988",
+      "detail": "Akademi Militer"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Dudung_Abdurachman"
+    },
+    {
+      "label": "pemberitaan yang dihimpun Jejak Suara"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -1,0 +1,50 @@
+{
+  "bio": "Kepala Badan Percepatan Pengentasan Kemiskinan sejak 2024. Pendiri Partai Rakyat Demokratik pada 1996 dan anggota DPR dari PDI Perjuangan 2009–2019.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Cilacap, 10 Maret 1970"
+    },
+    {
+      "label": "Partai",
+      "value": "Tidak berpartai (sejak 2023); sebelumnya PDI Perjuangan dan PRD"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Kepala Badan Percepatan Pengentasan Kemiskinan",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Komisaris Independen",
+      "org": "PT Perkebunan Nusantara V",
+      "period": "2021 – 2023"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "PDI Perjuangan",
+      "period": "2009 – 2019"
+    },
+    {
+      "role": "Ketua",
+      "org": "Partai Rakyat Demokratik",
+      "period": "1996"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Master Hubungan Internasional, University of Cambridge"
+    },
+    {
+      "detail": "Ilmu Politik, SOAS University of London"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Budiman_Sudjatmiko"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

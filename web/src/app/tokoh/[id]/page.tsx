@@ -8,6 +8,7 @@ import { FIGURE_PAGE_SIZE, getFigure, getFigureEvents } from "@/lib/data";
 import { getCv } from "@/lib/cv";
 import {
   dayBadge,
+  formatDate,
   monthGroupLabel,
   sentimentLabel,
   toDisplayScore,
@@ -26,11 +27,10 @@ export default async function HalamanTokoh({
   const { id } = await params;
   const { tab, hal } = await searchParams;
   const page = Math.max(1, Math.floor(Number(hal)) || 1);
-  const [figure, events] = await Promise.all([getFigure(id), getFigureEvents(id, page)]);
+  const [figure, events, cv] = await Promise.all([getFigure(id), getFigureEvents(id, page), getCv(id)]);
   if (!figure) notFound();
   const pageCount = Math.max(1, Math.ceil(Number(figure.event_count) / FIGURE_PAGE_SIZE));
 
-  const cv = getCv(id);
   // The tab lives in the URL rather than client state, so the page stays a
   // server component and each tab is linkable.
   const activeTab = tab === "cv" && cv ? "cv" : "rekam";
@@ -45,14 +45,8 @@ export default async function HalamanTokoh({
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <Nav />
-      <div className="container-page" style={{ maxWidth: 1120 }}>
-        <nav aria-label="Breadcrumb" style={{ padding: "20px 0 0", fontSize: 12.5, color: "#7a7264" }}>
-          <Link href="/" className="link-subtle">Beranda</Link>
-          <span aria-hidden> · </span>
-          <span style={{ color: "#16130f" }}>{figure.name}</span>
-        </nav>
-
+      <Nav crumbs={[{ label: "Beranda", href: "/" }, { label: figure.name }]} />
+      <div className="container-page" style={{ maxWidth: 1184 }}>
         <div className="tokoh-grid">
           <aside className="tokoh-profile">
             <div style={{ marginBottom: 18 }}>
@@ -78,24 +72,20 @@ export default async function HalamanTokoh({
               {figure.name}
             </h1>
 
-            <dl style={{ display: "flex", gap: 22, margin: "0 0 20px", fontSize: 12.5, color: "#7a7264", flexWrap: "wrap" }}>
+            <dl style={{ display: "flex", gap: 22, margin: "0 0 20px", fontSize: 12.5, color: "var(--color-stone)", flexWrap: "wrap" }}>
               <div>
-                <dt style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9b9285" }}>Catatan</dt>
-                <dd style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: 22, color: "#16130f" }}>{figure.event_count}</dd>
-              </div>
-              <div>
-                <dt style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9b9285" }}>Outlet</dt>
-                <dd style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: 22, color: "#16130f" }}>{figure.outlet_count}</dd>
+                <dt style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-stone-light)" }}>Catatan</dt>
+                <dd style={{ margin: 0, fontFamily: "var(--font-serif)", fontSize: 22, color: "var(--color-ink)" }}>{figure.event_count}</dd>
               </div>
             </dl>
 
             {avg !== null ? (
               <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9b9285", marginBottom: 8 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-stone-light)", marginBottom: 8 }}>
                   Rata-rata Sentimen
                 </div>
                 <SentimentTrack display={avg} height={10} thumb={30} />
-                <div style={{ fontFamily: "var(--font-serif)", fontSize: 15, marginTop: 8, color: "#4a443d" }}>
+                <div style={{ fontFamily: "var(--font-serif)", fontSize: 15, marginTop: 8, color: "var(--color-mud)" }}>
                   {avg > 0 ? "+" : ""}{avg} · {sentimentLabel(avg)}
                 </div>
               </div>
@@ -104,7 +94,7 @@ export default async function HalamanTokoh({
 
           <main style={{ minWidth: 0 }}>
             {cv ? (
-              <div role="tablist" aria-label="Bagian" style={{ display: "flex", gap: 24, borderBottom: "1px solid #d8cfba", marginBottom: 22 }}>
+              <div role="tablist" aria-label="Bagian" style={{ display: "flex", gap: 24, borderBottom: "1px solid var(--color-parchment)", marginBottom: 22 }}>
                 <TabLink href={`/tokoh/${id}`} active={activeTab === "rekam"}>Rekam Jejak</TabLink>
                 <TabLink href={`/tokoh/${id}?tab=cv`} active={activeTab === "cv"}>CV</TabLink>
               </div>
@@ -117,7 +107,7 @@ export default async function HalamanTokoh({
             {activeTab === "cv" && cv ? (
               <CvPanel cv={cv} />
             ) : events.length === 0 ? (
-              <p style={{ fontSize: 15, color: "#7a7264", lineHeight: 1.6 }}>
+              <p style={{ fontSize: 15, color: "var(--color-stone)", lineHeight: 1.6 }}>
                 {page > 1 ? (
                   <>
                     Tidak ada catatan di halaman ini.{" "}
@@ -129,24 +119,11 @@ export default async function HalamanTokoh({
               </p>
             ) : (
               <>
-              {[...groups.entries()].map(([month, rows]) => (
+              {[...groups.entries()].map(([month, rows], mi) => (
                 <section key={month}>
-                  <h2
-                    style={{
-                      position: "sticky",
-                      top: 57,
-                      zIndex: 5,
-                      background: "#f6f2e9",
-                      boxShadow: "0 -18px 0 #f6f2e9",
-                      fontFamily: "var(--font-serif)",
-                      fontWeight: 500,
-                      fontSize: 20,
-                      color: "#9b8f7d",
-                      margin: "10px 0 20px",
-                      padding: "14px 0",
-                      borderBottom: "1px solid #d8cfba",
-                    }}
-                  >
+                  {/* The first month sits right under the tab bar's rule, so
+                      its own top rule only drew a second line beneath it. */}
+                  <h2 className="month-heading" style={{ margin: "10px 0 20px", ...(mi === 0 ? { borderTop: "none" } : null) }}>
                     {month}
                   </h2>
                   {byDay(rows).map(([day, dayRows]) => (
@@ -201,7 +178,7 @@ function Pager({ id, page, pageCount }: { id: string; page: number; pageCount: n
         justifyContent: "space-between",
         alignItems: "center",
         gap: 16,
-        borderTop: "1px solid #d8cfba",
+        borderTop: "1px solid var(--color-parchment)",
         margin: "28px 0 48px",
         paddingTop: 16,
       }}
@@ -209,7 +186,7 @@ function Pager({ id, page, pageCount }: { id: string; page: number; pageCount: n
       <span style={{ minWidth: 0 }}>
         {page > 1 ? <Link href={href(page - 1)} className="link" style={{ fontSize: 13 }}>← Lebih baru</Link> : null}
       </span>
-      <span style={{ fontSize: 12.5, color: "#7a7264" }}>
+      <span style={{ fontSize: 12.5, color: "var(--color-stone)" }}>
         Halaman {Math.min(page, pageCount)} dari {pageCount}
       </span>
       <span style={{ minWidth: 0, textAlign: "right" }}>
@@ -240,12 +217,15 @@ function TabLink({ href, active, children }: { href: string; active: boolean; ch
   );
 }
 
-function CvPanel({ cv }: { cv: NonNullable<ReturnType<typeof getCv>> }) {
+function CvPanel({ cv }: { cv: NonNullable<Awaited<ReturnType<typeof getCv>>> }) {
+  const eduHasYears = cv.education.some((e) => e.year);
   return (
     <div>
-      <p style={{ fontFamily: "var(--font-serif)", fontSize: 19, lineHeight: 1.6, color: "#3e382f", marginTop: 0 }}>
-        {cv.bio}
-      </p>
+      {cv.bio ? (
+        <p style={{ fontFamily: "var(--font-serif)", fontSize: 19, lineHeight: 1.6, color: "var(--color-body)", marginTop: 0 }}>
+          {cv.bio}
+        </p>
+      ) : null}
 
       {cv.facts.length > 0 ? (
         <>
@@ -255,17 +235,17 @@ function CvPanel({ cv }: { cv: NonNullable<ReturnType<typeof getCv>> }) {
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
               gap: 1,
-              background: "#d8cfba",
-              border: "1px solid #d8cfba",
+              background: "var(--color-parchment)",
+              border: "1px solid var(--color-parchment)",
               margin: 0,
             }}
           >
             {cv.facts.map((f) => (
-              <div key={f.label} style={{ background: "#f6f2e9", padding: 16 }}>
-                <dt style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9b9285" }}>
+              <div key={f.label} style={{ background: "var(--color-cream)", padding: 16 }}>
+                <dt style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-stone-light)" }}>
                   {f.label}
                 </dt>
-                <dd style={{ margin: "6px 0 0", fontSize: 14.5, color: "#16130f" }}>{f.value}</dd>
+                <dd style={{ margin: "6px 0 0", fontSize: 14.5, color: "var(--color-ink)" }}>{f.value}</dd>
               </div>
             ))}
           </dl>
@@ -275,7 +255,7 @@ function CvPanel({ cv }: { cv: NonNullable<ReturnType<typeof getCv>> }) {
       {cv.posts.length > 0 ? (
         <>
           <h2 className="section-label" style={{ margin: "32px 0 14px" }}>Riwayat Jabatan</h2>
-          <ol style={{ listStyle: "none", margin: 0, padding: 0, borderLeft: "1.5px solid #d8cfba" }}>
+          <ol style={{ listStyle: "none", margin: 0, padding: 0, borderLeft: "1.5px solid var(--color-parchment)" }}>
             {cv.posts.map((p) => (
               <li key={`${p.period}-${p.title}`} style={{ position: "relative", padding: "0 0 22px 26px" }}>
                 <span
@@ -287,12 +267,12 @@ function CvPanel({ cv }: { cv: NonNullable<ReturnType<typeof getCv>> }) {
                     width: 9,
                     height: 9,
                     borderRadius: "50%",
-                    background: "#8b2e1f",
+                    background: "var(--color-clay)",
                   }}
                 />
-                <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: "0.08em", color: "#9b9285" }}>{p.period}</div>
+                <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: "0.08em", color: "var(--color-stone-light)" }}>{p.period}</div>
                 <div style={{ fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 600, marginTop: 2 }}>{p.title}</div>
-                {p.org ? <div style={{ fontSize: 13, color: "#7a7264" }}>{p.org}</div> : null}
+                {p.org ? <div style={{ fontSize: 13, color: "var(--color-stone)" }}>{p.org}</div> : null}
               </li>
             ))}
           </ol>
@@ -304,13 +284,37 @@ function CvPanel({ cv }: { cv: NonNullable<ReturnType<typeof getCv>> }) {
           <h2 className="section-label" style={{ margin: "32px 0 14px" }}>Pendidikan</h2>
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {cv.education.map((e) => (
-              <li key={`${e.year}-${e.detail}`} style={{ display: "flex", gap: 16, padding: "10px 0", borderBottom: "1px solid #e4dcc9" }}>
-                <span style={{ flex: "none", width: 70, fontSize: 12.5, color: "#9b9285" }}>{e.year}</span>
+              <li key={`${e.year ?? ""}-${e.detail}`} style={{ display: "flex", gap: 16, padding: "10px 0", borderBottom: "1px solid #e4dcc9" }}>
+                {/* The year column only exists when some entry has a year;
+                    otherwise it is an empty gutter in front of every line. */}
+                {eduHasYears ? (
+                  <span style={{ flex: "none", width: 44, fontSize: 12.5, color: "var(--color-stone-light)" }}>{e.year ?? ""}</span>
+                ) : null}
                 <span style={{ fontSize: 14.5 }}>{e.detail}</span>
               </li>
             ))}
           </ul>
         </>
+      ) : null}
+
+      {/* Offices typed in by a curator may come with no source yet. */}
+      {cv.sources.length > 0 ? (
+      <p style={{ fontSize: 12, color: "var(--color-stone-light)", margin: "28px 0 0", lineHeight: 1.6 }}>
+        Sumber:{" "}
+        {cv.sources.map((src, i) => (
+          <span key={src.url ?? src.label}>
+            {i > 0 ? "; " : ""}
+            {src.url ? (
+              <a href={src.url} target="_blank" rel="noopener noreferrer" className="link-subtle">
+                {src.label}
+              </a>
+            ) : (
+              src.label
+            )}
+          </span>
+        ))}
+        {cv.checkedAt ? <>. Diperiksa {formatDate(cv.checkedAt)}</> : null}.
+      </p>
       ) : null}
     </div>
   );

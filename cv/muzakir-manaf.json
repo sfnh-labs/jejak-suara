@@ -1,0 +1,43 @@
+{
+  "bio": "Gubernur Aceh sejak 2025, dikenal sebagai Mualem. Ketua Umum Partai Aceh sejak 2007 dan mantan panglima Gerakan Aceh Merdeka; sebelumnya Wakil Gubernur Aceh.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Aceh Utara, 3 April 1964"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Aceh"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Gubernur Aceh",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Wakil Gubernur Aceh",
+      "org": "",
+      "period": "2012 – 2017"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Partai Aceh",
+      "period": "2007 – kini"
+    },
+    {
+      "role": "Panglima",
+      "org": "Gerakan Aceh Merdeka",
+      "period": "sejak 2002"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Muzakir_Manaf"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

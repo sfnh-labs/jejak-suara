@@ -1,0 +1,54 @@
+{
+  "bio": "Ketua DPP PDI Perjuangan dan calon presiden pada Pemilu 2024. Sebelumnya Gubernur Jawa Tengah dua periode dan anggota DPR.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Karanganyar, 28 Oktober 1968"
+    },
+    {
+      "label": "Partai",
+      "value": "PDI Perjuangan"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Ketua DPP",
+      "org": "PDI Perjuangan",
+      "period": "kini"
+    },
+    {
+      "role": "Calon Presiden",
+      "org": "Pemilu 2024",
+      "period": "2024"
+    },
+    {
+      "role": "Gubernur Jawa Tengah",
+      "org": "",
+      "period": "2013 – 2023"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "PDI Perjuangan",
+      "period": "2004 – 2013"
+    }
+  ],
+  "education": [
+    {
+      "year": "2013",
+      "detail": "Magister Ilmu Politik, Universitas Indonesia"
+    },
+    {
+      "detail": "Sarjana Hukum, Universitas Gadjah Mada"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Ganjar_Pranowo"
+    },
+    {
+      "label": "pemberitaan yang dihimpun Jejak Suara"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

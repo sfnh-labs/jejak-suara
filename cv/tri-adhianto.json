@@ -1,0 +1,54 @@
+{
+  "bio": "Wali Kota Bekasi, terpilih kembali pada Pilkada 2024. Sebelumnya Wakil Wali Kota, lalu Pelaksana Tugas Wali Kota sejak 2022.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Tri Adhianto Tjahyono"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 3 Januari 1970"
+    },
+    {
+      "label": "Partai",
+      "value": "PDI Perjuangan; sebelumnya PAN"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wali Kota Bekasi",
+      "org": "Terpilih kembali pada Pilkada 2024",
+      "period": "2023 – kini"
+    },
+    {
+      "role": "Pelaksana Tugas Wali Kota Bekasi",
+      "org": "",
+      "period": "2022 – 2023"
+    },
+    {
+      "role": "Wakil Wali Kota Bekasi",
+      "org": "",
+      "period": "2018 – 2022"
+    }
+  ],
+  "education": [
+    {
+      "year": "2012",
+      "detail": "Doktor, Universitas Pasundan"
+    },
+    {
+      "detail": "Sarjana dan magister, Universitas Lampung"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Merdeka.com, profil Tri Adhianto",
+      "url": "https://www.merdeka.com/peristiwa/read/7972107/profil-wali-kota-bekasi-tri-adhianto-tjahyono-yang-menginap-di-hotel-saat-warganya-kebanjiran"
+    },
+    {
+      "label": "Wikipedia (English)",
+      "url": "https://en.wikipedia.org/wiki/Tri_Adhianto_Tjahyono"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

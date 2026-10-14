@@ -1,0 +1,71 @@
+{
+  "bio": "Menteri Koordinator Bidang Pemberdayaan Masyarakat sejak Oktober 2024 dan Ketua Umum PKB sejak 2005. Sebelumnya Menteri Tenaga Kerja dan Transmigrasi serta Wakil Ketua DPR.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Abdul Muhaimin Iskandar"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jombang, 24 September 1966"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Kebangkitan Bangsa (PKB)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Koordinator Bidang Pemberdayaan Masyarakat",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Wakil Ketua DPR",
+      "org": "",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Wakil Ketua MPR",
+      "org": "",
+      "period": "2018 – 2019"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "2014 – 2024"
+    },
+    {
+      "role": "Menteri Tenaga Kerja dan Transmigrasi",
+      "org": "",
+      "period": "2009 – 2014"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "PKB",
+      "period": "2005 – kini"
+    },
+    {
+      "role": "Wakil Ketua DPR",
+      "org": "",
+      "period": "1999 – 2009"
+    }
+  ],
+  "education": [
+    {
+      "year": "2001",
+      "detail": "M.Si. Manajemen Komunikasi, FISIP Universitas Indonesia"
+    },
+    {
+      "year": "1992",
+      "detail": "Drs. Sosiatri, FISIPOL Universitas Gadjah Mada"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Muhaimin_Iskandar"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

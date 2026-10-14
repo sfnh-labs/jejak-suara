@@ -1,8 +1,13 @@
+import Link from "next/link";
 import Nav from "@/components/Nav";
 import EventCard from "@/components/EventCard";
-import { getPeristiwa } from "@/lib/data";
+import { getPeristiwa, getPeristiwaIndex } from "@/lib/data";
 import { monthGroupLabel } from "@/lib/design";
+import { TOPICS, isTopicId, topicOf, type TopicId } from "@/lib/topics";
 import type { Peristiwa } from "@/lib/types";
+
+/** Cards shown at once; the topic counts still cover every peristiwa. */
+const PAGE_SIZE = 120;
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +16,25 @@ export const metadata = {
   description: "Peristiwa yang diberitakan banyak media, berurutan dari yang terbaru.",
 };
 
-export default async function Linimasa() {
-  const peristiwa = await getPeristiwa(120);
+export default async function Linimasa({
+  searchParams,
+}: {
+  searchParams: Promise<{ topik?: string }>;
+}) {
+  const { topik } = await searchParams;
+  const active: TopicId | null = isTopicId(topik) ? topik : null;
+
+  // Classify everything for the counts, then load full cards for the newest
+  // PAGE_SIZE in the chosen topic.
+  const index = await getPeristiwaIndex();
+  const counts = new Map<TopicId, number>();
+  const ids: number[] = [];
+  for (const row of index) {
+    const t = topicOf(row);
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+    if ((!active || t === active) && ids.length < PAGE_SIZE) ids.push(row.event_id);
+  }
+  const peristiwa = ids.length ? await getPeristiwa(PAGE_SIZE, ids) : [];
 
   const groups = new Map<string, Peristiwa[]>();
   for (const p of peristiwa) {
@@ -20,8 +42,6 @@ export default async function Linimasa() {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(p);
   }
-
-  const types = [...new Set(peristiwa.map((p) => p.event_type).filter(Boolean))] as string[];
 
   return (
     <div style={{ minHeight: "100vh" }}>
@@ -41,57 +61,38 @@ export default async function Linimasa() {
           >
             Linimasa
           </h1>
-          <p style={{ fontSize: 15.5, lineHeight: 1.6, color: "#4a443d", margin: 0, maxWidth: 580 }}>
+          <p style={{ fontSize: 15.5, lineHeight: 1.6, color: "var(--color-mud)", margin: 0, maxWidth: 580 }}>
             Peristiwa yang diberitakan secara independen oleh beberapa media.
             Kami tidak menilai mana yang penting — yang tampil di sini adalah
             yang diliput luas.
           </p>
         </header>
 
-        {types.length > 0 ? (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "22px 0 6px" }}>
-            {types.map((t) => (
-              <span
-                key={t}
-                style={{
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  color: "#6b645b",
-                  background: "#efe9dc",
-                  border: "1px solid #ddd3bf",
-                  borderRadius: 99,
-                  padding: "4px 11px",
-                }}
-              >
-                {t}
-              </span>
+        {index.length > 0 ? (
+          <nav aria-label="Topik" style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "22px 0 6px" }}>
+            <TopicLink href="/linimasa" label="Semua" count={index.length} active={!active} />
+            {TOPICS.filter((t) => counts.get(t.id)).map((t) => (
+              <TopicLink
+                key={t.id}
+                href={`/linimasa?topik=${t.id}`}
+                label={t.label}
+                count={counts.get(t.id)!}
+                active={active === t.id}
+              />
             ))}
-          </div>
+          </nav>
         ) : null}
 
         {peristiwa.length === 0 ? (
-          <p style={{ fontSize: 15, color: "#7a7264", padding: "28px 0 60px", lineHeight: 1.6 }}>
-            Belum ada peristiwa yang cukup diberitakan untuk ditampilkan.
+          <p style={{ fontSize: 15, color: "var(--color-stone)", padding: "28px 0 60px", lineHeight: 1.6 }}>
+            {active
+              ? "Belum ada peristiwa untuk topik ini."
+              : "Belum ada peristiwa yang cukup diberitakan untuk ditampilkan."}
           </p>
         ) : (
           [...groups.entries()].map(([month, rows]) => (
             <section key={month}>
-              <h2
-                style={{
-                  position: "sticky",
-                  top: 57,
-                  zIndex: 5,
-                  background: "#f6f2e9",
-                  boxShadow: "0 -18px 0 #f6f2e9",
-                  fontFamily: "var(--font-serif)",
-                  fontWeight: 500,
-                  fontSize: 20,
-                  color: "#9b8f7d",
-                  margin: "22px 0 16px",
-                  padding: "14px 0",
-                  borderBottom: "1px solid #d8cfba",
-                }}
-              >
+              <h2 className="month-heading" style={{ margin: "22px 0 16px" }}>
                 {month}
               </h2>
               <div style={{ display: "grid", gap: 16 }}>
@@ -104,5 +105,19 @@ export default async function Linimasa() {
         )}
       </div>
     </div>
+  );
+}
+
+function TopicLink({ href, label, count, active }: { href: string; label: string; count: number; active: boolean }) {
+  return (
+    <Link
+      href={href}
+      className="pill-link"
+      aria-current={active ? "page" : undefined}
+      style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px" }}
+    >
+      {label}
+      <span className="pill-count"> {count}</span>
+    </Link>
   );
 }

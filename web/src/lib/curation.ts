@@ -159,11 +159,65 @@ export interface ItemSource {
   lead: string | null;
 }
 
+/** One office a figure holds or held. The first in a list is the main one. */
+export interface Position {
+  role: string;
+  org: string;
+  /** Free text: "2024–sekarang", "2019–2024". */
+  period: string;
+}
+
+/** "Ketua" + "MPR RI" → "Ketua MPR RI": the one-line title shown under a name. */
+export function positionTitle(p: Position): string {
+  return [p.role, p.org].map((x) => x.trim()).filter(Boolean).join(" ");
+}
+
+export function parsePositions(raw: unknown): Position[] {
+  if (typeof raw !== "string" || !raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((x) =>
+      x && typeof x === "object"
+        ? [{
+            role: String((x as Record<string, unknown>).role ?? ""),
+            org: String((x as Record<string, unknown>).org ?? ""),
+            period: String((x as Record<string, unknown>).period ?? ""),
+          }]
+        : []
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** The CV fields beside positions, as /kurasi edits them. */
+export interface Profile {
+  bio: string;
+  facts: { label: string; value: string }[];
+  education: { year?: string; detail: string }[];
+  sources: { label: string; url: string }[];
+}
+
+function jsonList<T>(raw: string | null | undefined): T[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface FigureRef {
   id: string;
   name: string;
   role: string | null;
   aliases: string[];
+  positions: Position[];
+  /** The rest of the CV; owners only (the record's own figure). */
+  profile: Profile;
+  cv_checked_at: string | null;
   active: boolean;
   /** Set while the edit waits for apply_curation.py to reach the pipeline. */
   edit_pending: boolean;
@@ -177,6 +231,8 @@ export interface NamedPerson {
   role: string | null;
   /** Figures only. */
   aliases: string[];
+  /** Figures only. */
+  positions: Position[];
   articles: number;
   /** Candidates only: the verdict already recorded, if any. */
   verdict: string | null;
@@ -243,6 +299,18 @@ function wordPattern(term: string, flags: string): RegExp {
   return new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(term)}(?=$|[^\\p{L}\\p{N}])`, `u${flags}`);
 }
 
+function candidateRecordIds(raw: string | null): number[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.flatMap((r) => (r && typeof r === "object" && typeof (r as { id?: unknown }).id === "number" ? [(r as { id: number }).id] : []))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Who the event's coverage names, among tracked figures and the candidate
  * queue.
@@ -255,14 +323,15 @@ function wordPattern(term: string, flags: string): RegExp {
 async function namedPeople(
   texts: string[],
   ownerId: string | null,
-  related: { figure_id: string; struck: boolean }[]
+  related: { figure_id: string; struck: boolean }[],
+  eventId: number
 ): Promise<NamedPerson[]> {
   const [figures, candidates] = await Promise.all([
-    query<{ id: string; name: string; role: string | null; aliases: string | null }>(
-      `SELECT id, name, role, aliases FROM figures WHERE active`
+    query<{ id: string; name: string; role: string | null; aliases: string | null; positions: string | null }>(
+      `SELECT id, name, role, aliases, positions FROM figures WHERE active`
     ),
-    query<{ slug: string; name: string; role: string | null; verdict: string | null; full_name: string | null }>(
-      `SELECT slug, name, COALESCE(curated_role, role) AS role, verdict, full_name
+    query<{ slug: string; name: string; role: string | null; verdict: string | null; full_name: string | null; records: string | null }>(
+      `SELECT slug, name, COALESCE(curated_role, role) AS role, verdict, full_name, records
          FROM figure_candidates
         WHERE slug NOT IN (SELECT id FROM figures)
           AND (verdict IS NULL OR applied_at IS NULL)`
@@ -291,16 +360,21 @@ async function namedPeople(
     if (n === 0 && !relatedIds.has(f.id)) continue;
     out.push({
       kind: "figure", id: f.id, name: f.name, role: f.role,
-      aliases: parseAliases(f.aliases), articles: n, verdict: null,
+      aliases: parseAliases(f.aliases), positions: parsePositions(f.positions),
+      articles: n, verdict: null,
       struck: relatedIds.get(f.id),
     });
   }
   for (const c of candidates) {
     const n = count([wordPattern(c.name, "")]);
-    if (n === 0) continue;
+    // The queue links a name to the records its evidence clustered into, and
+    // sends the curator here to decide it. The evidence article is not always
+    // one the site holds text for, so that link counts even when no article
+    // here spells the name.
+    if (n === 0 && !candidateRecordIds(c.records).includes(eventId)) continue;
     out.push({
       kind: "candidate", id: c.slug, name: c.full_name || c.name, role: c.role,
-      aliases: [], articles: n, verdict: c.verdict,
+      aliases: [], positions: [], articles: n, verdict: c.verdict,
     });
   }
   return out.sort((a, b) => b.articles - a.articles || a.name.localeCompare(b.name));
@@ -354,8 +428,13 @@ export async function getItem(eventId: number): Promise<Item | null> {
       [eventId]
     ),
     ev.figure_id
-      ? queryOne<{ id: string; name: string; role: string | null; aliases: string | null; active: boolean; edit_pending: boolean }>(
-          `SELECT f.id, f.name, f.role, f.aliases, f.active,
+      ? queryOne<{
+          id: string; name: string; role: string | null; aliases: string | null; positions: string | null;
+          bio: string | null; facts: string | null; education: string | null; sources: string | null;
+          cv_checked_at: string | null; active: boolean; edit_pending: boolean;
+        }>(
+          `SELECT f.id, f.name, f.role, f.aliases, f.positions, f.bio, f.facts, f.education,
+                  f.sources, f.cv_checked_at, f.active,
                   (fe.figure_id IS NOT NULL AND fe.applied_at IS NULL) AS edit_pending
              FROM figures f
              LEFT JOIN figure_edits fe ON fe.figure_id = f.id
@@ -389,14 +468,14 @@ export async function getItem(eventId: number): Promise<Item | null> {
   ).values()];
 
   const texts = articles.map((a) => [a.title, a.lead, a.body].filter(Boolean).join("\n"));
-  const named = await namedPeople(texts, ev.figure_id, relatedMerged);
+  const named = await namedPeople(texts, ev.figure_id, relatedMerged, eventId);
   // A related figure stays listed even if no article spells out their name —
   // a confirmed link adds them on the record's say-so.
   for (const r of relatedMerged) {
     if (named.some((n) => n.kind === "figure" && n.id === r.figure_id)) continue;
     named.push({
       kind: "figure", id: r.figure_id, name: r.figure_id, role: null,
-      aliases: [], articles: 0, verdict: null, struck: r.struck,
+      aliases: [], positions: [], articles: 0, verdict: null, struck: r.struck,
     });
   }
 
@@ -419,7 +498,20 @@ export async function getItem(eventId: number): Promise<Item | null> {
   return {
     ...ev,
     sources: articles.map(({ body, ...a }) => ({ ...a, lead: plain(a.lead) || plain(body)?.slice(0, 280) || null })),
-    owner: owner ? { ...owner, aliases: parseAliases(owner.aliases) } : null,
+    owner: owner
+      ? {
+          id: owner.id, name: owner.name, role: owner.role, active: owner.active,
+          edit_pending: owner.edit_pending, cv_checked_at: owner.cv_checked_at,
+          aliases: parseAliases(owner.aliases),
+          positions: parsePositions(owner.positions),
+          profile: {
+            bio: owner.bio ?? "",
+            facts: jsonList(owner.facts),
+            education: jsonList(owner.education),
+            sources: jsonList(owner.sources),
+          },
+        }
+      : null,
     named,
     links,
     nearby,
@@ -469,27 +561,46 @@ export async function setLinkVerdict(
  * Written to `figures` as well, so the site shows it now; `figure_edits` is
  * what survives the next push (sync_figures lays it back over the pipeline's
  * row) and what apply_curation.py hands to the pipeline.
+ *
+ * `positions` null leaves them as they are (a merge or a retirement says
+ * nothing about offices); a list, even an empty one, replaces them.
  */
 export async function saveFigureEdit(
   figureId: string,
   name: string,
   role: string | null,
   aliases: string[],
-  active: boolean
+  active: boolean,
+  positions: Position[] | null = null,
+  profile: Profile | null = null
 ): Promise<void> {
   const json = JSON.stringify(aliases);
+  const pos = positions === null ? null : JSON.stringify(positions);
+  const cv = profile === null
+    ? [null, null, null, null]
+    : [profile.bio, JSON.stringify(profile.facts), JSON.stringify(profile.education), JSON.stringify(profile.sources)];
   await query(
-    `INSERT INTO figure_edits (figure_id, name, role, aliases, active, edited_at)
-     VALUES ($1, $2, $3, $4, $5, now()::text)
+    `INSERT INTO figure_edits (figure_id, name, role, aliases, active, positions,
+                               bio, facts, education, sources, edited_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now()::text)
      ON CONFLICT (figure_id) DO UPDATE
        SET name = EXCLUDED.name, role = EXCLUDED.role, aliases = EXCLUDED.aliases,
-           active = EXCLUDED.active, edited_at = EXCLUDED.edited_at,
-           applied_at = NULL`,
-    [figureId, name, role, json, active]
+           active = EXCLUDED.active,
+           positions = COALESCE(EXCLUDED.positions, figure_edits.positions),
+           bio = COALESCE(EXCLUDED.bio, figure_edits.bio),
+           facts = COALESCE(EXCLUDED.facts, figure_edits.facts),
+           education = COALESCE(EXCLUDED.education, figure_edits.education),
+           sources = COALESCE(EXCLUDED.sources, figure_edits.sources),
+           edited_at = EXCLUDED.edited_at, applied_at = NULL`,
+    [figureId, name, role, json, active, pos, ...cv]
   );
   await query(
-    `UPDATE figures SET name = $2, role = $3, aliases = $4, active = $5 WHERE id = $1`,
-    [figureId, name, role, json, active]
+    `UPDATE figures SET name = $2, role = $3, aliases = $4, active = $5,
+            positions = COALESCE($6, positions), bio = COALESCE($7, bio),
+            facts = COALESCE($8, facts), education = COALESCE($9, education),
+            sources = COALESCE($10, sources)
+      WHERE id = $1`,
+    [figureId, name, role, json, active, pos, ...cv]
   );
 }
 

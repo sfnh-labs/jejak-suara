@@ -255,6 +255,11 @@ where everything hanging off that event is decided in one place:
 - **the actor** — the record's figure: display name, office, aliases, or retire a
   mis-mined or duplicate figure, or merge a duplicate into the figure it repeats
   (its records move over and its names become aliases);
+- **the CV** — the figure's offices (role, organisation, period), bio, facts,
+  education and sources. One list: the first office is the title under the name
+  everywhere, and the whole list is the CV tab's career history. Generated CVs are
+  seeded from `cv/<figure-id>.json` by `scripts/import_cv.py`, which never
+  overwrites a figure a curator has edited;
 - **who else the coverage names** — tracked figures to correct, and discovered names
   to accept or reject on the spot (the same verdicts as `/kurasi/kandidat`); on a
   peristiwa, related figures can be struck when an alias matched the wrong person;

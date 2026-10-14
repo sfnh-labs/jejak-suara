@@ -1,0 +1,60 @@
+{
+  "bio": "Menteri Kebudayaan sejak Oktober 2024. Salah satu pendiri dan Wakil Ketua Umum Partai Gerindra; sebelumnya Wakil Ketua DPR dan Ketua BKSAP DPR.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 1 Juni 1971"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra (sejak 2008)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Kebudayaan",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Ketua Badan Kerja Sama Antar-Parlemen",
+      "org": "DPR",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Presiden",
+      "org": "GOPAC (Global Organization of Parliamentarians Against Corruption)",
+      "period": "2015 – 2019"
+    },
+    {
+      "role": "Wakil Ketua DPR",
+      "org": "Bidang Politik dan Keamanan",
+      "period": "2014 – 2019"
+    },
+    {
+      "role": "Wakil Ketua Umum",
+      "org": "Partai Gerindra",
+      "period": "2008 – kini"
+    }
+  ],
+  "education": [
+    {
+      "year": "2016",
+      "detail": "Doktor Ilmu Sejarah, Universitas Indonesia"
+    },
+    {
+      "year": "2002",
+      "detail": "M.Sc. Development Studies, London School of Economics"
+    },
+    {
+      "detail": "Sastra Rusia, Fakultas Sastra Universitas Indonesia"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Fadli_Zon"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

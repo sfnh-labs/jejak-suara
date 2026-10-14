@@ -11,6 +11,7 @@
  * to a paragraph rather than being forced into one bogus bullet.
  */
 
+import ActorText from "./ActorText";
 import Citation from "./Citation";
 import { formatDateShort } from "@/lib/design";
 import type { EventRecord } from "@/lib/types";
@@ -69,6 +70,52 @@ function contentWords(text: string): string[] {
 const REWORDED = 0.8;
 
 /**
+ * A lead bullet that says everything the title does and more replaces it, when
+ * at least this share of the title's content words recur in it (allowing for
+ * verb prefixes) and it is short enough to read as a heading. This catches the
+ * repeats the prefix test misses: "Mengirim 3 Ekskavator" over "Andre Rosiade
+ * kirim 3 ekskavator untuk bantu penanganan banjir di Kota Padang".
+ */
+const COVERED = 0.6;
+const HEADING_MAX_WORDS = 20;
+
+/**
+ * The forms a word may take without its verb prefix. Indonesian meN- drops
+ * the root's first consonant ("mengirim" from "kirim", "menyatakan" from
+ * "nyatakan"/"satakan"), so each candidate root is kept.
+ */
+function roots(w: string): string[] {
+  const out = [w];
+  const m = /^(meng|meny|mem|men|me|ber|di|ter)(.+)$/.exec(w);
+  if (m && m[2].length >= 3) {
+    const [, pre, rest] = m;
+    out.push(rest);
+    if (/^[aeiou]/.test(rest)) {
+      if (pre === "meng") out.push("k" + rest);
+      if (pre === "meny") out.push("s" + rest);
+      if (pre === "mem") out.push("p" + rest);
+      if (pre === "men") out.push("t" + rest);
+    }
+  }
+  return out;
+}
+
+/** Share of `title`'s content words that `text` also has, in some form. */
+function coverage(title: string, text: string): number {
+  const t = contentWords(title);
+  if (!t.length) return 0;
+  const have = new Set(contentWords(text).flatMap(roots));
+  return t.filter((w) => roots(w).some((r) => have.has(r))).length / t.length;
+}
+
+/** `text` without a leading mention of `subject`, who the card already names. */
+function withoutSubject(text: string, subject?: string): string {
+  if (!subject) return text;
+  const name = subject.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`^${name}\\s+`, "i"), "");
+}
+
+/**
  * The title and summary without the bullets that only repeat the title.
  *
  * The model often opens the list by repeating the JUDUL with a few more words —
@@ -79,8 +126,13 @@ const REWORDED = 0.8;
  */
 export function withoutTitleRepeats(
   title: string | null,
-  summary: string | null
+  summary: string | null,
+  /** The figure the card is about; a bullet opening with their name drops it. */
+  subject?: string
 ): { title: string | null; summary: string | null } {
+  // The model occasionally cites inside the JUDUL itself; a heading is no
+  // place for "[Sumber 14], [Sumber 17]".
+  if (title) title = title.replace(/\s*\[\s*Sumber[^\]]*\]\s*[,;.]?/gi, "").trim() || null;
   if (!title || !summary) return { title, summary };
   let lines = summary.split("\n");
   const lead = lines.findIndex((l) => {
@@ -90,14 +142,21 @@ export function withoutTitleRepeats(
   // A summary that came back as a paragraph has no bullet to compare.
   if (lead < 0 || !MARKER.test(lines[lead])) return { title, summary };
 
-  const text = lines[lead]
-    .replace(MARKER, "")
-    .replace(/\[[^\]]*\]/g, "")
-    .replace(/[\s.]+$/, "")
-    .trim();
+  const text = withoutSubject(
+    lines[lead]
+      .replace(MARKER, "")
+      .replace(/\[[^\]]*\]/g, "")
+      .replace(/[\s.]+$/, "")
+      .trim(),
+    subject
+  );
   const t = words(title);
   const b = words(text);
-  if (b === t || b.startsWith(t + " ")) {
+  if (
+    b === t ||
+    b.startsWith(t + " ") ||
+    (coverage(title, text) >= COVERED && b.split(" ").length <= HEADING_MAX_WORDS)
+  ) {
     title = text.charAt(0).toUpperCase() + text.slice(1);
     lines = lines.filter((_, i) => i !== lead);
   }
@@ -125,8 +184,12 @@ export function toBullets(summary: string): string[] {
 const CITE = /\[\s*Sumber\s*(\d+)\s*\]/gi;
 const CITE_SPLIT = /(\[\d+\])/;
 
+// Some summaries put several in one bracket: "[Sumber 2, Sumber 3]".
+const CITE_GROUP = /\[\s*Sumber\s*\d+(?:\s*[,;]\s*(?:Sumber\s*)?\d+)+\s*\]/gi;
+
 function shortenCitations(text: string): string {
   return text
+    .replace(CITE_GROUP, (group) => (group.match(/\d+/g) ?? []).map((n) => `[${n}]`).join(""))
     .replace(CITE, "[$1]")
     // The model punctuates between citations; runs of them read as one group.
     .replace(/\]\s*[,;]?\s*\[/g, "][")
@@ -142,16 +205,16 @@ function shortenCitations(text: string): string {
  * in the same order the sources arrive here (see data.ts). A number with no
  * matching source — a model miscount — stays plain muted text.
  */
-function withCitations(text: string, size: number, sources: Source[]) {
+function withCitations(text: string, size: number, sources: Source[], figureId?: string | null) {
   return shortenCitations(text)
     .split(CITE_SPLIT)
     .filter(Boolean)
     .map((part, i) => {
-      if (!CITE_SPLIT.test(part)) return part;
+      if (!CITE_SPLIT.test(part)) return <ActorText key={i} text={part} exclude={figureId} />;
       const source = sources[Number(part.slice(1, -1)) - 1];
       if (!source) {
         return (
-          <span key={i} style={{ color: "#9b9285", fontSize: size - 2 }}>
+          <span key={i} style={{ color: "var(--color-stone-light)", fontSize: size - 2 }}>
             {part}
           </span>
         );
@@ -173,20 +236,23 @@ export default function SummaryList({
   summary,
   sources = [],
   size = 14.5,
-  color = "#3e382f",
+  color = "var(--color-body)",
+  figureId,
 }: {
   summary: string;
   /** The entry's sources, in the order the summary's [n] numbers refer to. */
   sources?: Source[];
   size?: number;
   color?: string;
+  /** The entry's own figure: other figures named in it link to their pages, this one does not. */
+  figureId?: string | null;
 }) {
   const bullets = toBullets(summary);
 
   if (bullets.length === 0) {
     return (
       <p style={{ fontSize: size, lineHeight: 1.62, color, margin: "0 0 14px", whiteSpace: "pre-line" }}>
-        {withCitations(contentLines(summary).join("\n"), size, sources)}
+        {withCitations(contentLines(summary).join("\n"), size, sources, figureId)}
       </p>
     );
   }
@@ -225,7 +291,7 @@ export default function SummaryList({
               background: "#b9ab93",
             }}
           />
-          {withCitations(text, size, sources)}
+          {withCitations(text, size, sources, figureId)}
         </li>
       ))}
     </ul>

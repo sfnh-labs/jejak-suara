@@ -5,7 +5,16 @@ CREATE TABLE IF NOT EXISTS figures (
     name     TEXT NOT NULL,
     role     TEXT,
     aliases  TEXT,              -- JSON array
-    active   BOOLEAN NOT NULL DEFAULT TRUE
+    active   BOOLEAN NOT NULL DEFAULT TRUE,
+    -- The CV, one entity with the figure: `positions` ({role, org, period})
+    -- is the career list and its first entry is `role` ("Ketua" + "MPR RI").
+    -- Pushed from SQLite (seeded from cv/<id>.json); edited in /kurasi.
+    positions TEXT,
+    bio       TEXT,
+    facts     TEXT,              -- JSON [{label, value}]
+    education TEXT,              -- JSON [{year?, detail}]
+    sources   TEXT,              -- JSON [{label, url}]
+    cv_checked_at TEXT
 );
 
 -- 'record' = one tracked figure's activity (figure_id set).
@@ -91,6 +100,12 @@ CREATE TABLE IF NOT EXISTS figure_edits (
     name       TEXT NOT NULL,
     role       TEXT,
     aliases    TEXT NOT NULL,    -- JSON array
+    positions  TEXT,             -- JSON array of {role, org, period}
+    -- The rest of the CV. NULL leaves a field as it was.
+    bio        TEXT,
+    facts      TEXT,
+    education  TEXT,
+    sources    TEXT,
     -- FALSE retires the figure: discovery mis-mined it ("Ahmad Muzani Tutup")
     -- or it duplicates someone tracked. It leaves the figure list and the
     -- pipeline stops attributing new coverage to it; records it already owns
@@ -174,6 +189,8 @@ CREATE TABLE IF NOT EXISTS comments (
     like_count   INTEGER DEFAULT 0,
     published_at TEXT,
     stance       TEXT,
+    mentions_figure INTEGER,        -- 1 if the text names the event's figure
+    figure_stance TEXT,             -- stance toward the figure, where it is named
     collected_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_comments_event  ON comments(event_id);
@@ -237,6 +254,13 @@ CREATE TABLE IF NOT EXISTS figure_candidates (
     -- said most often, which is frequently a fragment ("Menko", "Kepala");
     -- this is what the site will print under the name.
     curated_role TEXT,
+    -- The page address (figures.id) the curator chose; NULL derives it
+    -- from full_name. Never from the mined spelling: "Hafidz" became
+    -- /tokoh/hafidz for a man the curator named Habib Umar.
+    curated_slug TEXT,
+    -- The offices as the curator entered them, JSON [{role, org, period}],
+    -- first = main; curated_role is that first one's title.
+    curated_positions TEXT,
     decided_at  TEXT,
     applied_at  TEXT,          -- set once the pipeline has acted on the verdict
     -- What the curator saw that the evidence does not say: "this is a rank",

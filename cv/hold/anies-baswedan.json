@@ -1,0 +1,60 @@
+{
+  "bio": "Gubernur DKI Jakarta 2017–2022 dan calon presiden pada Pemilu 2024. Sebelumnya Menteri Pendidikan dan Kebudayaan serta Rektor Universitas Paramadina.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Anies Rasyid Baswedan"
+    },
+    {
+      "label": "Lahir",
+      "value": "Kuningan, 7 Mei 1969"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Gerakan Rakyat (sejak 2026)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Calon Presiden",
+      "org": "Pemilu 2024, berpasangan dengan Muhaimin Iskandar",
+      "period": "2024"
+    },
+    {
+      "role": "Gubernur DKI Jakarta",
+      "org": "",
+      "period": "2017 – 2022"
+    },
+    {
+      "role": "Menteri Pendidikan dan Kebudayaan",
+      "org": "Kabinet Kerja",
+      "period": "2014 – 2016"
+    },
+    {
+      "role": "Rektor",
+      "org": "Universitas Paramadina",
+      "period": "2007 – 2015"
+    }
+  ],
+  "education": [
+    {
+      "year": "2005",
+      "detail": "Ph.D. Ilmu Politik, Northern Illinois University"
+    },
+    {
+      "year": "1998",
+      "detail": "Master of Public Policy, University of Maryland"
+    },
+    {
+      "year": "1995",
+      "detail": "Sarjana Ekonomi, Universitas Gadjah Mada"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Anies_Baswedan"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

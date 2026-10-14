@@ -14,7 +14,7 @@ import { outletLogo } from "@/lib/design";
 export default function OutletTile({
   source,
   size = 22,
-  ring = "#f6f2e9",
+  ring = "var(--color-cream)",
 }: {
   source: string;
   size?: number;

@@ -1,0 +1,68 @@
+{
+  "bio": "Menteri Dalam Negeri sejak 2019. Purnawirawan jenderal polisi; sebelumnya Kapolri, Kepala BNPT, dan Kapolda Metro Jaya.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Muhammad Tito Karnavian"
+    },
+    {
+      "label": "Lahir",
+      "value": "Palembang, 26 Oktober 1964"
+    },
+    {
+      "label": "Partai",
+      "value": "Tidak berpartai"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Dalam Negeri",
+      "org": "",
+      "period": "2019 – kini"
+    },
+    {
+      "role": "Kepala Kepolisian Negara Republik Indonesia",
+      "org": "",
+      "period": "2016 – 2019"
+    },
+    {
+      "role": "Kepala Badan Nasional Penanggulangan Terorisme",
+      "org": "",
+      "period": "2016"
+    },
+    {
+      "role": "Kapolda Metro Jaya",
+      "org": "",
+      "period": "2015 – 2016"
+    },
+    {
+      "role": "Kapolda Papua",
+      "org": "",
+      "period": "2012 – 2014"
+    }
+  ],
+  "education": [
+    {
+      "year": "1996",
+      "detail": "Sekolah Tinggi Ilmu Kepolisian, Jakarta"
+    },
+    {
+      "year": "1993",
+      "detail": "M.A. Police Studies, University of Exeter"
+    },
+    {
+      "year": "1987",
+      "detail": "Akademi Kepolisian"
+    },
+    {
+      "detail": "Nanyang Technological University, Singapura"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Tito_Karnavian"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

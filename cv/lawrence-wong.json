@@ -1,0 +1,61 @@
+{
+  "bio": "Perdana Menteri Singapura sejak Mei 2024, merangkap Menteri Keuangan, dan Sekretaris Jenderal Partai Aksi Rakyat (PAP).",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Singapura, 18 Desember 1972"
+    },
+    {
+      "label": "Partai",
+      "value": "People's Action Party (PAP)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Perdana Menteri Singapura",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "People's Action Party",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Menteri Keuangan",
+      "org": "",
+      "period": "2021 – kini"
+    },
+    {
+      "role": "Wakil Perdana Menteri",
+      "org": "",
+      "period": "2022 – 2024"
+    },
+    {
+      "role": "Menteri Pembangunan Nasional",
+      "org": "",
+      "period": "2015 – 2020"
+    }
+  ],
+  "education": [
+    {
+      "year": "2004",
+      "detail": "Master of Public Administration, Harvard University"
+    },
+    {
+      "year": "1995",
+      "detail": "M.A. Ekonomi Terapan, University of Michigan"
+    },
+    {
+      "year": "1994",
+      "detail": "B.S. Ekonomi, University of Wisconsin–Madison"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Lawrence_Wong"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

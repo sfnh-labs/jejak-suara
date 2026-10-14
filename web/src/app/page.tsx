@@ -1,17 +1,15 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
-import EventCard from "@/components/EventCard";
+import EventTile from "@/components/EventTile";
 import FigurePortrait from "@/components/FigurePortrait";
 import HScroller from "@/components/HScroller";
 import RecordCard from "@/components/RecordCard";
 import { getFeed, getFigures, getSentimentHistory } from "@/lib/data";
 import {
   dayBadge,
+  firstName,
   formatCount,
-  formatDate,
   monthGroupLabel,
-  sentimentRing,
-  toDisplayScore,
 } from "@/lib/design";
 import type { FeedItem, FigureSummary, SentimentPoint } from "@/lib/types";
 
@@ -36,7 +34,7 @@ function trendFor(history: SentimentPoint[], figureId: string): Trend {
 const TREND_MARK: Record<Trend, { glyph: string; color: string; label: string }> = {
   up: { glyph: "▲", color: "#2e7a52", label: "naik" },
   down: { glyph: "▼", color: "#c0392b", label: "turun" },
-  flat: { glyph: "▬", color: "#9b9285", label: "stabil" },
+  flat: { glyph: "▬", color: "var(--color-stone-light)", label: "stabil" },
 };
 
 /** The day a feed card *shows*, which is the event's own date. */
@@ -75,56 +73,49 @@ export default async function Beranda() {
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <Nav active="/" />
+      <Nav
+        active="/"
+        stats={[
+          `${figures.length} tokoh dipantau`,
+          `${formatCount(totalEvents)} catatan`,
+          ...(totalComments > 0 ? [`${formatCount(totalComments)} komentar dianalisis`] : []),
+        ]}
+      />
 
-      <div className="container-page" style={{ maxWidth: 1100 }}>
-        <header className="rule-heavy" style={{ padding: "clamp(32px, 6vw, 56px) 0 32px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 40, flexWrap: "wrap" }}>
-            <div style={{ maxWidth: 680, flex: "1 1 320px" }}>
-              <div className="eyebrow" style={{ marginBottom: 16 }}>
-                Portal Rekam Jejak Tokoh Publik
-              </div>
-              <h1
-                style={{
-                  fontFamily: "var(--font-serif)",
-                  fontWeight: 500,
-                  fontSize: "clamp(34px, 6vw, 58px)",
-                  lineHeight: 1.0,
-                  margin: "0 0 18px",
-                  letterSpacing: "-0.02em",
-                }}
-              >
-                Lacak bagaimana tokoh bertindak di mata media.
-              </h1>
-              <p style={{ fontSize: 16, lineHeight: 1.6, color: "#4a443d", margin: 0, maxWidth: 560 }}>
-                Setiap catatan dirangkum dari pemberitaan dengan sumber yang bisa
-                ditelusuri — dilengkapi reaksi publik dari komentar, apa adanya.
-              </p>
-            </div>
-            <div
-              style={{
-                flex: "0 1 auto",
-                textAlign: "right",
-                fontSize: 12.5,
-                color: "#7a7264",
-                lineHeight: 1.7,
-                borderLeft: "1px solid #d8cfba",
-                paddingLeft: 24,
-              }}
-            >
-              <div style={{ fontWeight: 700, color: "#16130f" }}>{formatDate(new Date().toISOString())}</div>
-              <div>{figures.length} tokoh dipantau</div>
-              <div>{formatCount(totalEvents)} catatan</div>
-              {totalComments > 0 ? <div>{formatCount(totalComments)} komentar dianalisis</div> : null}
-            </div>
-          </div>
+      <div className="container-page" style={{ maxWidth: 1184 }}>
+        <header className="rule-heavy" style={{ padding: "28px 0 26px" }}>
+          <h1
+            style={{
+              fontFamily: "var(--font-serif)",
+              fontWeight: 600,
+              fontSize: "clamp(32px, 5.4vw, 52px)",
+              lineHeight: 1.08,
+              margin: "0 0 14px",
+              letterSpacing: "-0.015em",
+            }}
+          >
+            Setiap suara meninggalkan jejak. Kami mencatatnya.
+          </h1>
+          <p style={{ fontSize: 15, lineHeight: 1.7, color: "var(--color-mud)", margin: 0, maxWidth: 640 }}>
+            Setiap catatan dirangkum dari pemberitaan dengan sumber yang bisa
+            ditelusuri — dilengkapi reaksi publik dari komentar, apa adanya.
+          </p>
         </header>
 
         {figures.length > 0 ? <StoryBubbles figures={figures} history={history} /> : null}
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "32px 0 18px", gap: 16, flexWrap: "wrap" }}>
-          <div className="section-label">Catatan Terbaru</div>
-          <div style={{ fontSize: 12.5, color: "#7a7264" }}>Diurutkan dari yang terbaru</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "30px 0 14px", gap: 16, flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0, fontFamily: "var(--font-serif)", fontWeight: 700, fontSize: 28 }}>Catatan Terbaru</h2>
+          <div style={{ display: "flex", gap: 18, fontSize: 12, fontWeight: 700, letterSpacing: "0.06em" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span aria-hidden style={{ width: 14, height: 14, background: "var(--color-event)" }} />
+              Peristiwa
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span aria-hidden style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid var(--color-ink)" }} />
+              Catatan tokoh
+            </span>
+          </div>
         </div>
 
         {feed.length === 0 ? (
@@ -132,29 +123,14 @@ export default async function Beranda() {
         ) : (
           [...groups.entries()].map(([month, rows]) => (
             <section key={month}>
-              <h2
-                style={{
-                  position: "sticky",
-                  top: 57,
-                  zIndex: 5,
-                  background: "#f6f2e9",
-                  boxShadow: "0 -18px 0 #f6f2e9",
-                  fontFamily: "var(--font-serif)",
-                  fontWeight: 500,
-                  fontSize: 20,
-                  color: "#9b8f7d",
-                  margin: "18px 0 20px",
-                  padding: "14px 0",
-                  borderBottom: "1px solid #d8cfba",
-                }}
-              >
+              <h2 className="month-heading" style={{ margin: "18px 0 20px" }}>
                 {month}
               </h2>
               <div className="rail">
                 {byDay(rows).map(([day, items]) => (
                   // One dateline per day, and it rides the rail for as long as
                   // that day's cards do. The dot each row keeps is what carries
-                  // the kind: maroon peristiwa, grey record.
+                  // the kind: a square peristiwa, a ring record, as in the legend.
                   <div className="rail-day" key={day}>
                     <div className="day-rail">
                       <span className="day-pill">{dayBadge(feedDate(items[0]))}</span>
@@ -162,14 +138,14 @@ export default async function Beranda() {
                     {items.map((item) =>
                       item.kind === "peristiwa" ? (
                         <div className="rail-row" key={`p-${item.peristiwa.event_id}`}>
-                          <span className="rail-dot" style={{ background: "#8b2e1f" }} aria-hidden />
+                          <span className="rail-dot is-event" aria-hidden />
                           <div className="rail-event">
-                            <EventCard peristiwa={item.peristiwa} showDate={false} />
+                            <EventTile peristiwa={item.peristiwa} />
                           </div>
                         </div>
                       ) : (
                         <div className="rail-row" key={`r-${item.record.event_id}`}>
-                          <span className="rail-dot" style={{ background: "#6b645b" }} aria-hidden />
+                          <span className="rail-dot is-record" aria-hidden />
                           <div className="rail-record">
                             <RecordCard record={item.record} showFigure bare marker="none" />
                           </div>
@@ -195,10 +171,38 @@ function byLatestRecord(figures: FigureSummary[]): FigureSummary[] {
 
 function StoryBubbles({ figures, history }: { figures: FigureSummary[]; history: SentimentPoint[] }) {
   return (
-    <section aria-label="Tokoh dipantau" style={{ padding: "28px 0 4px" }}>
+    <section
+      aria-label="Tokoh dipantau"
+      style={{
+        display: "grid",
+        gridTemplateColumns: "34px minmax(0, 1fr)",
+        columnGap: 16,
+        padding: "20px 0",
+        borderBottom: "1px solid var(--color-ink)",
+      }}
+    >
+      {/* Set to the avatar plus its name line, top to bottom. */}
+      <div
+        aria-hidden
+        style={{
+          alignSelf: "start",
+          height: 89,
+          writingMode: "vertical-rl",
+          fontFamily: "var(--font-serif)",
+          fontWeight: 700,
+          fontSize: 21,
+          lineHeight: 1,
+          textAlignLast: "justify",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          borderRight: "2px solid var(--color-ink)",
+          paddingRight: 6,
+        }}
+      >
+        TOKOH
+      </div>
       <HScroller label="Daftar tokoh, terbaru lebih dulu">
         {byLatestRecord(figures).map((fig) => {
-          const display = toDisplayScore(fig.avg_sentiment);
           const trend = TREND_MARK[trendFor(history, fig.id)];
           const recent = Number(fig.recent_count);
           return (
@@ -212,7 +216,7 @@ function StoryBubbles({ figures, history }: { figures: FigureSummary[]; history:
                 className="bubble-ring"
                 style={{ position: "relative", width: 66, height: 66, margin: "0 auto", padding: 5 }}
               >
-                <StoryRing count={recent} color={sentimentRing(display)} size={66} />
+                <StoryRing count={recent} size={66} />
                 <FigurePortrait
                   figureId={fig.id}
                   name={fig.name}
@@ -223,8 +227,8 @@ function StoryBubbles({ figures, history }: { figures: FigureSummary[]; history:
                   hatchStep={5}
                 />
               </div>
-              <div className="bubble-name" style={{ fontSize: 12, fontWeight: 600, marginTop: 7, lineHeight: 1.25 }}>
-                {fig.name.split(/\s+/)[0]}
+              <div className="bubble-name" style={{ fontSize: 12, fontWeight: 700, marginTop: 7, lineHeight: "16px", height: 16, whiteSpace: "nowrap" }}>
+                {firstName(fig.name)}
               </div>
               <div style={{ fontSize: 11, color: trend.color, marginTop: 2 }}>
                 <span aria-hidden>{trend.glyph}</span>
@@ -246,16 +250,18 @@ const STORY_MAX_SEGMENTS = 20;
 
 /**
  * The ring around a story bubble, Instagram-style: one segment per record with
- * coverage in the last 24 hours, in the figure's sentiment colour. With nothing
- * new it is a thin grey line, like a story already seen.
+ * coverage in the last 24 hours, always in the site's red so "new" reads the
+ * same on every bubble. Sentiment stays off the ring — colouring it red for a
+ * negative score made a figure look flagged. Nothing new: no ring at all.
  */
-function StoryRing({ count, color, size }: { count: number; color: string; size: number }) {
-  const stroke = count > 0 ? 3 : 1.5;
+function StoryRing({ count, size }: { count: number; size: number }) {
+  if (count <= 0) return null;
+  const stroke = 3;
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
   const segments = Math.min(count, STORY_MAX_SEGMENTS);
   const gap = segments > 1 ? (segments > 12 ? 2.5 : 4) : 0;
-  const dash = segments > 0 ? circumference / segments - gap : circumference;
+  const dash = circumference / segments - gap;
   return (
     <svg
       aria-hidden
@@ -270,7 +276,7 @@ function StoryRing({ count, color, size }: { count: number; color: string; size:
         cy={size / 2}
         r={r}
         fill="none"
-        stroke={count > 0 ? color : "#cfc6b2"}
+        stroke="#8b2e1f"
         strokeWidth={stroke}
         strokeDasharray={gap ? `${dash} ${gap}` : undefined}
         // A gap is left at the end of each dash, so shift by half a gap to
@@ -283,7 +289,7 @@ function StoryRing({ count, color, size }: { count: number; color: string; size:
 
 function Empty() {
   return (
-    <p style={{ fontSize: 15, color: "#7a7264", padding: "28px 0 60px", lineHeight: 1.6 }}>
+    <p style={{ fontSize: 15, color: "var(--color-stone)", padding: "28px 0 60px", lineHeight: 1.6 }}>
       Belum ada catatan yang tayang. Jalankan tahap peringkasan lalu sinkronkan ke
       basis data untuk mengisi halaman ini.
     </p>

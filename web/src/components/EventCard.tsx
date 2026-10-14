@@ -1,7 +1,9 @@
 import Link from "next/link";
+import FigurePortrait from "./FigurePortrait";
 import { SourcesDisclosure } from "./SourceList";
 import SummaryList, { withoutTitleRepeats } from "./SummaryList";
-import { dayBadge, eventTypeChip } from "@/lib/design";
+import { dayBadge, firstName } from "@/lib/design";
+import { topicChip, topicLabel, topicOf } from "@/lib/topics";
 import type { Peristiwa } from "@/lib/types";
 
 /**
@@ -26,17 +28,12 @@ export default function EventCard({
   /** False when the card repeats the day of the one above it in the feed. */
   showDate?: boolean;
 }) {
-  const chip = eventTypeChip(peristiwa.event_type);
-  const sources = peristiwa.sources ?? [];
-  const related = peristiwa.related_figures ?? [];
-  const { title, summary } = withoutTitleRepeats(peristiwa.title, peristiwa.summary);
-
   return (
     <article
       style={{
         position: "relative",
-        background: "#efe9dc",
-        border: "1px solid #ddd3bf",
+        background: "var(--color-cream-dark)",
+        border: "1px solid var(--color-parchment-light)",
         padding: peristiwa.image ? "0 0 16px" : "16px 18px",
         // No overflow clipping: it would cut off the citation tooltips. The
         // image is square-cornered and full-bleed, so it needs none.
@@ -52,15 +49,46 @@ export default function EventCard({
       ) : null}
 
       <div style={{ padding: peristiwa.image ? "0 18px" : 0 }}>
+        {bare || !showDate ? null : (
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: "var(--color-stone)", marginBottom: 8 }}>
+            {dayBadge(peristiwa.event_date)}
+          </div>
+        )}
+        <EventBody peristiwa={peristiwa} />
+      </div>
+    </article>
+  );
+}
 
-      {bare || !showDate ? null : (
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: "#7a7264", marginBottom: 8 }}>
-          {dayBadge(peristiwa.event_date)}
-        </div>
-      )}
+/**
+ * Everything a peristiwa says, without its frame: topic, title, summary,
+ * sources and related figures. The card above wraps it in a tinted panel; the
+ * home feed's EventTile shows it in a callout beside the tile.
+ */
+export function EventBody({
+  peristiwa,
+  size = 13.5,
+  heading: Heading = "h3",
+  titleSize = "clamp(18px, 3vw, 21px)",
+}: {
+  peristiwa: Peristiwa;
+  /** Body text size; the summary's citations scale with it. */
+  size?: number;
+  heading?: "h3" | "h4";
+  titleSize?: string;
+}) {
+  // The topic, not the model's KATEGORI: "Pernyataan" or "Penolakan" names the
+  // kind of act and says nothing about what the event concerns.
+  const topic = topicOf(peristiwa);
+  const chip = topicChip(topic);
+  const sources = peristiwa.sources ?? [];
+  const related = peristiwa.related_figures ?? [];
+  const { title, summary } = withoutTitleRepeats(peristiwa.title, peristiwa.summary);
 
+  return (
+    <>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-        {peristiwa.event_type ? (
+        {topic !== "lainnya" ? (
           <span
             style={{
               fontSize: 11,
@@ -73,29 +101,29 @@ export default function EventCard({
               padding: "2px 10px",
             }}
           >
-            {peristiwa.event_type}
+            {topicLabel(topic)}
           </span>
         ) : null}
         {peristiwa.scope ? (
-          <span style={{ fontSize: 11.5, color: "#7a7264" }}>{peristiwa.scope}</span>
+          <span style={{ fontSize: 11.5, color: "var(--color-stone)" }}>{peristiwa.scope}</span>
         ) : null}
       </div>
 
-      <h3
+      <Heading
         style={{
           fontFamily: "var(--font-serif)",
           fontWeight: 600,
-          fontSize: "clamp(18px, 3vw, 21px)",
+          fontSize: titleSize,
           lineHeight: 1.2,
           margin: "0 0 8px",
           letterSpacing: "-0.01em",
         }}
       >
         {title || "Tanpa judul"}
-      </h3>
+      </Heading>
 
       {summary ? (
-        <SummaryList summary={summary} sources={sources} size={13.5} />
+        <SummaryList summary={summary} sources={sources} size={size} />
       ) : null}
 
       {/* Same place and control as on a record card. */}
@@ -103,26 +131,42 @@ export default function EventCard({
         <SourcesDisclosure sources={sources} />
       </div>
 
-      {related.length ? (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9b9285" }}>
-            Tokoh terkait
-          </span>
-          {related.map((f) => (
-            <Link
-              key={f.id}
-              href={`/tokoh/${f.id}`}
-              className="pill-link"
-              style={{ fontSize: 11.5, fontWeight: 600, padding: "2px 10px" }}
-            >
-              {f.name}
-            </Link>
-          ))}
-        </div>
-      ) : null}
+      <RelatedFigures figures={related} />
+    </>
+  );
+}
 
-
-      </div>
-    </article>
+/**
+ * The figures an event names, as link pills: a small portrait and the name
+ * they go by. The full name is the pill's tooltip.
+ */
+function RelatedFigures({ figures }: { figures: Peristiwa["related_figures"] }) {
+  if (!figures.length) return null;
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-stone-light)" }}>
+        Tokoh terkait
+      </span>
+      {figures.map((f) => (
+        <Link
+          key={f.id}
+          href={`/tokoh/${f.id}`}
+          className="pill-link"
+          title={f.name}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            fontSize: 11.5,
+            fontWeight: 600,
+            lineHeight: 1,
+            padding: "2px 9px 2px 2px",
+          }}
+        >
+          <FigurePortrait figureId={f.id} name={f.name} width={18} round fontSize={8} hatchStep={3} />
+          {firstName(f.name)}
+        </Link>
+      ))}
+    </div>
   );
 }

@@ -120,7 +120,7 @@ TABLES: tuple[Table, ...] = (
     Table("comments", "id", (
         "id", "event_id", "comment_id", "video_id", "channel", "author_id",
         "author_name", "text", "like_count", "published_at", "stance",
-        "collected_at",
+        "mentions_figure", "figure_stance", "collected_at",
     ), serial=True, conflict=("event_id", "comment_id")),
     Table("buzzer_signals", "id", (
         "id", "event_id", "anomaly_score", "anomaly_pct",
@@ -172,9 +172,24 @@ MIGRATIONS = (
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS notes TEXT",
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS records TEXT",
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS curated_role TEXT",
+    "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS curated_slug TEXT",
+    "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS curated_positions TEXT",
+    "ALTER TABLE figures ADD COLUMN IF NOT EXISTS positions TEXT",
+    "ALTER TABLE figure_edits ADD COLUMN IF NOT EXISTS positions TEXT",
+    "ALTER TABLE figures ADD COLUMN IF NOT EXISTS bio TEXT",
+    "ALTER TABLE figures ADD COLUMN IF NOT EXISTS facts TEXT",
+    "ALTER TABLE figures ADD COLUMN IF NOT EXISTS education TEXT",
+    "ALTER TABLE figures ADD COLUMN IF NOT EXISTS sources TEXT",
+    "ALTER TABLE figures ADD COLUMN IF NOT EXISTS cv_checked_at TEXT",
+    "ALTER TABLE figure_edits ADD COLUMN IF NOT EXISTS bio TEXT",
+    "ALTER TABLE figure_edits ADD COLUMN IF NOT EXISTS facts TEXT",
+    "ALTER TABLE figure_edits ADD COLUMN IF NOT EXISTS education TEXT",
+    "ALTER TABLE figure_edits ADD COLUMN IF NOT EXISTS sources TEXT",
     "ALTER TABLE figure_edits ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS comment_id TEXT",
     "ALTER TABLE comments ADD COLUMN IF NOT EXISTS channel TEXT",
+    "ALTER TABLE comments ADD COLUMN IF NOT EXISTS mentions_figure INTEGER",
+    "ALTER TABLE comments ADD COLUMN IF NOT EXISTS figure_stance TEXT",
     "ALTER TABLE articles ADD COLUMN IF NOT EXISTS body_original TEXT",
     "ALTER TABLE articles ADD COLUMN IF NOT EXISTS body_lang TEXT DEFAULT 'id'",
     # figure_id became nullable when peristiwa were introduced: an event that
@@ -255,20 +270,31 @@ def sync_figures(pg, sqlite: sqlite3.Connection) -> int:
     # Retired figures go too, flagged inactive. Sending only the active ones
     # left a figure switched off in the pipeline still live on the site.
     rows = [
-        (r["id"], r["name"], r["role"] or "", r["aliases"] or "[]", bool(r["active"]))
-        for r in sqlite.execute("SELECT id, name, role, aliases, active FROM figures")
+        (r["id"], r["name"], r["role"] or "", r["aliases"] or "[]", bool(r["active"]),
+         r["positions"], r["bio"], r["facts"], r["education"], r["sources"],
+         r["cv_checked_at"])
+        for r in sqlite.execute(
+            "SELECT id, name, role, aliases, active, positions, bio, facts, "
+            "education, sources, cv_checked_at FROM figures")
     ]
     if not rows:
         return 0
     with pg.cursor() as cur:
         cur.executemany(
-            """INSERT INTO figures (id, name, role, aliases, active)
-               VALUES (%s, %s, %s, %s, %s)
+            """INSERT INTO figures (id, name, role, aliases, active, positions,
+                                  bio, facts, education, sources, cv_checked_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (id) DO UPDATE SET
                  name = EXCLUDED.name,
                  role = EXCLUDED.role,
                  aliases = EXCLUDED.aliases,
-                 active = EXCLUDED.active""",
+                 active = EXCLUDED.active,
+                 positions = EXCLUDED.positions,
+                 bio = EXCLUDED.bio,
+                 facts = EXCLUDED.facts,
+                 education = EXCLUDED.education,
+                 sources = EXCLUDED.sources,
+                 cv_checked_at = EXCLUDED.cv_checked_at""",
             rows,
         )
         # An edit the pipeline has not applied yet would be undone by the row
@@ -277,7 +303,10 @@ def sync_figures(pg, sqlite: sqlite3.Connection) -> int:
         cur.execute(
             """UPDATE figures f
                   SET name = e.name, role = e.role, aliases = e.aliases,
-                      active = e.active
+                      active = e.active, positions = COALESCE(e.positions, f.positions),
+                      bio = COALESCE(e.bio, f.bio), facts = COALESCE(e.facts, f.facts),
+                      education = COALESCE(e.education, f.education),
+                      sources = COALESCE(e.sources, f.sources)
                  FROM figure_edits e
                 WHERE e.figure_id = f.id AND e.applied_at IS NULL"""
         )

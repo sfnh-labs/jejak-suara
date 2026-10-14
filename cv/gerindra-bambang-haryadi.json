@@ -1,0 +1,56 @@
+{
+  "bio": "Wakil Ketua Komisi XII DPR dan Ketua DPP Partai Gerindra. Juga memimpin Dewan Koperasi Indonesia (Dekopin).",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jember, 20 Agustus 1979"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Ketua Komisi XII DPR",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Dewan Koperasi Indonesia (Dekopin)",
+      "period": "kini"
+    },
+    {
+      "role": "Ketua Bidang",
+      "org": "DPP Partai Gerindra",
+      "period": "2020 – kini"
+    },
+    {
+      "role": "Wakil Ketua Komisi VII DPR",
+      "org": "",
+      "period": "2021 – 2024"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "2019 – kini"
+    }
+  ],
+  "education": [
+    {
+      "year": "2012",
+      "detail": "Sarjana, STIE Manajemen Industri dan Jasa Indonesia, Jakarta"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Bambang_Haryadi"
+    },
+    {
+      "label": "pemberitaan yang dihimpun Jejak Suara"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

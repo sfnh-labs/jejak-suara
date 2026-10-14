@@ -43,7 +43,7 @@ export default function TranslatedText({ translated, original, originalLang, as 
             style={{
               display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", border: "none",
               background: "none", padding: 0, margin: "4px 0 0", fontSize: 11.5, fontWeight: 600,
-              color: "#8b2e1f", textDecoration: "underline", textUnderlineOffset: 2,
+              color: "var(--color-clay)", textDecoration: "underline", textUnderlineOffset: 2,
             }}
           >
             Tampilkan terjemahan Indonesia →
@@ -57,7 +57,7 @@ export default function TranslatedText({ translated, original, originalLang, as 
             style={{
               display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", border: "none",
               background: "none", padding: 0, margin: "4px 0 0", fontSize: 11.5, fontWeight: 600,
-              color: "#8b2e1f", textDecoration: "underline", textUnderlineOffset: 2,
+              color: "var(--color-clay)", textDecoration: "underline", textUnderlineOffset: 2,
             }}
           >
             Lihat teks asli ({langName}) →

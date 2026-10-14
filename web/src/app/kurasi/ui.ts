@@ -4,6 +4,8 @@ export const INK = "var(--color-ink)";
 export const MUTED = "var(--color-stone)";
 export const RULE = "var(--color-parchment)";
 export const ACCEPT = "#3d6b4a";
+/** Card surface: one step lighter than the cream page, so a section reads as a block. */
+export const SURFACE = "#fffdf8";
 
 export function button(tone: "accept" | "danger" | "quiet" | "ink") {
   const bg = { accept: ACCEPT, danger: "var(--color-clay)", quiet: "transparent", ink: INK }[tone];

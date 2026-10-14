@@ -25,6 +25,7 @@ export default function FigurePortrait({
   hatchStep = 6,
   align = "center",
   objectPosition,
+  inline = false,
 }: {
   figureId: string;
   name: string;
@@ -35,7 +36,10 @@ export default function FigurePortrait({
   hatchStep?: number;
   align?: CSSProperties["alignItems"];
   objectPosition?: string;
+  /** Render as spans, for use inside running text (a <div> would end a <p>). */
+  inline?: boolean;
 }) {
+  const Box = inline ? "span" : "div";
   // A 24px circle of the full podium scene is mostly robe; the face crop is
   // the same picture, cut for the size it is actually shown at.
   const src = figureImage(figureId, round ? "avatar" : "portrait");
@@ -44,13 +48,14 @@ export default function FigurePortrait({
     width,
     height,
     borderRadius: round ? "50%" : 0,
-    border: "1px solid #16130f",
+    border: "1px solid var(--color-ink)",
     overflow: "hidden",
+    ...(inline ? { display: "block" } : null),
   };
 
   if (src) {
     return (
-      <div aria-hidden style={box}>
+      <Box aria-hidden style={box}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
@@ -63,12 +68,12 @@ export default function FigurePortrait({
             display: "block",
           }}
         />
-      </div>
+      </Box>
     );
   }
 
   return (
-    <div
+    <Box
       aria-hidden
       style={{
         ...box,
@@ -88,6 +93,6 @@ export default function FigurePortrait({
       >
         {initials(name)}
       </span>
-    </div>
+    </Box>
   );
 }

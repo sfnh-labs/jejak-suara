@@ -48,23 +48,31 @@ def figure_edits(pg, conn: sqlite3.Connection) -> list[tuple[str, str]]:
     """Overwrite the roster rows a curator corrected. Returns (key, line)."""
     with pg.cursor() as cur:
         cur.execute(
-            "SELECT figure_id, name, role, aliases, active FROM figure_edits "
+            "SELECT figure_id, name, role, aliases, active, positions, "
+            "bio, facts, education, sources FROM figure_edits "
             "WHERE applied_at IS NULL ORDER BY edited_at"
         )
         pending = cur.fetchall()
     done = []
-    for figure_id, name, role, aliases, active in pending:
+    for figure_id, name, role, aliases, active, positions, bio, facts, education, sources in pending:
         row = conn.execute(
-            "SELECT name, role, aliases, active, origin FROM figures WHERE id = ?",
+            "SELECT name, role, aliases, active, origin, positions FROM figures WHERE id = ?",
             (figure_id,),
         ).fetchone()
         if row is None:
             done.append((figure_id, f"no such figure locally: {figure_id} (skipped)"))
             continue
+        cv = (positions, bio, facts, education, sources)
         conn.execute(
-            "UPDATE figures SET name = ?, role = ?, aliases = ?, active = ? WHERE id = ?",
-            (name, role, aliases, 1 if active else 0, figure_id),
+            "UPDATE figures SET name = ?, role = ?, aliases = ?, active = ?, "
+            "positions = COALESCE(?, positions), bio = COALESCE(?, bio), "
+            "facts = COALESCE(?, facts), education = COALESCE(?, education), "
+            "sources = COALESCE(?, sources) WHERE id = ?",
+            (name, role, aliases, 1 if active else 0, *cv, figure_id),
         )
+        # A curator's CV is not overwritten by the next import_cv.py.
+        if any(v is not None for v in cv):
+            conn.execute("UPDATE figures SET cv_curated = 1 WHERE id = ?", (figure_id,))
         before = set(json.loads(row["aliases"] or "[]"))
         after = set(json.loads(aliases or "[]"))
         change = []
@@ -76,6 +84,11 @@ def figure_edits(pg, conn: sqlite3.Connection) -> list[tuple[str, str]]:
             change.append("+aliases " + ", ".join(sorted(after - before)))
         if before - after:
             change.append("-aliases " + ", ".join(sorted(before - after)))
+        if positions is not None and positions != row["positions"]:
+            n = len(json.loads(positions or "[]"))
+            change.append(f"positions -> {n} entr{'y' if n == 1 else 'ies'}")
+        if any(v is not None for v in (bio, facts, education, sources)):
+            change.append("CV edited")
         if bool(row["active"]) != bool(active):
             change.append("activated" if active else "deactivated")
         line = f"figure {figure_id}: " + ("; ".join(change) or "unchanged")

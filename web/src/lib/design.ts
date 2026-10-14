@@ -127,6 +127,18 @@ export function outletLogo(name: string): OutletMark {
  * The single sentiment ladder. Scores are stored in [-1, 1] by
  * `jejak/sentiment.py`; the design works in [-100, 100].
  */
+/**
+ * Below this many comments naming the figure, their stance toward the figure
+ * is not shown as a score. Ten comments move it ten points each.
+ */
+export const MIN_FIGURE_SAMPLE = 8;
+
+/** Display score (-100..100) toward the figure, or null when too few comments name them. */
+export function figureDisplayScore(c: { positive: number; negative: number; total: number }): number | null {
+  if (c.total < MIN_FIGURE_SAMPLE) return null;
+  return Math.round(((c.positive - c.negative) / c.total) * 100);
+}
+
 export function toDisplayScore(score: number | null | undefined): number | null {
   if (score === null || score === undefined) return null;
   return Math.round(score * 100);
@@ -158,14 +170,6 @@ export function sentimentLabel(display: number): string {
 export function markerLeft(display: number): string {
   const clamped = Math.max(-100, Math.min(100, display));
   return `${(clamped + 100) / 2}%`;
-}
-
-/** Ring colour for the home page story bubbles. */
-export function sentimentRing(display: number | null): string {
-  if (display === null) return "#bcb3a0";
-  if (display <= -10) return "#d6453e";
-  if (display < 16) return "#e0a53b";
-  return "#2e9e6b";
 }
 
 const BULAN = [
@@ -204,6 +208,30 @@ export function dayBadge(iso: string | null | undefined): string {
 export function monthGroupLabel(iso: string | null | undefined): string {
   const p = parts(iso);
   return p ? `${BULAN[p.month]} ${p.year}` : "Tanpa tanggal";
+}
+
+const HARI = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+const ROMAWI = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
+
+/** The masthead's edition box: "Senin", "13·X", "Oktober 2026". In WIB. */
+export function editionParts(date: Date = new Date()): { weekday: string; stamp: string; month: string } {
+  const wib = new Date(date.getTime() + 7 * 3600_000);
+  const day = wib.getUTCDate();
+  const month = wib.getUTCMonth() + 1;
+  return {
+    weekday: HARI[wib.getUTCDay()],
+    stamp: `${day}·${ROMAWI[month]}`,
+    month: `${BULAN[month]} ${wib.getUTCFullYear()}`,
+  };
+}
+
+// Honorifics that are not a name on their own: "Gus Ipul" is "Gus Ipul".
+const HONORIFIC = /^(gus|kiai|kyai|prof\.?|dr\.?|h\.?|hj\.?)$/i;
+
+/** The name a figure goes by in a tight space: the first word, honorific kept. */
+export function firstName(name: string): string {
+  const words = name.trim().split(/\s+/);
+  return HONORIFIC.test(words[0]) && words[1] ? `${words[0]} ${words[1]}` : words[0];
 }
 
 export function initials(name: string): string {

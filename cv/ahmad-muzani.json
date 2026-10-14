@@ -1,0 +1,52 @@
+{
+  "bio": "Ketua MPR sejak 2024. Politikus Gerindra, anggota DPR dari Lampung sejak 2009, dan Sekretaris Jenderal Gerindra hingga 2025.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Tegal, Juli 1968"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Ketua MPR",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Wakil Ketua MPR",
+      "org": "",
+      "period": "2018 – 2024"
+    },
+    {
+      "role": "Ketua Fraksi Gerindra",
+      "org": "DPR",
+      "period": "2012 – 2024"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Lampung I",
+      "period": "2009 – kini"
+    },
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "Partai Gerindra",
+      "period": "2008 – 2025"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Ilmu Komunikasi, Universitas Ibnu Chaldun, Jakarta"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Ahmad_Muzani"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -1,0 +1,52 @@
+{
+  "bio": "Wakil Gubernur DKI Jakarta sejak Februari 2025. Politikus PDI Perjuangan yang sebelumnya menjabat Gubernur Banten dan anggota DPR; dikenal luas sebagai aktor dan pemeran Si Doel.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 8 Oktober 1960"
+    },
+    {
+      "label": "Partai",
+      "value": "PDI Perjuangan (sejak 1999)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Gubernur DKI Jakarta",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Banten III",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Gubernur Banten",
+      "org": "Pelaksana tugas sejak 2014",
+      "period": "2015 – 2017"
+    },
+    {
+      "role": "Wakil Gubernur Banten",
+      "org": "",
+      "period": "2012 – 2015"
+    },
+    {
+      "role": "Wakil Bupati Tangerang",
+      "org": "",
+      "period": "2008 – 2011"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Sekolah Tinggi Ilmu Pemerintahan Abdi Negara"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Rano_Karno"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

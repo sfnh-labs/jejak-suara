@@ -1,0 +1,60 @@
+{
+  "bio": "Menteri Agraria dan Tata Ruang/Kepala BPN sejak Oktober 2024. Politikus Golkar; sebelumnya anggota DPR, Kepala BNP2TKI, dan Ketua Umum GP Ansor.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Kudus, 12 Oktober 1973"
+    },
+    {
+      "label": "Partai",
+      "value": "Golkar"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Agraria dan Tata Ruang/Kepala BPN",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Kepala BNP2TKI",
+      "org": "",
+      "period": "2014 – 2019"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "GP Ansor",
+      "period": "2010 – 2015"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Jawa Tengah II",
+      "period": "2004 – 2015"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "PB PMII",
+      "period": "2000 – 2003"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister Ilmu Ekonomi, Institut Pertanian Bogor"
+    },
+    {
+      "detail": "Sarjana Ilmu Sejarah, Universitas Indonesia"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Nusron_Wahid"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

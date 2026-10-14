@@ -1,0 +1,62 @@
+{
+  "bio": "Menteri Sosial sejak Oktober 2024. Politikus PKB dan tokoh Nahdlatul Ulama; sebelumnya Wali Kota Pasuruan, Wakil Gubernur Jawa Timur dua periode, dan Ketua Umum GP Ansor.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Saifullah Yusuf"
+    },
+    {
+      "label": "Lahir",
+      "value": "Pasuruan, 28 Agustus 1964"
+    },
+    {
+      "label": "Partai",
+      "value": "PKB"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Sosial",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Wali Kota Pasuruan",
+      "org": "",
+      "period": "2021 – 2024"
+    },
+    {
+      "role": "Wakil Gubernur Jawa Timur",
+      "org": "",
+      "period": "2009 – 2019"
+    },
+    {
+      "role": "Menteri Negara Percepatan Pembangunan Daerah Tertinggal",
+      "org": "",
+      "period": "2004 – 2007"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "GP Ansor",
+      "period": "2000 – 2010"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "1999 – 2001"
+    }
+  ],
+  "education": [
+    {
+      "year": "1985",
+      "detail": "Sarjana, FISIP Universitas Nasional, Jakarta"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Saifullah_Yusuf"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

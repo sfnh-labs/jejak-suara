@@ -92,6 +92,8 @@ try {
     # Curator decisions from /kurasi go in first, so this cycle's attribution,
     # clustering and linking already follow them.
     Invoke-Stage "apply curation" @("scripts\apply_curation.py", "--apply")
+    # Generated CVs into the roster; after curation, so curated figures are skipped.
+    Invoke-Stage "import cv" @("scripts\import_cv.py", "--apply")
 
     Invoke-Stage "ingest" @("-m", "jejak.cli", "ingest")
 

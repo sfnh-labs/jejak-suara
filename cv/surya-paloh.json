@@ -1,0 +1,52 @@
+{
+  "bio": "Ketua Umum Partai NasDem sejak 2013 dan pendiri Media Group (Metro TV). Sebelumnya Ketua Dewan Pembina Partai Golkar.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Surya Dharma Paloh"
+    },
+    {
+      "label": "Lahir",
+      "value": "Banda Aceh, 16 Juli 1951"
+    },
+    {
+      "label": "Partai",
+      "value": "NasDem; sebelumnya Golkar"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Ketua Umum",
+      "org": "Partai NasDem",
+      "period": "2013 – kini"
+    },
+    {
+      "role": "Ketua Dewan Pembina",
+      "org": "Partai Golkar",
+      "period": "2004 – 2009"
+    },
+    {
+      "role": "Direktur Utama",
+      "org": "Metro TV",
+      "period": "2000 – 2006"
+    },
+    {
+      "role": "Anggota MPR",
+      "org": "",
+      "period": "1977 – 1987"
+    }
+  ],
+  "education": [
+    {
+      "year": "1975",
+      "detail": "Doktorandus Ilmu Sosial dan Politik, Universitas Islam Sumatera Utara"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Surya_Paloh"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

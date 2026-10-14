@@ -1,0 +1,47 @@
+{
+  "bio": "Wakil Ketua DPR sejak 2024 dari Partai NasDem. Sebelumnya Wakil Ketua Komisi II DPR; pernah duduk di DPR dari Partai Demokrat.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Karawang, 5 Juli 1968"
+    },
+    {
+      "label": "Partai",
+      "value": "NasDem (sejak 2016); sebelumnya Demokrat"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Ketua DPR",
+      "org": "Bidang Industri dan Pembangunan",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Wakil Ketua Komisi II DPR",
+      "org": "",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "NasDem, Dapil Jawa Barat VII",
+      "period": "2019 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Demokrat, Dapil Jawa Barat VII",
+      "period": "2009 – 2015"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Fisika, IKIP Bandung (kini Universitas Pendidikan Indonesia)"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Saan_Mustopa"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

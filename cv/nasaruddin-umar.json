@@ -1,0 +1,61 @@
+{
+  "bio": "Menteri Agama sejak Oktober 2024 dan Imam Besar Masjid Istiqlal sejak 2016. Sebelumnya Wakil Menteri Agama dan Rektor Universitas PTIQ Jakarta.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Bone, 23 Juni 1959"
+    },
+    {
+      "label": "Partai",
+      "value": "Tidak berpartai"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Agama",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Imam Besar",
+      "org": "Masjid Istiqlal",
+      "period": "2016 – kini"
+    },
+    {
+      "role": "Wakil Menteri Agama",
+      "org": "",
+      "period": "2011 – 2014"
+    },
+    {
+      "role": "Direktur Jenderal Bimbingan Masyarakat Islam",
+      "org": "Kementerian Agama",
+      "period": "2006 – 2011"
+    },
+    {
+      "role": "Rektor",
+      "org": "Universitas PTIQ Jakarta",
+      "period": "2005 – kini"
+    }
+  ],
+  "education": [
+    {
+      "year": "1998",
+      "detail": "Doktor, IAIN (kini UIN) Syarif Hidayatullah Jakarta"
+    },
+    {
+      "year": "1992",
+      "detail": "Magister, IAIN (kini UIN) Syarif Hidayatullah Jakarta"
+    },
+    {
+      "year": "1984",
+      "detail": "Sarjana, IAIN Ujung Pandang"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Nasaruddin_Umar"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

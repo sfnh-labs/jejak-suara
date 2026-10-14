@@ -1,0 +1,55 @@
+{
+  "bio": "Menteri Energi dan Sumber Daya Mineral sejak 2024 dan Ketua Umum Partai Golkar. Sebelumnya Menteri Investasi/Kepala BKPM dan Ketua Umum HIPMI.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Banda, Maluku Tengah, 7 Agustus 1976"
+    },
+    {
+      "label": "Partai",
+      "value": "Golkar (Ketua Umum sejak 2024)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Energi dan Sumber Daya Mineral",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Partai Golkar",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Menteri Investasi",
+      "org": "",
+      "period": "2021 – 2024"
+    },
+    {
+      "role": "Kepala Badan Koordinasi Penanaman Modal",
+      "org": "",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "HIPMI",
+      "period": "2015 – 2019"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister Sains Ekonomi, Universitas Cenderawasih"
+    },
+    {
+      "detail": "Sarjana Ekonomi, STIE Port Numbay"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Bahlil_Lahadalia"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

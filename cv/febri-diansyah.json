@@ -1,0 +1,43 @@
+{
+  "bio": "Advokat dan pendiri Visi Law Office. Sebelumnya Kepala Biro Hubungan Masyarakat sekaligus juru bicara KPK, dan peneliti hukum di Indonesia Corruption Watch.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Padang, 8 Februari 1983"
+    },
+    {
+      "label": "Pekerjaan kini",
+      "value": "Advokat"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Pendiri dan advokat",
+      "org": "Visi Law Office",
+      "period": "kini"
+    },
+    {
+      "role": "Kepala Biro Hubungan Masyarakat (Juru Bicara)",
+      "org": "Komisi Pemberantasan Korupsi",
+      "period": "s.d. 2020"
+    },
+    {
+      "role": "Peneliti hukum",
+      "org": "Indonesia Corruption Watch",
+      "period": "sejak 2007"
+    }
+  ],
+  "education": [
+    {
+      "year": "2007",
+      "detail": "Sarjana Hukum, Universitas Gadjah Mada"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Febri_Diansyah"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

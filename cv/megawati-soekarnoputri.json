@@ -1,0 +1,59 @@
+{
+  "bio": "Ketua Umum PDI Perjuangan sejak 1999 dan Presiden Indonesia ke-5 (2001–2004). Putri Presiden pertama Soekarno; kini Ketua Dewan Pengarah BPIP.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Diah Permata Megawati Setiawati Soekarnoputri"
+    },
+    {
+      "label": "Lahir",
+      "value": "Yogyakarta, 23 Januari 1947"
+    },
+    {
+      "label": "Partai",
+      "value": "PDI Perjuangan"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Ketua Dewan Pengarah",
+      "org": "Badan Pembinaan Ideologi Pancasila",
+      "period": "kini"
+    },
+    {
+      "role": "Presiden Indonesia ke-5",
+      "org": "",
+      "period": "2001 – 2004"
+    },
+    {
+      "role": "Wakil Presiden Indonesia",
+      "org": "",
+      "period": "1999 – 2001"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "PDI Perjuangan",
+      "period": "1999 – kini"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Partai Demokrasi Indonesia",
+      "period": "1993 – 1996"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Psikologi, Universitas Indonesia (tidak selesai)"
+    },
+    {
+      "detail": "Pertanian, Universitas Padjadjaran (tidak selesai)"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Megawati_Soekarnoputri"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

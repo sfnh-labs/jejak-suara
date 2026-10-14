@@ -1,0 +1,46 @@
+{
+  "bio": "Wakil Ketua MPR sejak 2024 dan anggota DPR dari PAN sejak 2019. Sebelumnya Sekretaris Jenderal PAN.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Mohammad Eddy Dwiyanto Soeparno"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 6 Mei 1965"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Amanat Nasional (PAN)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Ketua MPR",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Jawa Barat III",
+      "period": "2019 – kini"
+    },
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "PAN",
+      "period": "2015 – 2024"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Sarjana dan magister, Universitas Indonesia"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Eddy_Soeparno"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

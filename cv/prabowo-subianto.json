@@ -1,0 +1,66 @@
+{
+  "bio": "Presiden Indonesia ke-8 sejak Oktober 2024. Pensiunan perwira tinggi TNI Angkatan Darat, pendiri dan Ketua Umum Partai Gerindra, dan Menteri Pertahanan pada 2019–2024.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Prabowo Subianto Djojohadikusumo"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 17 Oktober 1951"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra (sejak 2008); sebelumnya Golkar"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Presiden Indonesia ke-8",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Menteri Pertahanan",
+      "org": "Kabinet Indonesia Maju",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Partai Gerindra",
+      "period": "2014 – kini"
+    },
+    {
+      "role": "Ketua Dewan Pembina",
+      "org": "Partai Gerindra",
+      "period": "2008 – kini"
+    },
+    {
+      "role": "Panglima Kostrad",
+      "org": "TNI Angkatan Darat",
+      "period": "Mar – Mei 1998"
+    },
+    {
+      "role": "Komandan Jenderal Kopassus",
+      "org": "TNI Angkatan Darat",
+      "period": "1995 – 1998"
+    }
+  ],
+  "education": [
+    {
+      "year": "1985",
+      "detail": "Kursus Perwira Infanteri Tingkat Lanjut, Fort Bragg, Amerika Serikat"
+    },
+    {
+      "year": "1974",
+      "detail": "Akademi ABRI (kini Akademi Militer), Magelang"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Prabowo_Subianto"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

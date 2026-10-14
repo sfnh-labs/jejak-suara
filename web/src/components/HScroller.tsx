@@ -49,7 +49,19 @@ export default function HScroller({ children, label }: { children: React.ReactNo
         ref={row}
         role="group"
         aria-label={label}
-        style={{ display: "flex", gap: 18, overflowX: "auto", padding: "4px 0 8px", marginTop: -4, scrollbarWidth: "none" }}
+        className="hscroller-row"
+        style={{
+          display: "flex",
+          gap: 18,
+          overflowX: "auto",
+          padding: "4px 0 8px",
+          marginTop: -4,
+          scrollbarWidth: "none",
+          // Each edge fades out only while there is more past it, so the
+          // first and last items sit crisp once the row reaches its end.
+          ["--fade-l" as string]: canPrev ? "56px" : "0px",
+          ["--fade-r" as string]: canNext ? "56px" : "0px",
+        }}
       >
         {children}
       </div>

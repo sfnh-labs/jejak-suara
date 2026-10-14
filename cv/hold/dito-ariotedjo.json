@@ -1,0 +1,42 @@
+{
+  "bio": "Menteri Pemuda dan Olahraga 2023–2025. Politikus Golkar; sebelumnya Ketua Umum Angkatan Muda Pembaharuan Indonesia.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Ario Bimo Nandito Ariotedjo"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 25 September 1990"
+    },
+    {
+      "label": "Partai",
+      "value": "Golkar"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Pemuda dan Olahraga",
+      "org": "",
+      "period": "2023 – 2025"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Angkatan Muda Pembaharuan Indonesia (AMPI)",
+      "period": "2016 – 2022"
+    }
+  ],
+  "education": [
+    {
+      "year": "2012",
+      "detail": "Sarjana Hukum, Universitas Indonesia"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Dito_Ariotedjo"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -1,0 +1,49 @@
+{
+  "bio": "Perdana Menteri India sejak 2014 dari Partai Bharatiya Janata. Sebelumnya Menteri Utama Gujarat selama hampir 13 tahun.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Narendra Damodardas Modi"
+    },
+    {
+      "label": "Lahir",
+      "value": "Vadnagar, Gujarat, 17 September 1950"
+    },
+    {
+      "label": "Partai",
+      "value": "Bharatiya Janata Party"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Perdana Menteri India",
+      "org": "",
+      "period": "2014 – kini"
+    },
+    {
+      "role": "Anggota Lok Sabha",
+      "org": "Varanasi",
+      "period": "2014 – kini"
+    },
+    {
+      "role": "Menteri Utama Gujarat",
+      "org": "",
+      "period": "2001 – 2014"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister Ilmu Politik, Gujarat University"
+    },
+    {
+      "detail": "Sarjana Ilmu Politik (jarak jauh), University of Delhi"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Narendra_Modi"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -1,0 +1,56 @@
+{
+  "bio": "Gubernur Banten sejak Februari 2025 dan Ketua DPD Partai Gerindra Banten. Sebelumnya Ketua DPRD Provinsi Banten.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Payakumbuh, 12 Agustus 1976"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra (sejak 2013)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Gubernur Banten",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Ketua DPD",
+      "org": "Partai Gerindra Banten",
+      "period": "2023 – kini"
+    },
+    {
+      "role": "Ketua DPRD Provinsi Banten",
+      "org": "",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Anggota DPRD Provinsi Banten",
+      "org": "",
+      "period": "2014 – 2019"
+    }
+  ],
+  "education": [
+    {
+      "year": "2023",
+      "detail": "Magister Administrasi Publik, Universitas Sultan Ageng Tirtayasa"
+    },
+    {
+      "year": "2021",
+      "detail": "Sarjana Manajemen, STIE Banten"
+    },
+    {
+      "year": "2001",
+      "detail": "Diploma III, STIE Bakti Pembangunan, Jakarta"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Andra_Soni"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

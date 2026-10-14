@@ -1,0 +1,43 @@
+{
+  "bio": "Menteri Sekretaris Negara sejak Oktober 2024 dan Juru Bicara Presiden sejak 2025. Politikus Gerindra; sebelumnya anggota DPR.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Ngawi, 28 Oktober 1979"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Juru Bicara Presiden",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Menteri Sekretaris Negara",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Jawa Tengah VI",
+      "period": "2020 – 2024"
+    }
+  ],
+  "education": [
+    {
+      "year": "2006",
+      "detail": "Sarjana Konservasi Sumber Daya Hutan, Universitas Gadjah Mada"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Prasetyo_Hadi"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

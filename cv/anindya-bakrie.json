@@ -1,0 +1,57 @@
+{
+  "bio": "Ketua Umum Kamar Dagang dan Industri Indonesia (Kadin) periode 2024–2029. Pengusaha dari Kelompok Bakrie; sebelumnya Presiden Direktur Bakrie Telecom.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Anindya Novyan Bakrie"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 10 November 1974"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Ketua Umum",
+      "org": "Kamar Dagang dan Industri Indonesia",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Ketua",
+      "org": "ASEAN Business Advisory Council Indonesia",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Ketua Dewan Pembina",
+      "org": "Kadin Indonesia",
+      "period": "2021 – 2024"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Akuatik Indonesia",
+      "period": "2016 – kini"
+    },
+    {
+      "role": "Presiden Direktur",
+      "org": "PT Bakrie Telecom Tbk",
+      "period": "2003 – 2012"
+    }
+  ],
+  "education": [
+    {
+      "year": "2001",
+      "detail": "MBA, Stanford Graduate School of Business"
+    },
+    {
+      "year": "1996",
+      "detail": "Sarjana Teknik Industri, Northwestern University"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Anindya_Bakrie"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -1,0 +1,57 @@
+{
+  "bio": "Presiden Republik Rakyat Tiongkok sejak 2013 serta Sekretaris Jenderal Partai Komunis Tiongkok dan Ketua Komisi Militer Pusat sejak 2012.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Beijing, 15 Juni 1953"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Komunis Tiongkok (sejak 1974)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Presiden Republik Rakyat Tiongkok",
+      "org": "",
+      "period": "2013 – kini"
+    },
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "Partai Komunis Tiongkok",
+      "period": "2012 – kini"
+    },
+    {
+      "role": "Ketua Komisi Militer Pusat",
+      "org": "",
+      "period": "2012 – kini"
+    },
+    {
+      "role": "Wakil Presiden Republik Rakyat Tiongkok",
+      "org": "",
+      "period": "2008 – 2013"
+    },
+    {
+      "role": "Sekretaris Partai Provinsi Zhejiang",
+      "org": "",
+      "period": "2002 – 2007"
+    }
+  ],
+  "education": [
+    {
+      "year": "2002",
+      "detail": "Doktor Hukum (teori Marxis), Universitas Tsinghua"
+    },
+    {
+      "year": "1979",
+      "detail": "Sarjana Teknik Kimia, Universitas Tsinghua"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Xi_Jinping"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -1,0 +1,41 @@
+{
+  "bio": "Wakil Presiden Indonesia sejak Oktober 2024. Sebelumnya Wali Kota Surakarta; putra Presiden ke-7 Joko Widodo.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Surakarta, 1 Oktober 1987"
+    },
+    {
+      "label": "Partai",
+      "value": "Tidak berpartai (sejak 2024); sebelumnya PDI Perjuangan"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Presiden Indonesia ke-14",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Wali Kota Surakarta",
+      "org": "",
+      "period": "2021 – 2024"
+    }
+  ],
+  "education": [
+    {
+      "detail": "B.Sc. Marketing, University of Bradford (melalui MDIS Singapura)"
+    },
+    {
+      "year": "2010",
+      "detail": "Diploma, Management Development Institute of Singapore"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Gibran_Rakabuming_Raka"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

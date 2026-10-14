@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import Nav from "@/components/Nav";
 import SourceList from "@/components/SourceList";
 import { Quote } from "@/components/RecordCard";
+import ActorText from "@/components/ActorText";
 import SentimentTrack from "@/components/SentimentTrack";
 import SummaryList, { withoutTitleRepeats } from "@/components/SummaryList";
 import {
@@ -20,6 +21,8 @@ import {
   percent,
   sentimentColor,
   sentimentLabel,
+  figureDisplayScore,
+  firstName,
   toDisplayScore,
 } from "@/lib/design";
 import type { PublicComment } from "@/lib/types";
@@ -36,7 +39,7 @@ const SIGNAL_LABELS: Record<string, string> = {
 
 const STANCE_STYLE: Record<string, { color: string; bg: string; border: string; label: string }> = {
   positive: { color: "#2e7a52", bg: "#e6efe8", border: "#b6d0bd", label: "Positif" },
-  neutral: { color: "#7a6a45", bg: "#efe9dc", border: "#ddd3bf", label: "Netral" },
+  neutral: { color: "#7a6a45", bg: "var(--color-cream-dark)", border: "var(--color-parchment-light)", label: "Netral" },
   negative: { color: "#c0392b", bg: "#f5e7e3", border: "#d8a99f", label: "Negatif" },
 };
 
@@ -60,9 +63,10 @@ export default async function DetailCatatan({
   ]);
 
   const display = toDisplayScore(record.sentiment_score);
+  const figureDisplay = figureDisplayScore(record.figure_stance);
   const { positive, neutral, negative, total } = record.stance;
   const sources = record.sources ?? [];
-  const { title, summary } = withoutTitleRepeats(record.title, record.summary);
+  const { title, summary } = withoutTitleRepeats(record.title, record.summary, record.figure_name);
   const signals = (buzzer?.signals_triggered ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -73,7 +77,7 @@ export default async function DetailCatatan({
       <Nav />
       <div className="container-page" style={{ maxWidth: 820 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 16, padding: "24px 0 0", flexWrap: "wrap" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "#8b2e1f" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--color-clay)" }}>
             {record.event_type ? `${record.event_type} · ` : ""}
             {formatDateShort(record.event_date)}
           </div>
@@ -100,11 +104,11 @@ export default async function DetailCatatan({
             letterSpacing: "-0.01em",
           }}
         >
-          {title || "Tanpa judul"}
+          <ActorText text={title || "Tanpa judul"} exclude={record.figure_id} />
         </h1>
-        <p style={{ fontSize: 13, color: "#7a7264", margin: "0 0 26px" }}>
+        <p style={{ fontSize: 13, color: "var(--color-stone)", margin: "0 0 26px" }}>
           {formatDate(record.event_date)} · tentang{" "}
-          <Link href={`/tokoh/${id}`} className="link-subtle" style={{ color: "#16130f", fontWeight: 600 }}>
+          <Link href={`/tokoh/${id}`} className="link-subtle" style={{ color: "var(--color-ink)", fontWeight: 600 }}>
             {record.figure_name}
           </Link>
         </p>
@@ -128,22 +132,38 @@ export default async function DetailCatatan({
 
         {display !== null ? (
           <section className="rule-heavy" style={{ paddingBottom: 22, marginBottom: 26 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-              <div style={{ fontFamily: "var(--font-serif)", fontSize: 34, color: sentimentColor(display), lineHeight: 1 }}>
-                {display > 0 ? "+" : ""}{display}
-              </div>
-              <div style={{ flex: "1 1 240px", minWidth: 200 }}>
-                <SentimentTrack display={display} />
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 18, marginTop: 10, fontSize: 12, color: "#7a7264", flexWrap: "wrap" }}>
-              <span>{percent(positive, total)}% positif</span>
-              <span>{percent(neutral, total)}% netral</span>
-              <span>{percent(negative, total)}% negatif</span>
-              <span style={{ marginLeft: "auto", color: "#9b9285" }}>
-                {formatCount(record.sentiment_sample_size ?? total)} komentar · {sentimentLabel(display)}
-              </span>
-            </div>
+            {/* Two different questions. The first row counts only comments
+                that name the figure; the second is every comment under the
+                videos, most of which are about the event and the other people
+                in it. See jejak/figure_stance.py. */}
+            {figureDisplay !== null ? (
+              <SentimentRow
+                label={`Terhadap ${record.figure_name}`}
+                display={figureDisplay}
+                counts={record.figure_stance}
+                countNote={`${formatCount(record.figure_stance.total)} komentar menyebut namanya`}
+              />
+            ) : (
+              <p style={{ fontSize: 12.5, color: "var(--color-stone)", margin: "0 0 4px", lineHeight: 1.5 }}>
+                <strong style={{ color: "var(--color-ink)" }}>Terhadap {record.figure_name}:</strong>{" "}
+                {record.figure_stance.total === 0
+                  ? "belum ada komentar yang menyebut namanya."
+                  : `hanya ${record.figure_stance.total} komentar menyebut namanya — terlalu sedikit untuk dinilai.`}
+              </p>
+            )}
+            <div style={{ height: 22 }} />
+            <SentimentRow
+              label="Semua komentar"
+              display={display}
+              counts={{ positive, neutral, negative, total }}
+              countNote={`${formatCount(record.sentiment_sample_size ?? total)} komentar`}
+              muted
+            />
+            <p style={{ fontSize: 11.5, color: "var(--color-stone-light)", margin: "12px 0 0", lineHeight: 1.5 }}>
+              Komentar YouTube di bawah video berita peristiwa ini. Sikap terhadap {firstName(record.figure_name)} hanya
+              dihitung dari komentar yang menyebut namanya; &ldquo;Semua komentar&rdquo; juga mencakup reaksi terhadap
+              peristiwa dan tokoh lain di dalamnya.
+            </p>
           </section>
         ) : null}
 
@@ -155,12 +175,12 @@ export default async function DetailCatatan({
           <h2 style={{ fontFamily: "var(--font-serif)", fontSize: 19, fontWeight: 600, margin: "0 0 12px" }}>Ringkasan</h2>
         ) : null}
         {summary ? (
-          <SummaryList summary={summary} sources={sources} size={15.5} />
+          <SummaryList summary={summary} sources={sources} size={15.5} figureId={record.figure_id} />
         ) : record.summary ? null : (
           // A record is published as soon as it clusters, so it can arrive here
           // before the summarize stage has run. Say so rather than showing a
           // blank section — the source articles below still carry the story.
-          <div style={{ fontSize: 14.5, lineHeight: 1.7, color: "#7a7264", fontStyle: "italic" }}>
+          <div style={{ fontSize: 14.5, lineHeight: 1.7, color: "var(--color-stone)", fontStyle: "italic" }}>
             Ringkasan belum tersedia. Baca artikel sumber di bawah.
           </div>
         )}
@@ -171,7 +191,7 @@ export default async function DetailCatatan({
 
         {buzzer && buzzer.anomaly_pct ? (
           <details style={{ background: "#f5e7e3", border: "1px solid #d8a99f", padding: "12px 16px", marginBottom: 34 }}>
-            <summary style={{ fontSize: 12.5, fontWeight: 700, color: "#8b2e1f", cursor: "pointer" }}>
+            <summary style={{ fontSize: 12.5, fontWeight: 700, color: "var(--color-clay)", cursor: "pointer" }}>
               ⚠ {Math.round(buzzer.anomaly_pct)}% komentar menunjukkan pola terkoordinasi
             </summary>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
@@ -181,8 +201,8 @@ export default async function DetailCatatan({
                   style={{
                     fontSize: 11,
                     fontWeight: 600,
-                    color: "#8b2e1f",
-                    background: "#f6f2e9",
+                    color: "var(--color-clay)",
+                    background: "var(--color-cream)",
                     border: "1px solid #d8a99f",
                     // Square-cornered: rounded pills on this site are links.
                     borderRadius: 2,
@@ -210,12 +230,12 @@ export default async function DetailCatatan({
         <h2 className="section-label rule-heavy" style={{ padding: "0 0 10px", margin: "0 0 8px" }}>
           Komentar Publik
         </h2>
-        <p style={{ fontSize: 12.5, color: "#7a7264", margin: "0 0 20px", lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12.5, color: "var(--color-stone)", margin: "0 0 20px", lineHeight: 1.6 }}>
           Reaksi publik di satu platform, apa adanya. Bukan penilaian benar atau
           salah, dan rentan dibanjiri kampanye terkoordinasi.
         </p>
         {comments.length === 0 ? (
-          <p style={{ fontSize: 14, color: "#7a7264" }}>Belum ada komentar yang terkumpul untuk catatan ini.</p>
+          <p style={{ fontSize: 14, color: "var(--color-stone)" }}>Belum ada komentar yang terkumpul untuk catatan ini.</p>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {comments.map((c) => (
@@ -239,7 +259,7 @@ function NeighbourLink({ href, label, muted }: { href: string | null; label: str
   if (!href) {
     // Square and faded, so it does not read as a link that failed to work.
     return (
-      <span style={{ ...style, color: "#bcb3a0", border: "1px solid #e4dcc9", borderRadius: 2 }} aria-disabled>
+      <span style={{ ...style, color: "var(--color-parchment-dark)", border: "1px solid #e4dcc9", borderRadius: 2 }} aria-disabled>
         {label}
       </span>
     );
@@ -277,8 +297,8 @@ function Comment({ comment }: { comment: PublicComment }) {
           width: 38,
           height: 38,
           borderRadius: "50%",
-          background: "#efe9dc",
-          border: "1px solid #ddd3bf",
+          background: "var(--color-cream-dark)",
+          border: "1px solid var(--color-parchment-light)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -295,7 +315,7 @@ function Comment({ comment }: { comment: PublicComment }) {
           <span style={{ fontSize: 13, fontWeight: 600 }}>
             {name}
             {comment.channel ? (
-              <span style={{ fontWeight: 400, color: "#9b9285" }}> di {comment.channel}</span>
+              <span style={{ fontWeight: 400, color: "var(--color-stone-light)" }}> di {comment.channel}</span>
             ) : null}
           </span>
           <span
@@ -311,13 +331,51 @@ function Comment({ comment }: { comment: PublicComment }) {
           >
             {stance.label}
           </span>
-          <span style={{ fontSize: 11.5, color: "#9b9285" }}>{formatDateShort(comment.published_at)}</span>
+          <span style={{ fontSize: 11.5, color: "var(--color-stone-light)" }}>{formatDateShort(comment.published_at)}</span>
         </div>
-        <p style={{ fontSize: 14, lineHeight: 1.6, color: "#3e382f", margin: "6px 0 0" }}>{comment.text}</p>
+        <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--color-body)", margin: "6px 0 0" }}>{comment.text}</p>
         {comment.like_count ? (
-          <div style={{ fontSize: 11.5, color: "#9b9285", marginTop: 6 }}>♥ {formatCount(comment.like_count)}</div>
+          <div style={{ fontSize: 11.5, color: "var(--color-stone-light)", marginTop: 6 }}>♥ {formatCount(comment.like_count)}</div>
         ) : null}
       </div>
     </li>
+  );
+}
+
+function SentimentRow({
+  label,
+  display,
+  counts,
+  countNote,
+  muted = false,
+}: {
+  label: string;
+  display: number;
+  counts: { positive: number; neutral: number; negative: number; total: number };
+  countNote: string;
+  /** The secondary row: smaller number, same track. */
+  muted?: boolean;
+}) {
+  const { positive, neutral, negative, total } = counts;
+  return (
+    <div>
+      <div className="section-label" style={{ marginBottom: 8 }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ fontFamily: "var(--font-serif)", fontSize: muted ? 24 : 34, color: sentimentColor(display), lineHeight: 1, minWidth: 64 }}>
+          {display > 0 ? "+" : ""}{display}
+        </div>
+        <div style={{ flex: "1 1 240px", minWidth: 200 }}>
+          <SentimentTrack display={display} height={muted ? 6 : 8} thumb={muted ? 20 : 26} />
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 18, marginTop: 10, fontSize: 12, color: "var(--color-stone)", flexWrap: "wrap" }}>
+        <span>{percent(positive, total)}% positif</span>
+        <span>{percent(neutral, total)}% netral</span>
+        <span>{percent(negative, total)}% negatif</span>
+        <span style={{ marginLeft: "auto", color: "var(--color-stone-light)" }}>
+          {countNote} · {sentimentLabel(display)}
+        </span>
+      </div>
+    </div>
   );
 }

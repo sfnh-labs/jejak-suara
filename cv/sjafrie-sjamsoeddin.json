@@ -1,0 +1,59 @@
+{
+  "bio": "Menteri Pertahanan sejak Oktober 2024. Purnawirawan jenderal TNI Angkatan Darat; sebelumnya Wakil Menteri dan Sekretaris Jenderal Kementerian Pertahanan.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Makassar, 30 Oktober 1952"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Pertahanan",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Wakil Menteri Pertahanan",
+      "org": "",
+      "period": "2010 – 2014"
+    },
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "Kementerian Pertahanan",
+      "period": "2005 – 2010"
+    },
+    {
+      "role": "Kepala Pusat Penerangan TNI",
+      "org": "",
+      "period": "2002 – 2005"
+    },
+    {
+      "role": "Panglima Kodam Jaya",
+      "org": "",
+      "period": "1997 – 1998"
+    }
+  ],
+  "education": [
+    {
+      "year": "1974",
+      "detail": "AKABRI"
+    },
+    {
+      "detail": "Doktor, Universitas Pertahanan"
+    },
+    {
+      "detail": "Magister Manajemen, Institut Manajemen Bisnis Indonesia"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Sjafrie_Sjamsoeddin"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

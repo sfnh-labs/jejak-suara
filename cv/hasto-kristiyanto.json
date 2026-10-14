@@ -1,0 +1,46 @@
+{
+  "bio": "Sekretaris Jenderal PDI Perjuangan sejak 2014. Sebelumnya anggota DPR periode 2004–2009.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Yogyakarta, 7 Juli 1966"
+    },
+    {
+      "label": "Partai",
+      "value": "PDI Perjuangan"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "PDI Perjuangan",
+      "period": "2014 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Jawa Timur VII",
+      "period": "2004 – 2009"
+    }
+  ],
+  "education": [
+    {
+      "year": "2022",
+      "detail": "Doktor Ilmu Pertahanan, Universitas Pertahanan"
+    },
+    {
+      "year": "2000",
+      "detail": "Magister Manajemen, Prasetiya Mulya Business School"
+    },
+    {
+      "year": "1991",
+      "detail": "Sarjana Teknik Kimia, Universitas Gadjah Mada"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Hasto_Kristiyanto"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

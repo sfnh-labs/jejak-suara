@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Newsreader, Public_Sans } from "next/font/google";
 import "./globals.css";
 
@@ -22,6 +22,11 @@ const publicSans = Public_Sans({
 export const metadata: Metadata = {
   title: "Jejak Suara",
   description: "Portal rekam jejak tokoh publik, dirangkum dari pemberitaan bersumber.",
+};
+
+// The browser chrome takes the brand red (Logo sheet).
+export const viewport: Viewport = {
+  themeColor: "#8B2E1F",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

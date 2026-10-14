@@ -1,0 +1,47 @@
+{
+  "bio": "Perdana Menteri Thailand sejak September 2025 dan pemimpin Partai Bhumjaithai sejak 2012. Sebelumnya Wakil Perdana Menteri dan Menteri Kesehatan Masyarakat.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Bangkok, 13 September 1966"
+    },
+    {
+      "label": "Partai",
+      "value": "Bhumjaithai"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Perdana Menteri Thailand",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Wakil Perdana Menteri Thailand",
+      "org": "",
+      "period": "2019 – 2025"
+    },
+    {
+      "role": "Menteri Kesehatan Masyarakat",
+      "org": "",
+      "period": "2019 – 2023"
+    },
+    {
+      "role": "Pemimpin",
+      "org": "Partai Bhumjaithai",
+      "period": "2012 – kini"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Hofstra University, New York"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Anutin_Charnvirakul"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

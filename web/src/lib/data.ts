@@ -21,7 +21,7 @@ import type {
  * IS DISTINCT FROM, not `<>`: a plain inequality is NULL for the untouched
  * rows, which is every event nobody has curated yet, and would hide the site.
  */
-const LIVE = (alias: string) =>
+export const LIVE = (alias: string) =>
   `${alias}.status IN ('new', 'summarized', 'approved')
    AND ${alias}.curated IS DISTINCT FROM 'rejected'`;
 
@@ -77,7 +77,13 @@ const RECORD_SELECT = `
            'neutral',  COALESCE(d.neutral, 0),
            'negative', COALESCE(d.negative, 0),
            'total',    COALESCE(d.total, 0)
-         )                            AS stance
+         )                            AS stance,
+         json_build_object(
+           'positive', COALESCE(d.fig_positive, 0),
+           'neutral',  COALESCE(d.fig_neutral, 0),
+           'negative', COALESCE(d.fig_negative, 0),
+           'total',    COALESCE(d.fig_total, 0)
+         )                            AS figure_stance
     FROM events e
     LEFT JOIN event_summaries es ON es.event_id = e.id
     LEFT JOIN figures f ON f.id = e.figure_id
@@ -98,7 +104,12 @@ const RECORD_SELECT = `
       SELECT count(*) FILTER (WHERE c.stance = 'positive') AS positive,
              count(*) FILTER (WHERE c.stance = 'neutral')  AS neutral,
              count(*) FILTER (WHERE c.stance = 'negative') AS negative,
-             count(*)                                      AS total
+             count(*)                                      AS total,
+             -- Only comments that name the figure: see jejak/figure_stance.py.
+             count(*) FILTER (WHERE c.figure_stance = 'positive') AS fig_positive,
+             count(*) FILTER (WHERE c.figure_stance = 'neutral')  AS fig_neutral,
+             count(*) FILTER (WHERE c.figure_stance = 'negative') AS fig_negative,
+             count(c.figure_stance)                               AS fig_total
         FROM comments c
        WHERE c.event_id = e.id
     ) d ON TRUE
@@ -228,7 +239,7 @@ export async function getEventNeighbours(
  * enough outlets corroborate it, which happens during clustering — the
  * summarize stage runs separately and may not have reached it yet.
  */
-export async function getPeristiwa(limit = 60): Promise<Peristiwa[]> {
+export async function getPeristiwa(limit = 60, ids?: number[]): Promise<Peristiwa[]> {
   const rows = await query<Peristiwa>(
     `SELECT e.id AS event_id,
             e.event_date, e.last_seen, e.title, e.event_type, e.scope, e.impact,
@@ -267,9 +278,10 @@ export async function getPeristiwa(limit = 60): Promise<Peristiwa[]> {
        ) rel ON TRUE
       WHERE e.kind = 'peristiwa'
         AND ${LIVE("e")}
+        AND ($2::int[] IS NULL OR e.id = ANY($2::int[]))
       ORDER BY ${FEED_ORDER} DESC
       LIMIT $1`,
-    [limit]
+    [limit, ids ?? null]
   );
   return rows.map((r) => ({ ...r, image: peristiwaImage(r.event_id) }));
 }
@@ -291,6 +303,24 @@ export async function getRecordPeristiwa(
         AND e.kind = 'peristiwa' AND ${LIVE("e")}
       ORDER BY e.event_date`,
     [recordId]
+  );
+}
+
+/**
+ * Every published peristiwa, newest first, with only what topicOf() reads.
+ * The Linimasa classifies these to count and filter by topic, then loads the
+ * full cards for just the page it shows.
+ */
+export async function getPeristiwaIndex(): Promise<
+  { event_id: number; title: string | null; summary: string | null; event_type: string | null }[]
+> {
+  return query(
+    `SELECT e.id AS event_id, e.title, e.event_type, es.summary_text AS summary
+       FROM events e
+       LEFT JOIN event_summaries es ON es.event_id = e.id
+      WHERE e.kind = 'peristiwa'
+        AND ${LIVE("e")}
+      ORDER BY ${FEED_ORDER} DESC`
   );
 }
 

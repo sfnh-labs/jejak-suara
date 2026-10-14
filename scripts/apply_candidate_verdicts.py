@@ -8,9 +8,12 @@ so the same decision is never carried out twice.
     python scripts/apply_candidate_verdicts.py            # show what would happen
     python scripts/apply_candidate_verdicts.py --apply
 
-A 'promote' becomes a tracked figure named as the curator typed it, carrying
-every spelling they listed as an alias — attribution matches on aliases, so a
-person written three ways still lands on one page. A 'reject' marks the
+A 'promote' becomes a tracked figure exactly as the curator filled the form:
+their full name, office, aliases and page address, and nothing else. The form
+pre-fills the mined spelling and the office the coverage stated, where the
+curator can see and change them; nothing is added behind their back. (It used
+to be: the mined spelling always became an alias and the page address, so
+accepting "Hafidz" as Habib Umar made /tokoh/hafidz match every Hafidz.) A 'reject' marks the
 candidate so discovery stops offering it.
 
 Promoting only adds figures; it does not hand them any history. To do that,
@@ -33,7 +36,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jejak.mentions import stated_role  # noqa: E402
+from jejak.mentions import slugify  # noqa: E402
 
 DB_PATH = ROOT / "jejak.db"
 
@@ -62,29 +65,35 @@ def _connect_pg(url: str):
 
 def _promote(conn: sqlite3.Connection, slug: str, name: str,
              full_name: str | None, aliases_raw: str | None,
-             curated_role: str | None = None) -> str:
+             curated_role: str | None = None,
+             curated_slug: str | None = None,
+             curated_positions: str | None = None) -> str:
     """Create the tracked figure a 'promote' verdict asked for."""
-    if conn.execute("SELECT 1 FROM figures WHERE id = ?", (slug,)).fetchone():
-        return f"already a figure: {slug}"
-
     display = (full_name or "").strip() or name
-    extra = [a.strip() for a in (aliases_raw or "").split("|") if a.strip()]
-    # The candidate's own spelling always stays a match term: it is how the
-    # headlines write them, and attribution reads headlines.
-    alias_list = sorted({name, display, *extra})
+    figure_id = (curated_slug or "").strip() or slugify(display)
+    if conn.execute("SELECT 1 FROM figures WHERE id = ?", (figure_id,)).fetchone():
+        return f"already a figure: {figure_id} (pick another page address for {display})"
 
-    # The curator's wording wins. What the coverage said most often is a
-    # starting point and frequently a fragment — "Menko", "Kepala" — and this
-    # string is printed under the name on the public page.
+    extra = [a.strip() for a in (aliases_raw or "").split("|") if a.strip()]
+    alias_list = sorted({display, *extra})
     role = (curated_role or "").strip()
-    if not role:
-        role = stated_role(conn, slug)
+    # The offices as the curator entered them; the title under the name is
+    # the first one, as everywhere else.
+    try:
+        positions = [p for p in json.loads(curated_positions or "[]")
+                     if isinstance(p, dict) and (p.get("role") or p.get("org"))]
+    except ValueError:
+        positions = []
+    if positions:
+        role = " ".join(x for x in (str(positions[0].get("role", "")).strip(),
+                                    str(positions[0].get("org", "")).strip()) if x)
 
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        """INSERT INTO figures (id, name, role, aliases, active, origin, created_at)
-           VALUES (?, ?, ?, ?, 1, 'discovered', ?)""",
-        (slug, display, role, json.dumps(alias_list, ensure_ascii=False), now),
+        """INSERT INTO figures (id, name, role, aliases, positions, active, origin, created_at)
+           VALUES (?, ?, ?, ?, ?, 1, 'discovered', ?)""",
+        (figure_id, display, role, json.dumps(alias_list, ensure_ascii=False),
+         json.dumps(positions, ensure_ascii=False) if positions else None, now),
     )
     # Every other candidate carrying one of these names is the same person and
     # would otherwise queue again on the next sync.
@@ -101,7 +110,7 @@ def _promote(conn: sqlite3.Connection, slug: str, name: str,
     )
     note = f" ({role})" if role else ""
     fold = f", {folded} duplicate/s folded" if folded else ""
-    return f"promoted {slug} -> {display}{note}{fold}"
+    return f"promoted {slug} -> {figure_id}: {display}{note}{fold}"
 
 
 def _reject(conn: sqlite3.Connection, slug: str) -> str:
@@ -125,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     pg = _connect_pg(_load_database_url())
     with pg.cursor() as cur:
         cur.execute(
-            """SELECT slug, name, verdict, full_name, aliases, curated_role, notes
+            """SELECT slug, name, verdict, full_name, aliases, curated_role, curated_slug,
+                      curated_positions, notes
                  FROM figure_candidates
                 WHERE verdict IS NOT NULL AND applied_at IS NULL
                 ORDER BY verdict, outlets DESC"""
@@ -141,9 +151,11 @@ def main(argv: list[str] | None = None) -> int:
     conn.row_factory = sqlite3.Row
     done: list[str] = []
     try:
-        for slug, name, verdict, full_name, aliases, curated_role, notes in pending:
+        for (slug, name, verdict, full_name, aliases, curated_role, curated_slug,
+             curated_positions, notes) in pending:
             if verdict == "promote":
-                line = _promote(conn, slug, name, full_name, aliases, curated_role)
+                line = _promote(conn, slug, name, full_name, aliases, curated_role,
+                                curated_slug, curated_positions)
             else:
                 line = _reject(conn, slug)
             print(("apply " if args.apply else "would ") + line)

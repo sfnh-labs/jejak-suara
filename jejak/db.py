@@ -149,6 +149,8 @@ CREATE TABLE IF NOT EXISTS comments (
     like_count   INTEGER DEFAULT 0,
     published_at TEXT,
     stance       TEXT,                     -- negative|neutral|positive (from classification)
+    mentions_figure INTEGER,               -- 1 if the text names the event's figure; NULL = not checked
+    figure_stance TEXT,                    -- stance toward the figure, only where mentions_figure = 1
     collected_at TEXT NOT NULL,
     FOREIGN KEY (event_id) REFERENCES events(id)
 );
@@ -178,7 +180,19 @@ CREATE TABLE IF NOT EXISTS figures (
     aliases    TEXT,                       -- JSON array
     active     INTEGER NOT NULL DEFAULT 1,
     origin     TEXT NOT NULL DEFAULT 'config',
-    created_at TEXT
+    created_at TEXT,
+    -- The figure's CV. One entity with the roster row: `positions` is both the
+    -- CV's career list and the source of `role` (the first entry), so an
+    -- office is never recorded twice. Seeded from cv/<id>.json by
+    -- scripts/import_cv.py; edited in /kurasi, after which cv_curated = 1 and
+    -- the seed no longer overwrites it.
+    positions  TEXT,                       -- JSON [{role, org, period}]; role = the first
+    bio        TEXT,
+    facts      TEXT,                       -- JSON [{label, value}]
+    education  TEXT,                       -- JSON [{year?, detail}]
+    sources    TEXT,                       -- JSON [{label, url}]
+    cv_checked_at TEXT,                    -- when the sources were read (ISO date)
+    cv_curated INTEGER NOT NULL DEFAULT 0
 );
 
 -- People discovered in the coverage, before any decision to track them.
@@ -252,6 +266,15 @@ def connect(path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
 
 
 _MIGRATIONS = {
+    "figures": [
+        ("positions", "TEXT"),
+        ("bio", "TEXT"),
+        ("facts", "TEXT"),
+        ("education", "TEXT"),
+        ("sources", "TEXT"),
+        ("cv_checked_at", "TEXT"),
+        ("cv_curated", "INTEGER NOT NULL DEFAULT 0"),
+    ],
     "articles": [
         ("body", "TEXT"),
         ("fetch_status", "TEXT"),
@@ -273,6 +296,8 @@ _MIGRATIONS = {
     "comments": [
         ("comment_id", "TEXT"),
         ("channel", "TEXT"),
+        ("mentions_figure", "INTEGER"),
+        ("figure_stance", "TEXT"),
     ],
 }
 

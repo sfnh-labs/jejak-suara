@@ -1,0 +1,54 @@
+{
+  "bio": "Menteri Komunikasi dan Digital sejak Oktober 2024. Politikus Golkar dan mantan jurnalis; sebelumnya Ketua Komisi I DPR.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Meutya Viada Hafid"
+    },
+    {
+      "label": "Lahir",
+      "value": "Bandung, 3 Mei 1978"
+    },
+    {
+      "label": "Partai",
+      "value": "Golkar (sejak 2010)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Komunikasi dan Digital",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Ketua Komisi I DPR",
+      "org": "",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Wakil Ketua Komisi I DPR",
+      "org": "",
+      "period": "2016 – 2018"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Sumatera Utara I",
+      "period": "2010 – 2024"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister Ilmu Pemerintahan, Universitas Indonesia"
+    },
+    {
+      "detail": "Teknik, University of New South Wales"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Meutya_Hafid"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}
