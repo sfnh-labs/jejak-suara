@@ -96,6 +96,8 @@ def build_payload(scene):
         "scheduler": "Karras",
         "seed": -1,
         "batch_size": 1,
+        "override_settings": {"sd_model_checkpoint": "DreamShaperXL_Turbo_v2_1.safetensors"},
+        "override_settings_restore_afterwards": False,
         "alwayson_scripts": {
             "ADetailer": {
                 "args": [

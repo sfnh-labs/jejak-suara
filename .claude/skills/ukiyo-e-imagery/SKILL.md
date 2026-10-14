@@ -57,19 +57,25 @@ already fights `crowd, many people, multiple people, background characters`.
 WebUI lives at `D:\Tools\stable-diffusion`, must be launched with `--api
 --medvram`, serves on port 7860.
 
-Start it — invoke `webui.bat` by **full absolute path**, a bare `webui.bat`
-after `cd` fails with "not recognized as an internal or external command":
+Start it with **`webui-launch-fixed.bat`**. It sets `--medvram --api ...` and
+calls `webui.bat` by full path. Launching `webui.bat` directly skips the flags
+(the log says `Launching Web UI with arguments:` with nothing after it), the
+server comes up with no `/sdapi/v1/txt2img` route, and generation 404s.
+`webui-user.bat` also fails: its bare `call webui.bat` is "not recognized".
+Redirect output to a log so a stall can be diagnosed:
 
 ```powershell
-Start-Process -FilePath "D:\Tools\stable-diffusion\webui.bat" `
-  -WorkingDirectory "D:\Tools\stable-diffusion" -WindowStyle Hidden
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c","D:\Tools\stable-diffusion\webui-launch-fixed.bat" `
+  -WorkingDirectory "D:\Tools\stable-diffusion" -WindowStyle Hidden `
+  -RedirectStandardOutput "<scratchpad>\webui.log" -RedirectStandardError "<scratchpad>\webui.err.log"
 ```
 
 Boot takes several minutes and routinely appears to stall around the
 `ControlNet v1.1.455` log line. It is not hung. Wait for the API:
 
 ```bash
-until curl -s -m 3 http://127.0.0.1:7860/sdapi/v1/progress >/dev/null 2>&1; do sleep 10; done
+# plain `curl -s` succeeds on a 404 too; wait for the route itself (405 on GET)
+until [ "$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:7860/sdapi/v1/txt2img)" = 405 ]; do sleep 10; done
 ```
 
 **Launch generation detached, never via a backgrounded Bash task.** Harness
