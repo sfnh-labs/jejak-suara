@@ -1,0 +1,47 @@
+{
+  "bio": "Menteri Luar Negeri Amerika Serikat sejak Januari 2025 di bawah Presiden Donald Trump, sekaligus penjabat Penasihat Keamanan Nasional sejak Mei 2025. Politikus Partai Republik yang sebelumnya Senator dari Florida.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Marco Antonio Rubio"
+    },
+    {
+      "label": "Lahir",
+      "value": "Miami, Florida, 28 Mei 1971"
+    },
+    {
+      "label": "Partai",
+      "value": "Republik"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Luar Negeri Amerika Serikat",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Penjabat Penasihat Keamanan Nasional",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Senator Amerika Serikat",
+      "org": "Florida",
+      "period": "2011 – 2025"
+    },
+    {
+      "role": "Ketua Dewan Perwakilan Florida",
+      "org": "",
+      "period": "2006 – 2008"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Marco_Rubio"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

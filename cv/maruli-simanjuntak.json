@@ -1,0 +1,48 @@
+{
+  "bio": "Kepala Staf TNI Angkatan Darat sejak November 2023. Perwira tinggi berpangkat Jenderal yang sebelumnya Panglima Kostrad, Pangdam IX/Udayana, dan Komandan Paspampres.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Bandung, 24 Februari 1970"
+    },
+    {
+      "label": "Pangkat",
+      "value": "Jenderal TNI"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Kepala Staf TNI Angkatan Darat",
+      "org": "",
+      "period": "2023 – kini"
+    },
+    {
+      "role": "Panglima Kostrad",
+      "org": "",
+      "period": "2022 – 2023"
+    },
+    {
+      "role": "Panglima Kodam IX/Udayana",
+      "org": "",
+      "period": "2020 – 2022"
+    },
+    {
+      "role": "Komandan Paspampres",
+      "org": "",
+      "period": "2018 – 2020"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Akademi Militer",
+      "year": "1992"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Maruli_Simanjuntak"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

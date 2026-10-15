@@ -1,0 +1,37 @@
+{
+  "bio": "Wakil Ketua Komisi IX DPR. Politikus PDI Perjuangan, anggota DPR sejak 2014 dari Dapil DKI Jakarta III.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 23 Juli 1984"
+    },
+    {
+      "label": "Partai",
+      "value": "PDI Perjuangan"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Ketua Komisi IX",
+      "org": "DPR",
+      "period": ""
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil DKI Jakarta III",
+      "period": "2014 – kini"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Charles_Honoris"
+    },
+    {
+      "label": "Antara, September 2026",
+      "url": "https://www.antaranews.com/berita/5695373/prabowo-usul-datangkan-dokter-dari-ln-dpr-harus-transfer-teknologi"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

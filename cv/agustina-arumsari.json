@@ -1,0 +1,41 @@
+{
+  "bio": "Wakil Kepala Badan Gizi Nasional sejak Juni 2026. Auditor dan birokrat yang sebelumnya menjadi Wakil Kepala BPKP pertama dan Deputi BPKP Bidang Investigasi.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Purbalingga, 1970"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Kepala",
+      "org": "Badan Gizi Nasional",
+      "period": "2026 – kini"
+    },
+    {
+      "role": "Wakil Kepala",
+      "org": "BPKP",
+      "period": "2025 – 2026"
+    },
+    {
+      "role": "Deputi Bidang Investigasi",
+      "org": "BPKP",
+      "period": "2020 – 2025"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Indonesia"
+    },
+    {
+      "detail": "Sekolah Tinggi Akuntansi Negara"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Agustina_Arumsari"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

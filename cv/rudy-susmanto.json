@@ -1,0 +1,38 @@
+{
+  "bio": "Bupati Bogor periode 2025–2030. Politikus Gerindra dan Wakil Sekretaris Jenderal DPP Gerindra; sebelumnya Ketua DPRD Kabupaten Bogor 2019–2024.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Sukoharjo, 15 Agustus 1985"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Bupati Bogor",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Ketua DPRD Kabupaten Bogor",
+      "org": "",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Wakil Sekretaris Jenderal",
+      "org": "DPP Partai Gerindra",
+      "period": ""
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Rudy_Susmanto"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

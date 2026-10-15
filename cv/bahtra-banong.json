@@ -1,0 +1,41 @@
+{
+  "bio": "Anggota DPR dari Sulawesi Tenggara sejak 2022 dan juru bicara Partai Gerindra.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Doping, Sulawesi Selatan, 8 September 1983"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Sulawesi Tenggara",
+      "period": "2022 – kini"
+    },
+    {
+      "role": "Juru bicara",
+      "org": "Partai Gerindra",
+      "period": ""
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Islam Bandung"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Bahtra_Banong"
+    },
+    {
+      "label": "Detik, 26 Agustus 2026",
+      "url": "https://news.detik.com/berita/d-8635932/gerindra-soal-menteri-tak-sanggup-silakan-minggir-penegasan-loyalitas"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

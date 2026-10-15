@@ -1,0 +1,28 @@
+{
+  "bio": "Wakil Menteri Kesehatan sejak Oktober 2025. Dokter dan politikus Gerindra.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Malang, 13 September 1963"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Menteri Kesehatan",
+      "org": "Kabinet Merah Putih",
+      "period": "2025 – kini"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Benjamin_Paulus_Octavianus"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

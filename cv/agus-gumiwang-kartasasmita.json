@@ -1,0 +1,48 @@
+{
+  "bio": "Politikus Golkar yang menjabat Menteri Perindustrian dari 2019 hingga 1 Oktober 2026, ketika digantikan Muhammad Sarmuji. Sebelumnya Menteri Sosial dan anggota DPR; sempat menjadi Plt. Ketua Umum Golkar pada Agustus 2024.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 3 Januari 1969"
+    },
+    {
+      "label": "Partai",
+      "value": "Golkar"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Perindustrian",
+      "org": "",
+      "period": "2019 – 2026"
+    },
+    {
+      "role": "Plt. Ketua Umum",
+      "org": "Partai Golkar",
+      "period": "2024"
+    },
+    {
+      "role": "Menteri Sosial",
+      "org": "",
+      "period": "2018 – 2019"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "2009 – 2018"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "1999 – 2004"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Agus_Gumiwang_Kartasasmita"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

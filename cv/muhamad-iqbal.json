@@ -1,0 +1,60 @@
+{
+  "bio": "Gubernur Nusa Tenggara Barat sejak Februari 2025. Diplomat karier yang sebelumnya Juru Bicara Kementerian Luar Negeri dan Duta Besar untuk Turki; bergabung dengan Gerindra pada 2024.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Lalu Muhamad Iqbal"
+    },
+    {
+      "label": "Lahir",
+      "value": "Praya, 10 Juli 1972"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra (sejak 2024)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Gubernur Nusa Tenggara Barat",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Juru Bicara",
+      "org": "Kementerian Luar Negeri",
+      "period": "2023 – 2024"
+    },
+    {
+      "role": "Duta Besar untuk Turki",
+      "org": "",
+      "period": "2019 – 2023"
+    },
+    {
+      "role": "Direktur Perlindungan WNI dan BHI",
+      "org": "Kementerian Luar Negeri",
+      "period": "2015 – 2019"
+    }
+  ],
+  "education": [
+    {
+      "detail": "University of Bucharest"
+    },
+    {
+      "detail": "Universitas Indonesia"
+    },
+    {
+      "detail": "Universitas Gadjah Mada"
+    },
+    {
+      "detail": "Universitas Muhammadiyah Yogyakarta"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Lalu_Muhamad_Iqbal"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

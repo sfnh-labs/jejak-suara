@@ -1,0 +1,33 @@
+{
+  "bio": "Ketua DPP Partai Solidaritas Indonesia Bidang Politik periode 2025–2030. Sebelumnya anggota DPRD DKI Jakarta 2014–2019 dan ketua fraksi NasDem di sana; pernah di Golkar.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Labuhan Batu"
+    },
+    {
+      "label": "Partai",
+      "value": "PSI"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Ketua Bidang Politik",
+      "org": "DPP Partai Solidaritas Indonesia",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Anggota DPRD DKI Jakarta",
+      "org": "Fraksi NasDem",
+      "period": "2014 – 2019"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Bestari_Barus"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

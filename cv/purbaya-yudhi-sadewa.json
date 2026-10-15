@@ -1,0 +1,34 @@
+{
+  "bio": "Ekonom yang menjabat Menteri Keuangan dari September 2025 hingga September 2026, menggantikan Sri Mulyani, sebelum digantikan Suahasil Nazara. Sebelumnya Ketua Dewan Komisioner Lembaga Penjamin Simpanan.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Bogor, 7 Juli 1964"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Keuangan",
+      "org": "Kabinet Merah Putih",
+      "period": "2025 – 2026"
+    },
+    {
+      "role": "Ketua Dewan Komisioner",
+      "org": "Lembaga Penjamin Simpanan",
+      "period": "2020 – 2025"
+    },
+    {
+      "role": "Direktur Utama",
+      "org": "Danareksa Sekuritas",
+      "period": "2006 – 2008"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Purbaya_Yudhi_Sadewa"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

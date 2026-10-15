@@ -1,0 +1,43 @@
+{
+  "bio": "Menteri Koordinator Bidang Perekonomian sejak 2019, berlanjut di Kabinet Merah Putih. Ketua Umum Golkar 2017–2024; sebelumnya Menteri Perindustrian dan anggota DPR.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Surabaya, 1 Oktober 1962"
+    },
+    {
+      "label": "Partai",
+      "value": "Golkar"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Koordinator Bidang Perekonomian",
+      "org": "",
+      "period": "2019 – kini"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Partai Golkar",
+      "period": "2017 – 2024"
+    },
+    {
+      "role": "Menteri Perindustrian",
+      "org": "",
+      "period": "2016 – 2019"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "2004 – 2016"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Airlangga_Hartarto"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

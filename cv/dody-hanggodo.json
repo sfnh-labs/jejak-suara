@@ -1,0 +1,37 @@
+{
+  "bio": "Menteri Pekerjaan Umum sejak Oktober 2024, menggantikan Basuki Hadimuljono. Insinyur dan pengusaha; bergabung dengan Partai Demokrat pada 2024.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Mojokerto, 7 Februari 1966"
+    },
+    {
+      "label": "Partai",
+      "value": "Demokrat (sejak 2024)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Pekerjaan Umum",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    }
+  ],
+  "education": [
+    {
+      "detail": "M.P.E., Universitas Tulsa",
+      "year": "1992"
+    },
+    {
+      "detail": "Insinyur, Institut Teknologi Bandung",
+      "year": "1989"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Dody_Hanggodo"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

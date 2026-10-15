@@ -1,0 +1,41 @@
+{
+  "bio": "Pengacara, pewara, dan pebisnis yang dikenal lewat klien-klien ternama dan kehadirannya di media.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Hotman Paris Hutapea"
+    },
+    {
+      "label": "Lahir",
+      "value": "Laguboti, Toba, 20 Oktober 1959"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Advokat",
+      "org": "",
+      "period": ""
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Padjadjaran"
+    },
+    {
+      "detail": "Universitas Gadjah Mada"
+    },
+    {
+      "detail": "Universitas Teknologi Sydney"
+    },
+    {
+      "detail": "Universitas Katolik Parahyangan"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Hotman_Paris_Hutapea"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

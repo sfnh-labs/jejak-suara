@@ -1,0 +1,43 @@
+{
+  "bio": "Wakil Panglima TNI sejak Agustus 2025. Perwira tinggi Angkatan Darat yang sebelumnya Wakil Kepala Staf TNI AD dan Pangdam IV/Diponegoro.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Surakarta, 21 Februari 1969"
+    },
+    {
+      "label": "Pangkat",
+      "value": "Jenderal TNI"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Panglima TNI",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Wakil Kepala Staf TNI Angkatan Darat",
+      "org": "",
+      "period": "2024 – 2025"
+    },
+    {
+      "role": "Panglima Kodam IV/Diponegoro",
+      "org": "",
+      "period": "2023 – 2024"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Akademi Militer",
+      "year": "1991"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Tandyo_Budi_Revita"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

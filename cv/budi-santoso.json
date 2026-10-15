@@ -1,0 +1,38 @@
+{
+  "bio": "Menteri Perdagangan sejak Oktober 2024, menggantikan Zulkifli Hasan. Birokrat karier perdagangan; bergabung dengan PAN pada 2024.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Sukoharjo, 9 Februari 1968"
+    },
+    {
+      "label": "Partai",
+      "value": "PAN (sejak 2024)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Perdagangan",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Sahid"
+    },
+    {
+      "detail": "Universitas Indonesia"
+    },
+    {
+      "detail": "Universitas Sebelas Maret"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Budi_Santoso_(birokrat)"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

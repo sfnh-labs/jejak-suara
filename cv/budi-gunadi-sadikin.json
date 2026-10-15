@@ -1,0 +1,41 @@
+{
+  "bio": "Menteri Kesehatan sejak Desember 2020, berlanjut di Kabinet Merah Putih. Bankir dan profesional korporasi; sebelumnya Wakil Menteri BUMN dan Direktur Utama Inalum.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Bandung, 6 Mei 1964"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Kesehatan",
+      "org": "",
+      "period": "2020 – kini"
+    },
+    {
+      "role": "Wakil Menteri BUMN",
+      "org": "",
+      "period": "2019 – 2020"
+    },
+    {
+      "role": "Direktur Utama",
+      "org": "PT Inalum (Persero)",
+      "period": ""
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Washington"
+    },
+    {
+      "detail": "Institut Teknologi Bandung"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Budi_Gunadi_Sadikin"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

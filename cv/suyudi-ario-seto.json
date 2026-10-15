@@ -1,0 +1,43 @@
+{
+  "bio": "Kepala Kepolisian Negara Republik Indonesia sejak 1 Oktober 2026, menggantikan Listyo Sigit Prabowo. Sebelumnya Kepala BNN dan Kapolda Banten.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Pandeglang, 14 Juli 1973"
+    },
+    {
+      "label": "Pangkat",
+      "value": "Jenderal Polisi"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Kapolri",
+      "org": "",
+      "period": "2026 – kini"
+    },
+    {
+      "role": "Kepala Badan Narkotika Nasional",
+      "org": "",
+      "period": "2025 – 2026"
+    },
+    {
+      "role": "Kapolda Banten",
+      "org": "",
+      "period": "2024 – 2025"
+    },
+    {
+      "role": "Wakapolda Metro Jaya",
+      "org": "",
+      "period": "2023 – 2024"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Suyudi_Ario_Seto"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

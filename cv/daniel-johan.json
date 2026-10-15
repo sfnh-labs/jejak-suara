@@ -1,0 +1,37 @@
+{
+  "bio": "Anggota DPR dari PKB sejak 2014, duduk di Komisi IV, dan Ketua DPP PKB.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 10 April 1972"
+    },
+    {
+      "label": "Partai",
+      "value": "PKB"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Anggota DPR",
+      "org": "Komisi IV",
+      "period": "2014 – kini"
+    },
+    {
+      "role": "Ketua DPP",
+      "org": "Partai Kebangkitan Bangsa",
+      "period": ""
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Tarumanagara"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Daniel_Johan"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}
