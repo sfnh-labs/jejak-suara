@@ -12,7 +12,7 @@
  * Worker bundle's hot path. Queries use SQLite's `?` placeholders; a boolean
  * is bound as 0/1 and an array as JSON, for `IN (SELECT value FROM json_each(?))`.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import path from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
@@ -84,16 +84,32 @@ export async function ltx(fn: () => Promise<void>): Promise<void> {
  * pipeline (promoting a name, merging figures), carried out by its own code.
  * Rejects with the script's own explanation when it refuses.
  */
-export async function pipelineOp(...args: string[]): Promise<string> {
+function opCommand(args: string[]): { python: string; argv: string[]; root: string } {
   const file = localDbPath();
   if (!file) throw new Error("JEJAK_DB is not set");
   // The repository: the web app runs from web/, beside scripts/ and .venv.
   const root = process.env.JEJAK_ROOT ?? path.resolve(process.cwd(), "..");
   const python = process.env.JEJAK_PYTHON ?? path.join(root, ".venv", "bin", "python");
+  return { python, root, argv: [path.join(root, "scripts", "kurasi_ops.py"), "--db", file, ...args] };
+}
+
+/**
+ * Start a pipeline op and return at once: for work that takes the model a
+ * minute (a rework), which the page then shows as in progress. It records its
+ * own outcome in jejak.db.
+ */
+export function pipelineOpInBackground(...args: string[]): void {
+  const { python, argv, root } = opCommand(args);
+  const child = spawn(python, argv, { cwd: root, detached: true, stdio: "ignore" });
+  child.unref();
+}
+
+export async function pipelineOp(...args: string[]): Promise<string> {
+  const { python, argv, root } = opCommand(args);
   return new Promise((resolve, reject) => {
     execFile(
       python,
-      [path.join(root, "scripts", "kurasi_ops.py"), "--db", file, ...args],
+      argv,
       { cwd: root, timeout: 120_000 },
       (err, stdout, stderr) => {
         if (err) reject(new Error(stderr.trim() || err.message));

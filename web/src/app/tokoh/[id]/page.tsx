@@ -221,12 +221,8 @@ function CvPanel({ cv }: { cv: NonNullable<Awaited<ReturnType<typeof getCv>>> })
   const eduHasYears = cv.education.some((e) => e.year);
   return (
     <div>
-      {cv.bio ? (
-        <p style={{ fontFamily: "var(--font-serif)", fontSize: 19, lineHeight: 1.6, color: "var(--color-body)", marginTop: 0 }}>
-          {cv.bio}
-        </p>
-      ) : null}
-
+      {/* No bio: a figure is read from their records and current office,
+          which the page already leads with. */}
       {cv.facts.length > 0 ? (
         <>
           <h2 className="section-label" style={{ margin: "32px 0 14px" }}>Fakta Ringkas</h2>

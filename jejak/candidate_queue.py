@@ -64,8 +64,15 @@ def refresh(conn: sqlite3.Connection, min_outlets: int = MIN_OUTLETS) -> int:
     Returns how many names are in the queue.
     """
     now = datetime.now(timezone.utc).isoformat()
+    # First words the curator keeps rejecting ("Polisi …", "Istana …"),
+    # learned by jejak/kurasi.py: names starting with them are not asked.
+    row = conn.execute(
+        "SELECT value FROM pipeline_state WHERE key = 'learned_name_prefixes'").fetchone()
+    skip = set(json.loads(row[0])) if row else set()
     slugs = []
     for c in conn.execute(EVIDENCE_SQL, (min_outlets,)).fetchall():
+        if c["name"].split()[0] in skip:
+            continue
         role_row = conn.execute(
             """SELECT role FROM figure_mentions
                 WHERE slug = ? AND role IS NOT NULL AND role != ''

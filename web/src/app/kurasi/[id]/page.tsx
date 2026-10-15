@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { REASONS, getFigureOptions, getFollowupCandidates, getItem, getReading, positionTitle, reasonLabel, type FigureOption, type FigureRef, type FollowupCandidate, type FollowupRow, type Position, type Profile, type Item, type LinkRow, type NamedPerson } from "@/lib/curation";
+import { REASONS, getFigureOptions, getFollowupCandidates, getItem, getReading, likelyDuplicates, positionTitle, reasonLabel, type FigureOption, type FigureRef, type FollowupCandidate, type FollowupRow, type Position, type Profile, type Item, type Rework, type ReworkSnapshot, type CvProposal, type LinkRow, type NamedPerson } from "@/lib/curation";
 import { decide } from "../kandidat/actions";
 import { AcceptCandidateForm } from "../AcceptCandidateForm";
 import { ArticleReader, type ReaderTerm } from "../ArticleReader";
-import { addFollowup, curate, editFigure, mergeFigures, relateFigure, ruleFollowup, ruleLink } from "../actions";
+import { addFollowup, curate, editFigure, mergeFigures, relateFigure, ruleFollowup, ruleLink, rework, decideRework, notAPerson, cvDraft, decideCvDraft } from "../actions";
 import { storyImageSource, storylines } from "@/lib/data";
 import { EventBanner } from "../EventImage";
 import { placeGroups, provinceLabel, provincesIn } from "@/lib/places";
@@ -62,8 +62,7 @@ export default async function KurasiItem({
   // Numbered in reading order; the record-only "Pelaku" shifts the rest.
   const sections = [
     { id: "isi", title: "Isi" },
-    ...(isRecord ? [{ id: "pelaku", title: "Pelaku" }] : []),
-    { id: "nama", title: isRecord ? "Disebut dalam liputan" : "Tokoh terkait" },
+    { id: "nama", title: "Tokoh" },
     { id: "tautan", title: isRecord ? "Bagian dari peristiwa" : "Catatan di dalamnya" },
     { id: "lini", title: "Lini cerita" },
   ];
@@ -99,7 +98,11 @@ export default async function KurasiItem({
               {item.last_seen && day(item.last_seen) !== day(item.event_date) ? ` – ${day(item.last_seen)}` : ""}
             </Pill>
             <Pill>{outlets} media · {item.sources.length} artikel</Pill>
-            {outlets <= 1 ? <Pill tone="danger">⚠ satu sumber</Pill> : null}
+            {outlets <= 1 ? (
+              <Pill tone="danger" title="Semua artikelnya dari satu media. Belum ada redaksi lain yang ikut melaporkan, jadi periksa lebih teliti.">
+                ⚠ hanya 1 media
+              </Pill>
+            ) : null}
             {scattered ? <Pill tone="danger">⚠ beda provinsi</Pill> : null}
             {item.event_type && item.event_type !== "other" ? <Pill>{item.event_type}</Pill> : null}
           </div>
@@ -120,7 +123,7 @@ export default async function KurasiItem({
           ) : null}
         </header>
 
-        <VerdictBar item={item} sections={sections} missing={perlu} />
+        <VerdictBar item={item} sections={sections} missing={perlu} figures={figures} />
         <FigureOptions figures={figures} />
 
         <Card n={n("isi")} id="isi" title="Isi" note="Ringkasan yang tayang dan artikel yang menjadi sumbernya. Baca ini dulu sebelum memutuskan.">
@@ -179,30 +182,15 @@ export default async function KurasiItem({
           </SubPanel>
         </Card>
 
-        {isRecord ? (
-          <Card
-            n={n("pelaku")}
-            id="pelaku"
-            title="Pelaku"
-            note="Tokoh pemilik catatan ini. Perubahan nama, jabatan, dan alias berlaku di seluruh situs; alias juga dipakai pipeline untuk mengenali artikel berikutnya."
-          >
-            {item.owner ? (
-              <OwnerEditor figure={item.owner} eventId={item.event_id} figures={figures} />
-            ) : (
-              <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Tokoh {item.figure_id} tidak ada di daftar.</p>
-            )}
-          </Card>
-        ) : null}
-
         <Card
           n={n("nama")}
           id="nama"
-          title={isRecord ? "Disebut dalam liputan" : "Tokoh terkait"}
+          title="Tokoh"
           count={item.named.length}
           note={
             isRecord
-              ? "Orang lain yang namanya muncul di artikel catatan ini. Tokoh yang sudah dilacak bisa disunting; nama baru bisa langsung diterima atau ditolak."
-              : "Tokoh yang muncul di liputan peristiwa ini. Coret yang salah cocok, misalnya karena alias yang juga nama orang lain."
+              ? "Semua orang di liputan catatan ini, pemilik catatan paling atas. Tokoh yang sudah ada bisa disunting atau digabung; nama baru bisa dijadikan tokoh, disamakan dengan tokoh yang ada, atau ditolak. Perubahan nama, jabatan, dan alias berlaku di seluruh situs dan dipakai pipeline untuk artikel berikutnya."
+              : "Semua orang di liputan peristiwa ini. Coret tokoh yang salah cocok, misalnya karena alias yang juga nama orang lain; nama baru bisa langsung diputuskan."
           }
         >
           <NamedList item={item} figures={figures} />
@@ -411,10 +399,12 @@ function VerdictBar({
   item,
   sections,
   missing,
+  figures,
 }: {
   item: Item;
   sections: { id: string; title: string }[];
   missing?: string;
+  figures: FigureOption[];
 }) {
   const next = item.next_id ?? "";
   const s = item.suggestion;
@@ -487,6 +477,8 @@ function VerdictBar({
             </div>
           </form>
         </details>
+        <ReworkMenu item={item} figures={figures} />
+        <CvMenu item={item} figures={figures} />
         {item.curated ? (
           <form action={curate}>
             <Hidden fields={{ event_id: item.event_id, verdict: "" }} />
@@ -512,6 +504,176 @@ function VerdictBar({
         ))}
       </nav>
     </div>
+  );
+}
+
+/**
+ * "Kerjakan ulang…", beside "Turunkan…": the other answer to a bad entry —
+ * the coverage belongs on the site, but the title or summary got it wrong.
+ * Opens by itself while a draft is being written or waits for a decision.
+ */
+function ReworkMenu({ item, figures }: { item: Item; figures: FigureOption[] }) {
+  const running = item.reworks.some((r) => r.status === "queued" || r.status === "running");
+  const ready = item.reworks.some((r) => r.status === "ready" || r.status === "failed");
+  return (
+    <details id="ulang" open={running || ready} style={{ position: "static" }}>
+      <summary style={{ ...button(ready ? "ink" : "quiet"), listStyle: "none", display: "inline-block" }}>
+        {running ? "Sedang dikerjakan ulang…" : ready ? "Tinjau draf ulang…" : "Kerjakan ulang…"}
+      </summary>
+      <div
+        style={{
+          position: "absolute", left: 0, right: 0, top: "calc(100% + 4px)", zIndex: 6,
+          background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8, padding: "14px 16px",
+          boxShadow: "0 8px 24px rgba(22, 19, 15, 0.14)", maxHeight: "70vh", overflowY: "auto",
+        }}
+      >
+        <div style={{ fontSize: 12.5, color: INK, fontWeight: 600, marginBottom: 8 }}>
+          Layak tayang, tapi judul atau ringkasannya keliru?{" "}
+          <span style={{ color: MUTED, fontWeight: 400 }}>
+            Tulis apa yang salah; sistem menulis ulang dari artikel yang sama. Hasilnya draf, tidak ada yang berubah sampai kamu menerimanya.
+          </span>
+        </div>
+        <ReworkPanel item={item} figures={figures} />
+      </div>
+    </details>
+  );
+}
+
+/**
+ * "Jadikan info CV…": for coverage that is a fact about someone rather than
+ * something they did — an appointment, a family tie, a background. The local
+ * model drafts the CV entries; the curator edits and accepts them, and the
+ * record comes down as "Bahan CV".
+ */
+function CvMenu({ item, figures }: { item: Item; figures: FigureOption[] }) {
+  const running = item.cvProposals.some((r) => r.status === "queued" || r.status === "running");
+  const ready = item.cvProposals.find((r) => r.status === "ready" || r.status === "failed");
+  return (
+    <details open={running || Boolean(ready)} style={{ position: "static" }}>
+      <summary style={{ ...button(ready ? "ink" : "quiet"), listStyle: "none", display: "inline-block" }}>
+        {running ? "Menyusun info CV…" : ready ? "Tinjau info CV…" : "Jadikan info CV…"}
+      </summary>
+      <div
+        style={{
+          position: "absolute", left: 0, right: 0, top: "calc(100% + 4px)", zIndex: 6,
+          background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8, padding: "14px 16px",
+          boxShadow: "0 8px 24px rgba(22, 19, 15, 0.14)", maxHeight: "70vh", overflowY: "auto", display: "grid", gap: 12,
+        }}
+      >
+        <div style={{ fontSize: 12.5, color: INK, fontWeight: 600 }}>
+          Bukan perbuatan, tapi keterangan tentang seseorang?{" "}
+          <span style={{ color: MUTED, fontWeight: 400 }}>
+            Pelantikan, jabatan baru, hubungan keluarga, latar belakang. Model lokal menyusun isian CV dari artikel ini;
+            kamu periksa dan ubah, lalu terima. Catatan ini diturunkan dengan alasan “Bahan CV”.
+          </span>
+        </div>
+        {running ? (
+          <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>
+            Model lokal sedang membaca artikel, biasanya kurang dari semenit.{" "}
+            <Link href={`/kurasi/${item.event_id}`} style={{ color: INK }}>Muat ulang</Link>
+          </p>
+        ) : ready ? (
+          <CvReview proposal={ready} item={item} figures={figures} />
+        ) : (
+          <form action={cvDraft} style={{ display: "grid", gap: 10 }}>
+            <Hidden fields={{ event_id: item.event_id }} />
+            <label style={label}>
+              CV siapa? (ketik nama untuk mencari)
+              <input
+                name="figure_id"
+                list={FIGURE_LIST}
+                required
+                autoComplete="off"
+                defaultValue={item.figure_id ?? ""}
+                pattern={figures.map((f) => f.id).join("|")}
+                title="Pilih tokoh dari daftar saran"
+                style={input}
+              />
+            </label>
+            <label style={label}>
+              Yang perlu diambil (opsional)
+              <textarea name="note" rows={2} placeholder="mis. hubungan keluarga dengan Benny Sinomba Siregar" style={{ ...input, resize: "vertical", fontFamily: "inherit" }} />
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button type="submit" style={button("ink")}>Susun info CV</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </details>
+  );
+}
+
+/** The drafted entries as editable rows: blank a row to leave it out. */
+function CvReview({ proposal: p, item, figures }: { proposal: CvProposal; item: Item; figures: FigureOption[] }) {
+  const who = figures.find((f) => f.id === p.figure_id)?.name ?? p.figure_id;
+  if (p.status === "failed" || !p.proposal) {
+    return (
+      <form action={decideCvDraft} style={{ display: "grid", gap: 8 }}>
+        <Hidden fields={{ event_id: item.event_id, proposal_id: p.id, decision: "discard" }} />
+        <p style={{ fontSize: 13, color: "var(--color-clay)", margin: 0 }}>
+          {p.error}{p.error?.includes("Ollama") ? " Jalankan Ollama (ollama serve), lalu coba lagi." : ""}
+        </p>
+        <div><button type="submit" style={button("quiet")}>Tutup, coba lagi</button></div>
+      </form>
+    );
+  }
+  const d = p.proposal;
+  const three = { display: "grid", gap: 6, gridTemplateColumns: "minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.2fr)" } as const;
+  const two = { display: "grid", gap: 6, gridTemplateColumns: "minmax(110px, 0.6fr) minmax(160px, 1.4fr)" } as const;
+  const head = { fontSize: 11, color: MUTED } as const;
+  const cell = { ...input, width: "100%" };
+  const empty = d.positions.length + d.facts.length + d.education.length === 0;
+  return (
+    <form action={decideCvDraft} style={{ display: "grid", gap: 12 }}>
+      {/* Enter in a row must not accept: a disabled first button absorbs it. */}
+      <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
+      <Hidden fields={{ event_id: item.event_id, proposal_id: p.id }} />
+      <div style={{ fontSize: 13 }}>
+        Untuk CV <strong>{who}</strong>.{" "}
+        <span style={{ color: MUTED }}>
+          {empty ? "Model tidak menemukan keterangan biografis; isi sendiri bila ada." : "Ubah yang keliru; kosongkan baris yang tidak perlu."}
+        </span>
+      </div>
+      <div style={three}>
+        <span style={head}>Jabatan</span><span style={head}>Lembaga</span><span style={head}>Periode</span>
+        {[...d.positions, { role: "", org: "", period: "" }].map((x, i) => (
+          <PositionCv key={i} role={x.role} org={x.org} period={x.period} cell={cell} />
+        ))}
+      </div>
+      <div style={two}>
+        <span style={head}>Fakta</span><span style={head}>Isi</span>
+        {[...d.facts, { label: "", value: "" }].map((x, i) => (
+          <FactRow key={i} a={["cv_label", x.label, ""]} b={["cv_value", x.value, ""]} style={cell} hint={false} />
+        ))}
+      </div>
+      <div style={two}>
+        <span style={head}>Tahun</span><span style={head}>Pendidikan</span>
+        {[...d.education, { year: "", detail: "" }].map((x, i) => (
+          <FactRow key={i} a={["cv_year", x.year ?? "", ""]} b={["cv_detail", x.detail, ""]} style={cell} hint={false} />
+        ))}
+      </div>
+      <div style={two}>
+        <span style={head}>Sumber</span><span style={head}>URL</span>
+        {d.sources.map((x, i) => (
+          <FactRow key={i} a={["cv_src_label", x.label, ""]} b={["cv_src_url", x.url, ""]} style={cell} hint={false} />
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+        <button type="submit" name="decision" value="accept" style={button("accept")}>Masukkan ke CV, turunkan catatan</button>
+        <button type="submit" name="decision" value="discard" formNoValidate style={button("quiet")}>Buang</button>
+      </div>
+    </form>
+  );
+}
+
+function PositionCv({ role, org, period, cell }: { role: string; org: string; period: string; cell: React.CSSProperties }) {
+  return (
+    <>
+      <input name="cv_role" defaultValue={role} style={cell} aria-label="Jabatan" />
+      <input name="cv_org" defaultValue={org} style={cell} aria-label="Lembaga" />
+      <input name="cv_period" defaultValue={period} style={cell} aria-label="Periode" />
+    </>
   );
 }
 
@@ -546,7 +708,7 @@ function SuggestionLine({ item }: { item: Item }) {
 }
 
 function FigureHeading({ figure }: { figure: FigureRef | NamedPerson }) {
-  const active = "active" in figure ? figure.active : true;
+  const active = figure.active ?? true;
   return (
     <span style={{ display: "inline-flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
       <span style={{ fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 600, color: INK }}>{figure.name}</span>
@@ -569,8 +731,8 @@ function FigureHeading({ figure }: { figure: FigureRef | NamedPerson }) {
  * are one list: what is typed here is what the CV tab shows.
  */
 function FigureForm({ figure, eventId }: { figure: FigureRef | NamedPerson; eventId: number }) {
-  const profile = "profile" in figure ? figure.profile : null;
-  const active = "active" in figure ? figure.active : true;
+  const profile = figure.profile ?? null;
+  const active = figure.active ?? true;
   return (
     <form action={editFigure} style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", alignItems: "end" }}>
       <Hidden fields={{ event_id: eventId, figure_id: figure.id }} />
@@ -579,7 +741,7 @@ function FigureForm({ figure, eventId }: { figure: FigureRef | NamedPerson; even
         <input name="name" defaultValue={figure.name} required style={input} />
       </label>
       <Positions figure={figure} />
-      {profile && "cv_checked_at" in figure ? <CvFields profile={profile} checkedAt={figure.cv_checked_at} figureId={figure.id} /> : null}
+      {profile ? <CvFields profile={profile} checkedAt={figure.cv_checked_at ?? null} figureId={figure.id} /> : null}
       <label style={{ ...label, gridColumn: "1 / -1" }}>
         Alias, satu per baris
         <span style={{ fontSize: 11.5 }}>
@@ -592,11 +754,34 @@ function FigureForm({ figure, eventId }: { figure: FigureRef | NamedPerson; even
           style={{ ...input, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
         />
       </label>
-      <label style={{ ...label, display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--color-mud)" }}>
-        <input type="checkbox" name="active" value="1" defaultChecked={active} />
-        Aktif (hapus centang untuk nama yang salah tambang)
-      </label>
-      <div style={{ justifySelf: "end" }}>
+      {/* Retiring is "Bukan orang…" or a merge; saving keeps a figure as it
+          is. Only a retired figure (an owner whose record is still open) gets
+          the way back. */}
+      {active ? (
+        <input type="hidden" name="active" value="1" />
+      ) : (
+        <label style={{ ...label, display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--color-mud)" }}>
+          <input type="checkbox" name="active" value="1" />
+          Tokoh ini nonaktif. Centang untuk mengaktifkannya lagi saat disimpan.
+        </label>
+      )}
+      <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "flex-start", flexWrap: "wrap" }}>
+        {active ? (
+          // The existing-figure twin of rejecting a new name. Its confirm
+          // button belongs to the separate form `bukan-orang-<id>`.
+          <details style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+            <summary style={{ ...button("quiet"), listStyle: "none", display: "inline-block" }}>Bukan orang…</summary>
+            <div style={{ ...CONFIRM_PANEL, textAlign: "left" }}>
+              <span style={{ fontSize: 12.5, color: "var(--color-mud)", lineHeight: 1.5 }}>
+                Untuk tempat, jabatan, atau potongan judul yang terlanjur jadi tokoh. {figure.name} dinonaktifkan,
+                dicabut dari semua peristiwa, artikelnya dilepas, dan catatannya diturunkan.
+              </span>
+              <button type="submit" form={`bukan-orang-${figure.id}`} formNoValidate style={button("danger")}>
+                Ya, hapus {figure.name}
+              </button>
+            </div>
+          </details>
+        ) : null}
         <button type="submit" style={button("ink")}>Simpan tokoh</button>
       </div>
     </form>
@@ -649,29 +834,44 @@ function CvFields({ profile, checkedAt, figureId }: { profile: Profile; checkedA
         {" "}Riwayat jabatannya adalah daftar jabatan di atas; jabatan kini diambil dari baris pertama.
         {checkedAt ? ` Sumber diperiksa ${checkedAt}.` : ""}
       </legend>
-      <label style={label}>
-        Ringkasan
-        <textarea name="bio" rows={3} defaultValue={profile.bio} style={{ ...input, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
-      </label>
-      <div style={two}>
-        <span style={head}>Fakta</span><span style={head}>Isi</span>
-        {facts.map((f, i) => (
-          <FactRow key={i} a={["fact_label", f.label, "mis. Lahir"]} b={["fact_value", f.value, "mis. Kudus, 12 Oktober 1973"]} style={cell} hint={i === 0} />
-        ))}
-      </div>
-      <div style={two}>
-        <span style={head}>Tahun</span><span style={head}>Pendidikan</span>
-        {education.map((e, i) => (
-          <FactRow key={i} a={["edu_year", e.year ?? "", "1997"]} b={["edu_detail", e.detail, "mis. S1 Filsafat, UGM"]} style={cell} hint={i === 0} />
-        ))}
-      </div>
-      <div style={two}>
-        <span style={head}>Sumber</span><span style={head}>URL</span>
-        {sources.map((s, i) => (
-          <FactRow key={i} a={["src_label", s.label, "mis. Wikipedia"]} b={["src_url", s.url, "https://…"]} style={cell} hint={i === 0} />
-        ))}
-      </div>
+      {/* Folded: they rarely change while curating a record. A closed
+          <details> still submits its fields, so saving keeps them. */}
+      <CvGroup title="Biodata" count={profile.facts.length}>
+        <div style={two}>
+          <span style={head}>Fakta</span><span style={head}>Isi</span>
+          {facts.map((f, i) => (
+            <FactRow key={i} a={["fact_label", f.label, "mis. Lahir"]} b={["fact_value", f.value, "mis. Kudus, 12 Oktober 1973"]} style={cell} hint={i === 0} />
+          ))}
+        </div>
+      </CvGroup>
+      <CvGroup title="Pendidikan" count={profile.education.length}>
+        <div style={two}>
+          <span style={head}>Tahun</span><span style={head}>Pendidikan</span>
+          {education.map((e, i) => (
+            <FactRow key={i} a={["edu_year", e.year ?? "", "1997"]} b={["edu_detail", e.detail, "mis. S1 Filsafat, UGM"]} style={cell} hint={i === 0} />
+          ))}
+        </div>
+      </CvGroup>
+      <CvGroup title="Sumber" count={profile.sources.length}>
+        <div style={two}>
+          <span style={head}>Sumber</span><span style={head}>URL</span>
+          {sources.map((s, i) => (
+            <FactRow key={i} a={["src_label", s.label, "mis. Wikipedia"]} b={["src_url", s.url, "https://…"]} style={cell} hint={i === 0} />
+          ))}
+        </div>
+      </CvGroup>
     </fieldset>
+  );
+}
+
+function CvGroup({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
+  return (
+    <details style={{ border: `1px solid ${RULE}`, borderRadius: 6, padding: "8px 12px", background: SURFACE }}>
+      <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: INK }}>
+        {title} <span style={{ fontWeight: 400, color: MUTED }}>{count ? `${count} isian` : "kosong"}</span>
+      </summary>
+      <div style={{ marginTop: 10 }}>{children}</div>
+    </details>
   );
 }
 
@@ -695,23 +895,6 @@ function PositionRow({ position: p, main }: { position: Position; main: boolean 
   );
 }
 
-/** The record's own figure: always open, editing and merging in separate boxes. */
-function OwnerEditor({ figure, eventId, figures }: { figure: FigureRef; eventId: number; figures: FigureOption[] }) {
-  return (
-    <>
-      <FigureHeading figure={figure} />
-      <SubPanel title="Data tokoh">
-        <FigureForm figure={figure} eventId={eventId} />
-      </SubPanel>
-      {figure.active ? <MergeForm figure={figure} eventId={eventId} figures={figures} /> : null}
-    </>
-  );
-}
-
-/**
- * "This is the same person as …". Moves every record of this figure to the
- * chosen one, adds this figure's names to its aliases and retires this one.
- */
 const FIGURE_LIST = "figure-options";
 
 /**
@@ -731,42 +914,9 @@ function FigureOptions({ figures }: { figures: FigureOption[] }) {
   );
 }
 
-function MergeForm({ figure, eventId, figures }: { figure: FigureRef | NamedPerson; eventId: number; figures: FigureOption[] }) {
-  return (
-    <SubPanel
-      title="Tokoh ganda? Gabungkan"
-      tone="danger"
-      note={`Semua catatan ${figure.name} pindah ke tokoh yang dipilih, namanya menjadi alias di sana, dan ${figure.name} dinonaktifkan. Tidak bisa dibatalkan dari sini.`}
-    >
-      <form action={mergeFigures} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <Hidden fields={{ event_id: eventId, figure_id: figure.id }} />
-        <label style={{ ...label, flex: "1 1 280px" }}>
-          Gabungkan ke (ketik nama untuk mencari)
-          <input
-            name="into_id"
-            list={FIGURE_LIST}
-            required
-            autoComplete="off"
-            placeholder="mis. Muhaimin"
-            // Ids are [a-z0-9-] only, so they need no escaping in a pattern.
-            pattern={figures.filter((f) => f.id !== figure.id).map((f) => f.id).join("|")}
-            title="Pilih tokoh dari daftar saran"
-            style={input}
-          />
-        </label>
-        <label style={{ ...label, display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--color-mud)" }}>
-          <input type="checkbox" name="confirm" value="1" required />
-          Ya, gabungkan
-        </label>
-        <button type="submit" style={button("danger")}>Gabungkan</button>
-      </form>
-    </SubPanel>
-  );
-}
-
 function NamedList({ item, figures }: { item: Item; figures: FigureOption[] }) {
   if (item.named.length === 0) {
-    return <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Tidak ada nama lain yang dikenali.</p>;
+    return <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Tidak ada nama yang dikenali.</p>;
   }
   const isRecord = item.kind === "record";
   return (
@@ -776,23 +926,37 @@ function NamedList({ item, figures }: { item: Item; figures: FigureOption[] }) {
         // to it: /kurasi/<record>#nama-<slug>.
         <li key={`${p.kind}-${p.id}`} id={`nama-${p.id}`} style={{ scrollMarginTop: 80, padding: "14px 0", borderTop: i ? `1px solid ${RULE}` : "none" }}>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
-            <Pill tone={p.kind === "candidate" ? "pending" : "neutral"}>{p.kind === "candidate" ? "Nama baru" : "Tokoh terlacak"}</Pill>
+            <Pill tone={p.kind === "candidate" ? "pending" : "neutral"}>{p.kind === "candidate" ? "Nama baru" : "Sudah ada"}</Pill>
+            {p.owner ? <Pill tone="ink">pemilik catatan</Pill> : null}
             <span style={{ fontSize: 11.5, color: MUTED }}>disebut di {p.articles} artikel</span>
             {p.struck ? <Pill tone="danger">dicoret dari peristiwa</Pill> : null}
           </div>
           {p.kind === "figure" ? (
             <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap", opacity: p.struck ? 0.6 : 1 }}>
-              <details style={{ flex: "1 1 420px", minWidth: 0 }}>
+              {/* Everything about this figure in one fold: its data, whether it
+                  is someone else, and "Bukan orang". Closed, the line still
+                  says when a duplicate is suspected. */}
+              <details open={p.owner} style={{ flex: "1 1 420px", minWidth: 0 }}>
                 <summary style={{ cursor: "pointer" }}>
                   <FigureHeading figure={p} />
+                  {p.active !== false && likelyDuplicates(p, figures).length > 0 ? (
+                    <span style={{ marginLeft: 8 }}><Pill tone="pending">mungkin tokoh ganda</Pill></span>
+                  ) : null}
                   <span style={{ fontSize: 12, color: MUTED, marginLeft: 8 }}>sunting ▾</span>
                 </summary>
                 <SubPanel title="Data tokoh">
                   <FigureForm figure={p} eventId={item.event_id} />
                 </SubPanel>
-                <MergeForm figure={p} eventId={item.event_id} figures={figures} />
+                {p.active !== false ? <SamePerson person={p} eventId={item.event_id} figures={figures} /> : null}
+                {p.active !== false ? (
+                  // Its button sits beside "Simpan tokoh"; forms cannot nest,
+                  // so it submits this one by id.
+                  <form id={`bukan-orang-${p.id}`} action={notAPerson}>
+                    <Hidden fields={{ event_id: item.event_id, figure_id: p.id, confirm: 1 }} />
+                  </form>
+                ) : null}
               </details>
-              {!isRecord ? (
+              {!isRecord && !p.owner ? (
                 <form action={relateFigure}>
                   <Hidden fields={{ event_id: item.event_id, figure_id: p.id, struck: p.struck ? "0" : "1" }} />
                   <button type="submit" style={button("quiet")}>{p.struck ? "Pulihkan" : "Coret dari peristiwa"}</button>
@@ -800,7 +964,7 @@ function NamedList({ item, figures }: { item: Item; figures: FigureOption[] }) {
               ) : null}
             </div>
           ) : (
-            <CandidateRow person={p} />
+            <CandidateRow person={p} figures={figures} />
           )}
         </li>
       ))}
@@ -813,12 +977,15 @@ function NamedList({ item, figures }: { item: Item; figures: FigureOption[] }) {
  *
  * The form itself is shared with the queue (AcceptCandidateForm).
  */
-function CandidateRow({ person: p }: { person: NamedPerson }) {
+function CandidateRow({ person: p, figures }: { person: NamedPerson; figures: FigureOption[] }) {
   if (p.verdict) {
+    const [tone, text]: [PillTone, string] =
+      p.verdict === "promote" ? ["accept", "dijadikan tokoh"] :
+      p.verdict === "alias" ? ["accept", "disamakan dengan tokoh yang ada"] : ["danger", "ditolak"];
     return (
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ fontFamily: "var(--font-serif)", fontSize: 17, fontWeight: 600 }}>{p.name}</span>
-        <Pill tone={p.verdict === "promote" ? "accept" : "danger"}>{p.verdict === "promote" ? "diterima" : "ditolak"}</Pill>
+        <Pill tone={tone}>{text}</Pill>
         {p.verdict === "reject" ? (
           <form action={decide}>
             <Hidden fields={{ slug: p.id, verdict: "" }} />
@@ -834,10 +1001,303 @@ function CandidateRow({ person: p }: { person: NamedPerson }) {
         <span style={{ fontFamily: "var(--font-serif)", fontSize: 17, fontWeight: 600 }}>{p.name}</span>
         {p.role ? <span style={{ fontSize: 12.5, color: MUTED }}>liputan menyebutnya “{p.role}”</span> : null}
       </div>
-      <SubPanel title="Jadikan tokoh" note="Isian ini yang disimpan, apa adanya.">
+      <SamePerson person={p} eventId={0} figures={figures} />
+      <SubPanel title="Atau: jadikan tokoh baru" note="Isian ini yang disimpan, apa adanya.">
         <AcceptCandidateForm slug={p.id} name={p.name} role={p.role} />
       </SubPanel>
     </div>
+  );
+}
+
+/**
+ * "Is this someone already tracked?" — one panel for every person on the page,
+ * new name or existing figure alike. It leads with the figures that look like
+ * the same person (nobody remembers the whole roster), and ends with a search
+ * for any other. For a new name the answer is one click: it becomes that
+ * figure's alias. Merging two tracked figures moves records, so it asks for
+ * the tick; the suggested direction folds the figure with fewer records into
+ * the one with more, and the record's own figure stays put.
+ */
+function SamePerson({ person: p, eventId, figures }: { person: NamedPerson; eventId: number; figures: FigureOption[] }) {
+  const hints = likelyDuplicates(p, figures);
+  const isName = p.kind === "candidate";
+  const own = figures.find((f) => f.id === p.id)?.records ?? 0;
+  // A one-word alias matches inside longer names too: "Prasetyo" would also
+  // claim coverage of Budi Prasetyo.
+  const word = p.name.trim().toLowerCase();
+  const sharedWord = isName && !word.includes(" ")
+    ? figures.filter((f) => f.name.toLowerCase().split(/\s+/).includes(word)).map((f) => f.name)
+    : [];
+  return (
+    <div style={{ flexBasis: "100%", margin: "10px 0 4px", padding: "10px 12px", borderRadius: 6, background: "var(--color-cream-dark)", border: `1px dashed ${RULE}` }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: MUTED, marginBottom: 6 }}>
+        {hints.length ? "Mungkin orang yang sama" : "Orang yang sama dengan tokoh lain?"}
+      </div>
+      {sharedWord.length > 1 ? (
+        <p style={{ fontSize: 12.5, color: "var(--color-clay)", margin: "0 0 8px", lineHeight: 1.5 }}>
+          ⚠ “{p.name}” satu kata dan ada di nama {sharedWord.join(", ")}. Sebagai alias, ia akan ikut
+          mencocokkan liputan semua tokoh itu. Lebih aman ditolak, kecuali memang hanya dipakai untuk satu orang.
+        </p>
+      ) : null}
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+        {hints.map(({ figure: f, why }) => (
+          <li key={f.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ flex: "1 1 260px", minWidth: 0, fontSize: 13.5 }}>
+              <strong style={{ fontFamily: "var(--font-serif)", fontSize: 15 }}>{f.name}</strong>
+              <span style={{ color: MUTED }}>{f.role ? ` · ${f.role}` : ""} · {f.records} catatan · </span>
+              <Link href={`/tokoh/${f.id}`} target="_blank" style={{ color: MUTED, fontSize: 12 }}>/tokoh/{f.id} ↗</Link>
+              <span style={{ display: "block", fontSize: 12, color: MUTED }}>{why}</span>
+            </span>
+            <SameAction person={p} eventId={eventId} into={f.id} intoName={f.name}
+              reverse={!isName && (p.owner === true || own > f.records)} counts={[own, f.records]} />
+          </li>
+        ))}
+        {/* Anyone else on the roster: out of the way until asked for. */}
+        <li style={{ paddingTop: hints.length ? 6 : 0, borderTop: hints.length ? `1px solid ${RULE}` : "none" }}>
+          <details>
+            <summary style={{ cursor: "pointer", fontSize: 12.5, color: MUTED, fontWeight: 600 }}>
+              Tokoh lainnya…
+            </summary>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
+              <SameAction person={p} eventId={eventId} figures={figures} />
+            </div>
+          </details>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * The one action behind every "same person" choice. Given `into`, a button
+ * for that figure; given `figures`, a search field over the whole roster.
+ * `reverse` folds the other figure into this one instead.
+ */
+/** The second step of a destructive action: what it does, and the final button. */
+const CONFIRM_PANEL: React.CSSProperties = {
+  marginTop: 8, maxWidth: 460, background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8,
+  padding: "12px 14px", display: "grid", gap: 10, boxShadow: "0 4px 14px rgba(22, 19, 15, 0.08)",
+};
+
+function SameAction({ person: p, eventId, into, intoName, reverse = false, figures, counts }: {
+  person: NamedPerson; eventId: number; into?: string; intoName?: string; reverse?: boolean; figures?: FigureOption[];
+  /** Records of this figure and of `into`, for saying what a merge moves. */
+  counts?: [number, number];
+}) {
+  const isName = p.kind === "candidate";
+  const search = figures ? (
+    <label style={{ ...label, flex: "1 1 260px" }}>
+      Tokoh lain (ketik nama untuk mencari)
+      <input
+        name={isName ? "alias_of" : "into_id"}
+        list={FIGURE_LIST}
+        required
+        autoComplete="off"
+        placeholder="mis. Nusron Wahid"
+        // Ids are [a-z0-9-] only, so they need no escaping in a pattern.
+        pattern={figures.filter((f) => f.id !== p.id).map((f) => f.id).join("|")}
+        title="Pilih tokoh dari daftar saran"
+        style={input}
+      />
+    </label>
+  ) : null;
+  if (isName) {
+    return (
+      <form action={decide} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", flex: figures ? "1 1 100%" : undefined }}>
+        <Hidden fields={into ? { slug: p.id, verdict: "alias", alias_of: into } : { slug: p.id, verdict: "alias" }} />
+        {search}
+        <button type="submit" style={button("ink")}>{into ? `Samakan dengan ${intoName}` : "Samakan"}</button>
+      </form>
+    );
+  }
+  // Two steps instead of a tick box: "Gabungkan…" opens what each direction
+  // would move, and the choice is the final button. The suggested direction
+  // (fewer records into more; the record's own figure stays) comes first.
+  const fields: Record<string, string | number> = into
+    ? { event_id: eventId, figure_id: p.id, into_id: into, confirm: 1 }
+    : { event_id: eventId, figure_id: p.id, confirm: 1 };
+  const other = intoName ?? "tokoh yang dipilih";
+  const [mine, theirs] = counts ?? [undefined, undefined];
+  const n = (x: number | undefined) => (x !== undefined ? ` (${x} catatan)` : "");
+  const choices = [
+    { value: "into", text: `Ya, ${p.name} ke ${other}`, detail: `Catatan ${p.name}${n(mine)} pindah ke ${other}; ${p.name} dinonaktifkan dan namanya jadi alias di sana.` },
+    { value: "here", text: `Ya, ${other} ke ${p.name}`, detail: `Catatan ${other}${n(theirs)} pindah ke ${p.name}; ${other} dinonaktifkan dan namanya jadi alias di sini.` },
+  ];
+  if (reverse) choices.reverse();
+  return (
+    <form action={mergeFigures} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", flex: figures ? "1 1 100%" : undefined }}>
+      {/* Enter in the search field submits with the form's first button. A
+          disabled one first makes Enter do nothing, so a merge only ever
+          happens through the confirmation below. */}
+      <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
+      <Hidden fields={fields} />
+      {search}
+      {/* Opens in the flow, below the button, so it is never cut off by the
+          card's edge however narrow the column. */}
+      <details style={{ flex: "1 1 100%" }}>
+        <summary style={{ ...button("danger"), listStyle: "none", display: "inline-block" }}>Gabungkan…</summary>
+        <div style={CONFIRM_PANEL}>
+          <div style={{ fontSize: 12.5, color: MUTED }}>Ke arah mana? Tidak bisa dibatalkan dari sini.</div>
+          {choices.map((c, i) => (
+            <div key={c.value} style={{ display: "grid", gap: 4 }}>
+              <button type="submit" name="direction" value={c.value} style={{ ...button(i === 0 ? "danger" : "quiet"), textAlign: "left" }}>
+                {c.text}{i === 0 ? " (disarankan)" : ""}
+              </button>
+              <span style={{ fontSize: 12, color: "var(--color-mud)", lineHeight: 1.45 }}>{c.detail}</span>
+            </div>
+          ))}
+        </div>
+      </details>
+    </form>
+  );
+}
+
+const FRAMING_LABEL: Record<string, string> = {
+  own: "perbuatan tokoh sendiri",
+  about: "liputan tentang tokoh (bukan pelaku)",
+};
+
+function snapshotLine(s: ReworkSnapshot, figures: FigureOption[]): string {
+  const who = s.figure_id ? figures.find((f) => f.id === s.figure_id)?.name ?? s.figure_id : null;
+  return [
+    s.kind === "peristiwa" ? "Peristiwa" : `Catatan ${who ?? ""}`.trim(),
+    s.kind === "record" ? FRAMING_LABEL[s.framing === "about" ? "about" : "own"] : null,
+    s.event_type,
+  ].filter(Boolean).join(" · ");
+}
+
+/**
+ * Rework requests: a note and/or a change, drafted by the local model in the
+ * background, then shown beside the current entry to accept or throw away.
+ * The page does not refresh itself (no client script); "Muat ulang" does.
+ */
+function ReworkPanel({ item, figures }: { item: Item; figures: FigureOption[] }) {
+  const isRecord = item.kind === "record";
+  const busy = item.reworks.some((r) => r.status === "queued" || r.status === "running");
+  return (
+    <>
+      {item.reworks.map((r) => (
+        <ReworkItem key={r.id} rework={r} item={item} figures={figures} />
+      ))}
+      {busy ? null : (
+        <form action={rework} style={{ display: "grid", gap: 12, marginTop: item.reworks.length ? 16 : 0 }}>
+          <Hidden fields={{ event_id: item.event_id }} />
+          <label style={label}>
+            Apa yang salah? Tulis seperti memberi catatan ke penulis.
+            <textarea
+              name="note"
+              rows={3}
+              placeholder={isRecord
+                ? "mis. Nusron tidak menolak apa pun. KPK menyita mobil dari Arif Sugiyanto, orang kepercayaannya."
+                : "mis. Judulnya menyebut Jakarta, padahal kebakarannya di Tangerang."}
+              style={{ ...input, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+            />
+          </label>
+          {isRecord ? (
+            <>
+              <fieldset style={{ border: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+                <legend style={{ ...label, padding: 0, marginBottom: 4 }}>Sudut pandang</legend>
+                {[
+                  ["", "Biarkan"],
+                  ["own", "Perbuatan atau ucapan tokoh sendiri"],
+                  ["about", "Liputan tentang tokoh, tapi bukan dia pelakunya"],
+                ].map(([value, text]) => (
+                  <label key={value} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13.5 }}>
+                    <input type="radio" name="framing" value={value} defaultChecked={value === ""} />
+                    {text}
+                    {(value === "about" && item.framing === "about") || (value === "own" && item.framing !== "about")
+                      ? <span style={{ fontSize: 11.5, color: MUTED }}>(sekarang)</span> : null}
+                  </label>
+                ))}
+              </fieldset>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <label style={{ ...label, flex: "1 1 260px" }}>
+                  Pindahkan ke tokoh lain (kosongkan bila tidak)
+                  <input
+                    name="new_figure_id"
+                    list={FIGURE_LIST}
+                    autoComplete="off"
+                    placeholder="ketik nama untuk mencari"
+                    pattern={figures.filter((f) => f.id !== item.figure_id).map((f) => f.id).join("|")}
+                    title="Pilih tokoh dari daftar saran"
+                    style={input}
+                  />
+                </label>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13.5, paddingBottom: 8 }}>
+                  <input type="checkbox" name="to_peristiwa" value="1" />
+                  Jadikan peristiwa (bukan milik satu tokoh)
+                </label>
+              </div>
+            </>
+          ) : null}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button type="submit" style={button("ink")}>Kerjakan ulang</button>
+          </div>
+        </form>
+      )}
+    </>
+  );
+}
+
+function ReworkItem({ rework: r, item, figures }: { rework: Rework; item: Item; figures: FigureOption[] }) {
+  const asked = [
+    r.note ? `“${r.note}”` : null,
+    r.framing ? `sudut pandang: ${FRAMING_LABEL[r.framing]}` : null,
+    r.new_figure_id ? `pindah ke ${figures.find((f) => f.id === r.new_figure_id)?.name ?? r.new_figure_id}` : null,
+    r.to_peristiwa ? "jadikan peristiwa" : null,
+  ].filter(Boolean).join(" · ");
+  const [tone, text]: [PillTone, string] =
+    r.status === "ready" ? ["pending", "draf siap, tinjau"] :
+    r.status === "accepted" ? ["accept", "diterima"] :
+    r.status === "discarded" ? ["neutral", "dibuang"] :
+    r.status === "failed" ? ["danger", "gagal"] : ["pending", "sedang dikerjakan"];
+  const open = r.status === "ready" || r.status === "queued" || r.status === "running" || r.status === "failed";
+  return (
+    <details open={open} style={{ borderBottom: `1px solid ${RULE}`, padding: "10px 0" }}>
+      <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Pill tone={tone}>{text}</Pill>
+        <span style={{ fontSize: 13, color: "var(--color-mud)" }}>{asked}</span>
+        <span style={{ fontSize: 11.5, color: MUTED }}>{day(r.created_at)}</span>
+      </summary>
+      {r.status === "queued" || r.status === "running" ? (
+        <p style={{ fontSize: 13, color: MUTED, margin: "8px 0 0" }}>
+          Model lokal sedang menulis, biasanya kurang dari semenit.{" "}
+          <Link href={`/kurasi/${item.event_id}#ulang`} style={{ color: INK }}>Muat ulang</Link>
+        </p>
+      ) : null}
+      {r.status === "failed" ? (
+        <p style={{ fontSize: 13, color: "var(--color-clay)", margin: "8px 0 0" }}>
+          {r.error}
+          {r.error?.includes("Ollama") ? " Jalankan Ollama (ollama serve), lalu minta lagi." : ""}
+        </p>
+      ) : null}
+      {r.before && r.after ? (
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", marginTop: 10 }}>
+          {([["Sekarang", r.before], [r.status === "accepted" ? "Diterima" : "Draf baru", r.after]] as const).map(([heading, snap]) => (
+            <div key={heading} style={{ background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 6, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: MUTED }}>{heading}</div>
+              <div style={{ fontSize: 11.5, color: MUTED, margin: "4px 0" }}>{snapshotLine(snap, figures)}</div>
+              <div style={{ fontFamily: "var(--font-serif)", fontSize: 16.5, fontWeight: 600, lineHeight: 1.3 }}>{snap.title}</div>
+              <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--color-mud)", margin: "6px 0 0", whiteSpace: "pre-line" }}>{snap.summary_text}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {r.status === "ready" || r.status === "failed" ? (
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+          <form action={decideRework}>
+            <Hidden fields={{ event_id: item.event_id, request_id: r.id, decision: "discard" }} />
+            <button type="submit" style={button("quiet")}>Buang</button>
+          </form>
+          {r.status === "ready" ? (
+            <form action={decideRework}>
+              <Hidden fields={{ event_id: item.event_id, request_id: r.id, decision: "accept" }} />
+              <button type="submit" style={button("accept")}>Terima draf ini</button>
+            </form>
+          ) : null}
+        </div>
+      ) : null}
+    </details>
   );
 }
 

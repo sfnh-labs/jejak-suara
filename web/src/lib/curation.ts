@@ -1,4 +1,4 @@
-import { lquery as query, lqueryOne as queryOne, lrun, ltx, pipelineOp } from "./localDb";
+import { lquery as query, lqueryOne as queryOne, lrun, ltx, pipelineOp, pipelineOpInBackground } from "./localDb";
 
 /**
  * Curation, one event at a time.
@@ -44,6 +44,7 @@ export const REASONS = [
   { code: "mixed", label: "Campuran beberapa kejadian", hint: "Artikelnya tentang kejadian berbeda yang tergabung, mis. dua kebakaran di provinsi lain." },
   { code: "hoax", label: "Hoaks / sudah dibantah", hint: "Klaimnya keliru atau sudah dibantah." },
   { code: "garbled", label: "Judul/ringkasan rusak", hint: "Isinya ada, tetapi judul atau ringkasannya kacau." },
+  { code: "cv_material", label: "Bahan CV, bukan peristiwa", hint: "Pelantikan, jabatan baru, latar belakang: masuk ke CV tokoh (lihat “Jadikan info CV”)." },
   { code: "other", label: "Lainnya", hint: "Tulis alasannya di catatan." },
 ] as const;
 
@@ -288,7 +289,8 @@ export function parsePositions(raw: unknown): Position[] {
 
 /** The CV fields beside positions, as /kurasi edits them. */
 export interface Profile {
-  bio: string;
+  /** Not edited in /kurasi; null leaves the stored one as it is. */
+  bio: string | null;
   facts: { label: string; value: string }[];
   education: { year?: string; detail: string }[];
   sources: { label: string; url: string }[];
@@ -331,6 +333,12 @@ export interface NamedPerson {
   verdict: string | null;
   /** Peristiwa only: a related figure the curator struck. */
   struck?: boolean;
+  /** The record's own figure: who the record is about. */
+  owner?: boolean;
+  /** Figures only: the rest of the CV, so every figure edits the same way. */
+  profile?: Profile;
+  cv_checked_at?: string | null;
+  active?: boolean;
 }
 
 export interface LinkRow {
@@ -380,6 +388,57 @@ export interface Item {
   followups: { earlier: FollowupRow[]; later: FollowupRow[] };
   /** The labelled events the suggestion leans on, for "like these". */
   examples: { event_id: number; title: string | null; reasons: ReasonCode[] }[];
+  /** NULL = the figure's own act; 'about' = coverage concerning them. */
+  framing: string | null;
+  /** Rework requests on this event, newest first. */
+  reworks: Rework[];
+  /** "Jadikan info CV" drafts from this event, newest first. */
+  cvProposals: CvProposal[];
+}
+
+/** CV entries drafted from an event's articles (jejak/cv_extract.py). */
+export interface CvDraft {
+  positions: Position[];
+  facts: { label: string; value: string }[];
+  education: { year?: string; detail: string }[];
+  sources: { label: string; url: string }[];
+}
+
+export interface CvProposal {
+  id: number;
+  figure_id: string;
+  note: string | null;
+  status: ReworkStatus;
+  proposal: CvDraft | null;
+  error: string | null;
+  created_at: string;
+}
+
+/** An event as a rework sees it, before and after. */
+export interface ReworkSnapshot {
+  kind: Kind;
+  figure_id: string | null;
+  framing: string | null;
+  title: string | null;
+  event_type: string | null;
+  summary_text: string | null;
+}
+
+export type ReworkStatus = "queued" | "running" | "ready" | "accepted" | "discarded" | "failed";
+
+/** A curator's request to have an event written again (scripts/kurasi_ops.py rework). */
+export interface Rework {
+  id: number;
+  note: string | null;
+  framing: "own" | "about" | null;
+  new_figure_id: string | null;
+  to_peristiwa: boolean;
+  status: ReworkStatus;
+  error: string | null;
+  before: ReworkSnapshot | null;
+  after: ReworkSnapshot | null;
+  created_at: string;
+  finished_at: string | null;
 }
 
 function parseAliases(raw: unknown): string[] {
@@ -488,16 +547,35 @@ async function namedPeople(
   eventId: number
 ): Promise<NamedPerson[]> {
   const [figures, candidates] = await Promise.all([
-    query<{ id: string; name: string; role: string | null; aliases: string | null; positions: string | null }>(
-      `SELECT id, name, role, aliases, positions FROM figures WHERE active`
+    query<{
+      id: string; name: string; role: string | null; aliases: string | null; positions: string | null;
+      bio: string | null; facts: string | null; education: string | null; sources: string | null;
+      cv_checked_at: string | null;
+    }>(
+      `SELECT id, name, role, aliases, positions, bio, facts, education, sources, cv_checked_at
+         FROM figures WHERE active`
     ),
-    // Decided names are carried out at once (kurasi_ops.py), so an applied
-    // verdict is a settled one: only undecided names are still a question.
+    // The queue's names (3+ outlets), and any name mined from this event's
+    // own articles however few outlets used it: here the curator is reading
+    // the evidence, so one article is enough to ask. Decided names are
+    // carried out at once (kurasi_ops.py), so an applied verdict is settled.
     query<{ slug: string; name: string; role: string | null; verdict: string | null; full_name: string | null; records: string | null }>(
       `SELECT slug, name, COALESCE(curated_role, role) AS role, verdict, full_name, records
          FROM candidate_review
         WHERE slug NOT IN (SELECT id FROM figures)
-          AND (verdict IS NULL OR applied_at IS NULL)`
+          AND (verdict IS NULL OR applied_at IS NULL)
+       UNION
+       SELECT c.slug, c.name,
+              (SELECT m2.role FROM figure_mentions m2
+                WHERE m2.slug = c.slug AND m2.role <> '' LIMIT 1),
+              NULL, NULL, json_array(json_object('id', ?1))
+         FROM figure_candidates c
+        WHERE c.status = 'candidate'
+          AND c.slug NOT IN (SELECT id FROM figures)
+          AND c.slug NOT IN (SELECT slug FROM candidate_review)
+          AND EXISTS (SELECT 1 FROM figure_mentions m JOIN articles a ON a.id = m.article_id
+                       WHERE m.slug = c.slug AND a.event_id = ?1)`,
+      [eventId]
     ),
   ]);
 
@@ -526,6 +604,10 @@ async function namedPeople(
       aliases: parseAliases(f.aliases), positions: parsePositions(f.positions),
       articles: n, verdict: null,
       struck: relatedIds.get(f.id),
+      profile: {
+        bio: f.bio ?? "", facts: jsonList(f.facts), education: jsonList(f.education), sources: jsonList(f.sources),
+      },
+      cv_checked_at: f.cv_checked_at, active: true,
     });
   }
   for (const c of candidates) {
@@ -588,12 +670,12 @@ async function getLinks(kind: Kind, eventId: number): Promise<LinkRow[]> {
 
 export async function getItem(eventId: number): Promise<Item | null> {
   const row = await queryOne<
-    Omit<Item, "sources" | "owner" | "named" | "links" | "nearby" | "next_id" | "ruling" | "suggestion" | "examples">
+    Omit<Item, "sources" | "owner" | "named" | "links" | "nearby" | "next_id" | "ruling" | "suggestion" | "examples" | "reworks" | "cvProposals">
     & SuggestionColumns
     & { r_reasons: string | null; r_note: string | null; r_suggested: string | null }
   >(
     `SELECT e.id AS event_id, e.kind, e.figure_id, e.event_date, e.last_seen,
-            e.title, e.event_type, e.status, e.curated,
+            e.title, e.event_type, e.status, e.curated, e.framing,
             es.summary_text AS summary,
             cr.reasons AS r_reasons, cr.note AS r_note, cr.suggested AS r_suggested,
             ${SUGGESTION_SELECT}
@@ -619,7 +701,7 @@ export async function getItem(eventId: number): Promise<Item | null> {
       )
     : [];
 
-  const [articles, owner, related, links, next, followups] = await Promise.all([
+  const [articles, owner, related, links, next, followups, reworks, cvProposals] = await Promise.all([
     query<Omit<ItemSource, "has_body"> & { body: string | null }>(
       `SELECT id, source, url, title, published_at, summary AS lead, body
          FROM articles WHERE event_id = ?
@@ -659,6 +741,8 @@ export async function getItem(eventId: number): Promise<Item | null> {
       [ev.kind, eventId, ev.event_date]
     ),
     getFollowups(eventId),
+    getReworks(eventId),
+    getCvProposals(eventId),
   ]);
 
   // A struck figure wins over the still-present event_figures row.
@@ -692,6 +776,23 @@ export async function getItem(eventId: number): Promise<Item | null> {
       )
     : [];
 
+  // The record's figure heads the list: one place for every person in the
+  // coverage, the owner marked rather than kept apart.
+  if (owner) {
+    const terms = [owner.name, ...parseAliases(owner.aliases)].filter((t) => t.trim().length > 2);
+    named.unshift({
+      kind: "figure", id: owner.id, name: owner.name, role: owner.role,
+      aliases: parseAliases(owner.aliases), positions: parsePositions(owner.positions),
+      articles: texts.filter((t) => terms.some((x) => wordPattern(x, "i").test(t))).length,
+      verdict: null, owner: true,
+      profile: {
+        bio: owner.bio ?? "", facts: jsonList(owner.facts),
+        education: jsonList(owner.education), sources: jsonList(owner.sources),
+      },
+      cv_checked_at: owner.cv_checked_at, active: Boolean(owner.active),
+    });
+  }
+
   return {
     ...ev,
     sources: articles.map(({ body, ...a }) => ({
@@ -721,7 +822,173 @@ export async function getItem(eventId: number): Promise<Item | null> {
     suggestion,
     followups,
     examples: examples.map((x) => ({ ...x, reasons: jsonCodes(x.reasons) })),
+    reworks,
+    cvProposals,
   };
+}
+
+async function getCvProposals(eventId: number): Promise<CvProposal[]> {
+  const rows = await query<Omit<CvProposal, "proposal"> & { proposal: string | null }>(
+    `SELECT id, figure_id, note, status, proposal, error, created_at
+       FROM cv_proposals WHERE event_id = ? ORDER BY id DESC LIMIT 5`,
+    [eventId]
+  );
+  return rows.map((r) => {
+    let proposal: CvDraft | null = null;
+    try {
+      proposal = r.proposal ? (JSON.parse(r.proposal) as CvDraft) : null;
+    } catch {
+      proposal = null;
+    }
+    return { ...r, proposal };
+  });
+}
+
+/**
+ * "Jadikan info CV": have the local model draft what this event's articles
+ * say about a figure's offices, background and education
+ * (scripts/kurasi_ops.py cv-draft), for the curator to check and accept.
+ */
+export async function requestCvDraft(eventId: number, figureId: string, note: string | null): Promise<void> {
+  const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ? AND active`, [figureId]);
+  if (!fig) throw new Error(`unknown figure: ${figureId}`);
+  const busy = await queryOne(
+    `SELECT 1 FROM cv_proposals WHERE event_id = ? AND status IN ('queued', 'running') AND created_at > ?`,
+    [eventId, new Date(Date.now() - 15 * 60_000).toISOString()]
+  );
+  if (busy) throw new Error("a CV draft for this event is already running");
+  await lrun(
+    `INSERT INTO cv_proposals (event_id, figure_id, note, created_at) VALUES (?, ?, ?, ?)`,
+    [eventId, figureId, note, new Date().toISOString()]
+  );
+  const row = await queryOne<{ id: number }>(`SELECT max(id) AS id FROM cv_proposals WHERE event_id = ?`, [eventId]);
+  pipelineOpInBackground("cv-draft", String(row!.id));
+}
+
+const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Put the entries the curator kept onto the figure's CV, then take the record
+ * down as "Bahan CV" — it was a fact about someone, not something they did.
+ *
+ * Offices already listed (same role and body) are not repeated; a current one
+ * ("… – kini") goes first, since the first office is the figure's title. A
+ * fact replaces one with the same label. The article joins the CV's sources.
+ */
+export async function acceptCvDraft(proposalId: number, kept: CvDraft): Promise<void> {
+  const p = await queryOne<{ event_id: number; figure_id: string; status: string }>(
+    `SELECT event_id, figure_id, status FROM cv_proposals WHERE id = ?`, [proposalId]
+  );
+  if (!p || p.status !== "ready") throw new Error("this CV draft is not ready");
+  const f = await queryOne<{ positions: string | null; facts: string | null; education: string | null; sources: string | null }>(
+    `SELECT positions, facts, education, sources FROM figures WHERE id = ?`, [p.figure_id]
+  );
+  if (!f) throw new Error(`unknown figure: ${p.figure_id}`);
+
+  const positions = parsePositions(f.positions);
+  for (const pos of kept.positions) {
+    if (positions.some((x) => sameText(x.role, pos.role) && sameText(x.org, pos.org))) continue;
+    if (/kini|sekarang/i.test(pos.period)) positions.unshift(pos);
+    else positions.push(pos);
+  }
+  const facts = jsonList<{ label: string; value: string }>(f.facts);
+  for (const fact of kept.facts) {
+    const i = facts.findIndex((x) => sameText(x.label, fact.label));
+    if (i >= 0) facts[i] = fact;
+    else facts.push(fact);
+  }
+  const education = jsonList<{ year?: string; detail: string }>(f.education);
+  for (const e of kept.education) {
+    if (!education.some((x) => sameText(x.detail, e.detail))) education.push(e);
+  }
+  const sources = jsonList<{ label: string; url: string }>(f.sources);
+  for (const src of kept.sources) {
+    if (!sources.some((x) => x.url === src.url)) sources.push(src);
+  }
+
+  await ltx(async () => {
+    await lrun(
+      `UPDATE figures SET positions = ?, role = COALESCE(?, role), facts = ?, education = ?, sources = ?,
+              cv_curated = 1 WHERE id = ?`,
+      [JSON.stringify(positions), positions[0] ? positionTitle(positions[0]) : null,
+       JSON.stringify(facts), JSON.stringify(education), JSON.stringify(sources), p.figure_id]
+    );
+    // What the curator kept, beside what the model drafted: the nightly
+    // `kurasi` stage learns from the difference.
+    await lrun(`UPDATE cv_proposals SET status = 'accepted', accepted = ?, decided_at = ? WHERE id = ?`,
+      [JSON.stringify(kept), new Date().toISOString(), proposalId]);
+  });
+  await setCuration(p.event_id, "rejected", ["cv_material"], `Masuk CV ${p.figure_id}`);
+}
+
+export async function discardCvDraft(proposalId: number): Promise<void> {
+  await lrun(
+    `UPDATE cv_proposals SET status = 'discarded', decided_at = ? WHERE id = ? AND status IN ('ready', 'failed')`,
+    [new Date().toISOString(), proposalId]
+  );
+}
+
+async function getReworks(eventId: number): Promise<Rework[]> {
+  const rows = await query<Omit<Rework, "before" | "after" | "to_peristiwa"> & {
+    before: string | null; after: string | null; to_peristiwa: number;
+  }>(
+    `SELECT id, note, framing, new_figure_id, to_peristiwa, status, error, before, after,
+            created_at, finished_at
+       FROM rework_requests WHERE event_id = ? ORDER BY id DESC LIMIT 10`,
+    [eventId]
+  );
+  const snap = (raw: string | null): ReworkSnapshot | null => {
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as ReworkSnapshot;
+    } catch {
+      return null;
+    }
+  };
+  return rows.map((r) => ({ ...r, to_peristiwa: Boolean(r.to_peristiwa), before: snap(r.before), after: snap(r.after) }));
+}
+
+/**
+ * Ask for an event to be written again: with the curator's note correcting
+ * the current draft, framed as about the figure rather than by them, given to
+ * another figure, or made a peristiwa — any combination. The local model
+ * drafts it in the background; nothing changes until the draft is accepted.
+ */
+export async function requestRework(
+  eventId: number,
+  opts: { note: string | null; framing: "own" | "about" | null; newFigureId: string | null; toPeristiwa: boolean }
+): Promise<void> {
+  if (!opts.note && !opts.framing && !opts.newFigureId && !opts.toPeristiwa) {
+    throw new Error("a rework needs a note or a change to ask for");
+  }
+  const busy = await queryOne(
+    // One at a time per event; a run that died (a closed laptop) stops
+    // blocking after a quarter of an hour.
+    `SELECT 1 FROM rework_requests
+      WHERE event_id = ? AND status IN ('queued', 'running')
+        AND created_at > ?`, [eventId, new Date(Date.now() - 15 * 60_000).toISOString()]
+  );
+  if (busy) throw new Error("a rework of this event is already running");
+  await lrun(
+    `INSERT INTO rework_requests (event_id, note, framing, new_figure_id, to_peristiwa, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [eventId, opts.note, opts.framing, opts.newFigureId, opts.toPeristiwa, new Date().toISOString()]
+  );
+  const row = await queryOne<{ id: number }>(`SELECT max(id) AS id FROM rework_requests WHERE event_id = ?`, [eventId]);
+  pipelineOpInBackground("rework", String(row!.id));
+}
+
+/** Make a ready draft the event's entry. */
+export async function acceptRework(requestId: number): Promise<void> {
+  await pipelineOp("rework-accept", String(requestId));
+}
+
+/** Throw a ready draft away; the event stays as it was. */
+export async function discardRework(requestId: number): Promise<void> {
+  await lrun(
+    `UPDATE rework_requests SET status = 'discarded', decided_at = ? WHERE id = ? AND status IN ('ready', 'failed')`,
+    [new Date().toISOString(), requestId]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -992,10 +1259,126 @@ export async function saveFigureEdit(
 }
 
 /** Every active figure, for the merge target picker. */
-export type FigureOption = { id: string; name: string; role: string | null };
+export type FigureOption = {
+  id: string;
+  name: string;
+  role: string | null;
+  aliases: string[];
+  /** Records the figure owns, so a suggested merge can say which way round. */
+  records: number;
+};
 
 export async function getFigureOptions(): Promise<FigureOption[]> {
-  return query(`SELECT id, name, role FROM figures WHERE active ORDER BY name`);
+  const rows = await query<{ id: string; name: string; role: string | null; aliases: string | null; records: number }>(
+    `SELECT f.id, f.name, f.role, f.aliases,
+            (SELECT count(*) FROM events e WHERE e.figure_id = f.id AND e.kind = 'record') AS records
+       FROM figures f WHERE f.active ORDER BY f.name`
+  );
+  return rows.map((r) => ({ ...r, aliases: parseAliases(r.aliases) }));
+}
+
+/** A tracked figure that may be the same person as someone on the page. */
+export interface DuplicateHint {
+  figure: FigureOption;
+  /** Why it was suggested, in the curator's words. */
+  why: string;
+}
+
+// Given names shared by too many people to suggest anything on their own.
+const COMMON_NAMES = new Set(`muhammad mohammad mohamad muhamad moh mochamad ahmad achmad abdul
+abdullah siti nur nurul sri budi agus dwi tri eko putra putri wahyu adi andi arif rahmat
+hendra dedi joko bambang yusuf ali hasan ibrahim ismail umar anwar rizki rizky fajar`.split(/\s+/));
+
+// Words that come before a name without being part of it.
+const LEADING = new Set(["pak", "bapak", "bu", "ibu", "h", "hj", "dr", "drs", "ir", "kh", "prof", "haji"]);
+
+function nameTokens(name: string): string[] {
+  const words = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  while (words.length > 1 && LEADING.has(words[0])) words.shift();
+  return words;
+}
+
+function contains(long: string[], short: string[]): boolean {
+  for (let i = 0; i + short.length <= long.length; i++) {
+    if (short.every((w, j) => long[i + j] === w)) return true;
+  }
+  return false;
+}
+
+function editDistance(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** Every word of `short` in `long`, in order, gaps allowed. */
+function inOrder(long: string[], short: string[]): boolean {
+  let i = 0;
+  for (const w of long) if (w === short[i]) i++;
+  return i === short.length;
+}
+
+/**
+ * How alike two spellings are, 0 when not worth suggesting. A shared surname
+ * alone is not enough — Santoso, Hidayat or Nugroho are half the country —
+ * and a one-word name only counts when it is someone's actual name, not one
+ * of their aliases ("Prabowo" is in a stray alias of Pramono's).
+ */
+function likeness(a: string, b: string, singleOk: boolean): [number, string] {
+  const ta = nameTokens(a);
+  const tb = nameTokens(b);
+  if (ta.length === 0 || tb.length === 0) return [0, ""];
+  const ja = ta.join(" ");
+  const jb = tb.join(" ");
+  if (ja === jb) return [100, `nama sama: “${b}”`];
+  const [long, short] = ta.length >= tb.length ? [ta, tb] : [tb, ta];
+  const single = short.length === 1;
+  if (single && !(singleOk && short[0].length >= 5 && !COMMON_NAMES.has(short[0]))) {
+    return ja.length >= 8 && editDistance(ja, jb) <= 2 ? [70, `ejaan mirip: “${a}” / “${b}”`] : [0, ""];
+  }
+  if (contains(long, short)) return [80, `“${a}” dan “${b}”: yang satu memuat yang lain`];
+  if (!single && inOrder(long, short)) return [75, `“${a}” dan “${b}”: nama yang sama, lebih lengkap`];
+  if (ja.length >= 8 && editDistance(ja, jb) <= 2) return [70, `ejaan mirip: “${a}” / “${b}”`];
+  return [0, ""];
+}
+
+/** Aliases that join two people ("Prabowo Subianto-Gibran Rakabuming") match
+ *  both; they are left out of the comparison. */
+function usable(term: string): boolean {
+  return !/\S\s*[-–\/&]\s*\S/.test(term) || term.trim().split(/\s+/).length <= 2;
+}
+
+/**
+ * Tracked figures that may be the same person as `person`, best first — so
+ * the curator is shown a merge rather than having to remember the roster.
+ * Compared on every spelling either side answers to (name and aliases).
+ */
+export function likelyDuplicates(
+  person: { id: string; name: string; aliases: string[] },
+  figures: FigureOption[],
+  limit = 3
+): DuplicateHint[] {
+  const mine = [person.name, ...person.aliases].filter(usable);
+  const hits: { score: number; hint: DuplicateHint }[] = [];
+  for (const f of figures) {
+    if (f.id === person.id) continue;
+    let best: [number, string] = [0, ""];
+    for (const a of mine) {
+      for (const b of [f.name, ...f.aliases].filter(usable)) {
+        const l = likeness(a, b, a === person.name || b === f.name);
+        if (l[0] > best[0]) best = l;
+      }
+    }
+    if (best[0] > 0) hits.push({ score: best[0] + Math.min(f.records, 50) / 100, hint: { figure: f, why: best[1] } });
+  }
+  return hits.sort((x, y) => y.score - x.score).slice(0, limit).map((h) => h.hint);
 }
 
 /**
@@ -1005,6 +1388,15 @@ export async function getFigureOptions(): Promise<FigureOption[]> {
  */
 export async function mergeFigure(fromId: string, intoId: string): Promise<void> {
   await pipelineOp("merge", fromId, intoId);
+}
+
+/**
+ * A tracked "figure" that is no one — a place, an office, a headline fragment.
+ * Retired and taken off every peristiwa; its records come down
+ * (scripts/kurasi_ops.py not-a-person).
+ */
+export async function removeNotAPerson(figureId: string): Promise<void> {
+  await pipelineOp("not-a-person", figureId);
 }
 
 /**
@@ -1030,4 +1422,55 @@ export async function setRelatedFigure(
       await lrun(`INSERT OR IGNORE INTO event_figures (event_id, figure_id) VALUES (?, ?)`, [eventId, figureId]);
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// What the pipeline learns from the curator (jejak/kurasi.py)
+
+export interface KurasiReport {
+  run_at: string;
+  drafted: { reworks: number; cv: number; failed: number };
+  learned: { summary: number; cv: number; marked: number };
+  name_prefixes: string[];
+  names_queue: number;
+  lessons_active: number;
+  labels: number;
+}
+
+/** The last run of the nightly `kurasi` stage. */
+export async function getLatestReport(): Promise<KurasiReport | null> {
+  const row = await queryOne<{ run_at: string; stats: string }>(
+    `SELECT run_at, stats FROM kurasi_reports ORDER BY id DESC LIMIT 1`
+  );
+  if (!row) return null;
+  try {
+    return { run_at: row.run_at, ...(JSON.parse(row.stats) as Omit<KurasiReport, "run_at">) };
+  } catch {
+    return null;
+  }
+}
+
+export interface Lesson {
+  id: number;
+  kind: "summary" | "cv";
+  event_id: number | null;
+  figure_id: string | null;
+  wrong: string | null;
+  note: string | null;
+  right: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export async function getLessons(): Promise<Lesson[]> {
+  const rows = await query<Omit<Lesson, "active"> & { active: number }>(
+    `SELECT id, kind, event_id, figure_id, wrong, note, right, active, created_at
+       FROM curation_lessons ORDER BY id DESC LIMIT 200`
+  );
+  return rows.map((r) => ({ ...r, active: Boolean(r.active) }));
+}
+
+/** A lesson switched off is never shown to the model again. */
+export async function setLessonActive(id: number, active: boolean): Promise<void> {
+  await lrun(`UPDATE curation_lessons SET active = ? WHERE id = ?`, [active, id]);
 }

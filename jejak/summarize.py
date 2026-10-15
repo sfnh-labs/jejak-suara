@@ -306,10 +306,85 @@ def _split_title(text: str) -> tuple[str | None, str]:
     return (title or None), body.strip()
 
 
+# Record about a figure rather than by them: coverage that concerns the
+# figure without being their own act — a confidant arrested, their ministry
+# investigated. Chosen by a curator in /kurasi (events.framing = 'about'),
+# because the ledger framing above would otherwise make the model invent an
+# act for them ("Menolak penyitaan..." when they did nothing).
+SYSTEM_RECORD_ABOUT = f"""You are an editorial assistant for a public accountability archive
+that keeps a per-person record of {{name}}. This entry is coverage ABOUT
+{{name}} — something reported that concerns them — not something {{name}}
+said or did. Write it grounded ONLY in the provided source documents.
+
+{_GROUNDING}
+- Do NOT make {{name}} the actor. Never write that {{name}} said, did,
+  refused, approved or knew anything the documents do not explicitly say
+  {{name}} personally said or did.
+- Say plainly who acted (e.g. KPK, a court, a ministry) and how the reporting
+  connects the matter to {{name}}, in the documents' own terms.
+
+The JUDUL names what happened, from {{name}}'s page's point of view:
+- Do NOT write {{name}}'s name in it. Refer to people by their relation when
+  the documents give it ("orang kepercayaannya", "kementeriannya").
+- Not a verb of {{name}}'s own act. 4-10 words, sentence case, no quotation
+  marks, no question marks, no trailing punctuation.
+{_KATEGORI_RULES}
+
+The bullets must not repeat the JUDUL; each adds a fact it leaves out.
+
+Output format, exactly:
+JUDUL: <what happened>
+KATEGORI: <type of event, 1-3 words>
+---
+- <bullet> [Sumber 1]
+"""
+
+_PROMPT_RECORD_ABOUT = (
+    "Tuliskan satu entri tentang liputan yang menyangkut {name} berdasarkan "
+    "dokumen di atas. {name} BUKAN pelakunya: jangan menulis bahwa {name} "
+    "melakukan atau mengatakan sesuatu yang tidak tertulis di dokumen. "
+    "Sebutkan siapa yang bertindak dan bagaimana liputan mengaitkannya dengan "
+    "{name}. Setiap poin diakhiri [Sumber 1], [Sumber 2], dan seterusnya, "
+    "ditulis pada baris sendiri dan diawali tanda '- '.\n\n"
+    "{categories}"
+    "Ikuti kerangka ini persis, termasuk kata JUDUL, KATEGORI, dan garis ---:\n"
+    "JUDUL: <apa yang terjadi, tanpa nama {name}, 4-10 kata>\n"
+    "KATEGORI: <jenis peristiwa, 1-3 kata>\n"
+    "---\n"
+    "- <fakta> [Sumber 1]"
+)
+
+# A curator's correction of an earlier draft, from /kurasi's rework requests.
+_CORRECTION = (
+    "\n\nCATATAN KURATOR — koreksi atas draf sebelumnya, wajib diikuti:\n"
+    "{note}\n\n"
+    "Draf sebelumnya, yang dikoreksi (jangan ulangi kesalahannya):\n"
+    "JUDUL: {title}\n{summary}\n\n"
+    "Catatan ini mengoreksi pembingkaian dan ketelitian saja. Semua isi tetap "
+    "harus berasal dari dokumen di atas; jangan menambahkan fakta dari catatan "
+    "yang tidak tertulis di dokumen."
+)
+
+
+def _lessons_block(examples: list[dict]) -> str:
+    """The curator's past corrections of similar entries (jejak/kurasi.py), as
+    worked examples: what was wrong, why, and what they accepted."""
+    parts = ["\n\nCONTOH KOREKSI KURATOR pada entri serupa. Pelajari kesalahannya; "
+             "jangan salin isinya, karena dokumennya berbeda:"]
+    for i, ex in enumerate(examples, 1):
+        parts.append(f"\n[Contoh {i}]\nDraf yang keliru:\n{ex['wrong']}\n"
+                     f"Catatan kurator: {ex['note'] or '-'}\nVersi yang diterima:\n{ex['right']}")
+    return "\n".join(parts)
+
+
 def summarize_ollama(
     articles: list[sqlite3.Row],
     figure_name: str | None = None,
     existing_categories: list[str] | None = None,
+    framing: str | None = None,
+    note: str | None = None,
+    previous: tuple[str | None, str | None] | None = None,
+    examples: list[dict] | None = None,
 ) -> tuple[str | None, str | None, str, list[dict]]:
     """Summarize via a local Ollama model with inline citation markers.
 
@@ -325,12 +400,21 @@ def summarize_ollama(
     """
     formatted = _format_articles(articles)
     categories = _format_categories(existing_categories or [])
-    if figure_name:
+    if figure_name and framing == "about":
+        system = SYSTEM_RECORD_ABOUT.format(name=figure_name)
+        prompt = _PROMPT_RECORD_ABOUT.format(name=figure_name, categories=categories)
+    elif figure_name:
         system = SYSTEM_RECORD.format(name=figure_name)
         prompt = _PROMPT_RECORD.format(name=figure_name, categories=categories)
     else:
         system = SYSTEM_PERISTIWA
         prompt = _PROMPT_PERISTIWA.format(categories=categories)
+    if examples:
+        prompt += _lessons_block(examples)
+    if note:
+        prev_title, prev_summary = previous or (None, None)
+        prompt += _CORRECTION.format(note=note.strip(), title=prev_title or "-",
+                                     summary=prev_summary or "-")
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": f"{formatted}\n\n{prompt}"},
@@ -356,11 +440,21 @@ def summarize_ollama(
     return title, category, text, citations
 
 
-def summarize_event(conn: sqlite3.Connection, event_id: int) -> dict:
-    """Generate a grounded draft entry for one event and store it.
+def draft_event(
+    conn: sqlite3.Connection,
+    event_id: int,
+    *,
+    kind: str | None = None,
+    figure_id: str | None = None,
+    framing: str | None = None,
+    note: str | None = None,
+    examples: list[dict] | None = None,
+) -> dict:
+    """Write a grounded entry for one event without storing it.
 
-    Sets the event status to 'approved' (the summary has been written).
-    Returns a small result dict for logging.
+    The overrides are a curator's rework (scripts/kurasi_ops.py): the entry as
+    it would read with another kind, figure or framing, and with their note
+    correcting the current draft. Left out, each is the event's own.
     """
     articles = conn.execute(
         # The web numbers sources in this same order to link each [Sumber N]
@@ -374,34 +468,43 @@ def summarize_event(conn: sqlite3.Connection, event_id: int) -> dict:
         raise ValueError(f"event {event_id} has no articles")
 
     ev = conn.execute(
-        """SELECT e.kind, e.status, COALESCE(f.name, e.figure_id) AS figure_name
-             FROM events e LEFT JOIN figures f ON f.id = e.figure_id
+        """SELECT e.kind, e.status, e.figure_id, e.framing, e.title, s.summary_text
+             FROM events e LEFT JOIN event_summaries s ON s.event_id = e.id
             WHERE e.id = ?""",
         (event_id,),
     ).fetchone()
-    if ev and ev["status"] == "candidate":
-        # A peristiwa candidate has not cleared PERISTIWA_MIN_OUTLETS yet — see
-        # cluster.promote_peristiwa. This function always ends with
-        # status='approved', so calling it here would publish an
-        # uncorroborated event. Enforced here, not just in call sites: a
-        # broadened SQL filter in a batch script is exactly how this once
-        # slipped through.
-        raise ValueError(
-            f"event {event_id} is still a candidate (not yet corroborated) — "
-            "refusing to summarize/approve it"
-        )
-    figure_name = ev["figure_name"] if ev and ev["kind"] == "record" else None
+    if ev is None:
+        raise ValueError(f"no event {event_id}")
+    kind = kind or ev["kind"]
+    figure_id = figure_id if figure_id is not None else ev["figure_id"]
+    framing = framing if framing is not None else ev["framing"]
+    figure_name = None
+    if kind == "record" and figure_id:
+        row = conn.execute("SELECT name FROM figures WHERE id = ?", (figure_id,)).fetchone()
+        figure_name = row["name"] if row else figure_id
 
     outlets = {a["source"] for a in articles}
-    corroboration = len(outlets)
-    single_source = 1 if corroboration < 2 else 0
-
-    existing_categories = _existing_categories(conn)
     title, category, summary_text, citations = summarize_ollama(
-        articles, figure_name, existing_categories
+        articles, figure_name, _existing_categories(conn),
+        framing=framing, note=note, previous=(ev["title"], ev["summary_text"]),
+        examples=examples,
     )
-    model_used = f"ollama/{OLLAMA_MODEL}"
+    return {
+        "event_id": event_id,
+        "title": title,
+        "category": category,
+        "summary_text": summary_text,
+        "citations": citations,
+        "outlets": sorted(outlets),
+        "corroboration": len(outlets),
+        "single_source": len(outlets) < 2,
+        "model": f"ollama/{OLLAMA_MODEL}",
+    }
 
+
+def store_draft(conn: sqlite3.Connection, draft: dict) -> None:
+    """Make a draft the event's entry, and mark the event summarized. Does not commit."""
+    event_id = draft["event_id"]
     conn.execute(
         """INSERT INTO event_summaries
            (event_id, summary_text, citations_json, corroboration_count,
@@ -414,8 +517,8 @@ def summarize_event(conn: sqlite3.Connection, event_id: int) -> dict:
              single_source_flag=excluded.single_source_flag,
              model=excluded.model,
              generated_at=excluded.generated_at""",
-        (event_id, summary_text, json.dumps(citations, ensure_ascii=False),
-         corroboration, single_source, model_used,
+        (event_id, draft["summary_text"], json.dumps(draft["citations"], ensure_ascii=False),
+         draft["corroboration"], 1 if draft["single_source"] else 0, draft["model"],
          datetime.now(timezone.utc).isoformat()),
     )
     # The working title is the first source's headline (teaser phrasing,
@@ -423,31 +526,50 @@ def summarize_event(conn: sqlite3.Connection, event_id: int) -> dict:
     # keyword guess made before any of the articles' content was read closely.
     # Replacing both here — grounded in the actual documents, in the model's
     # open vocabulary rather than a fixed list — is what makes a record read as
-    # the figure's own entry and lets the type taxonomy grow with the archive
-    # instead of being fixed in code. Either can come back empty (guarded
-    # above), in which case the earlier value is left as-is rather than
-    # cleared.
+    # the figure's own entry and lets the type taxonomy grow with the archive.
+    # Either can come back empty, in which case the earlier value is kept.
     sets, params = ["status = 'approved'"], []
-    if title:
+    if draft["title"]:
         sets.append("title = ?")
-        params.append(title)
-    if category:
+        params.append(draft["title"])
+    if draft["category"]:
         sets.append("event_type = ?")
-        params.append(category)
+        params.append(draft["category"])
     params.append(event_id)
     conn.execute(f"UPDATE events SET {', '.join(sets)} WHERE id = ?", params)
-    conn.commit()
 
+
+def summarize_event(conn: sqlite3.Connection, event_id: int) -> dict:
+    """Generate a grounded entry for one event and store it.
+
+    Sets the event status to 'approved' (the summary has been written).
+    Returns a small result dict for logging.
+    """
+    ev = conn.execute("SELECT status FROM events WHERE id = ?", (event_id,)).fetchone()
+    if ev and ev["status"] == "candidate":
+        # A peristiwa candidate has not cleared PERISTIWA_MIN_OUTLETS yet — see
+        # cluster.promote_peristiwa. This function always ends with
+        # status='approved', so calling it here would publish an
+        # uncorroborated event. Enforced here, not just in call sites: a
+        # broadened SQL filter in a batch script is exactly how this once
+        # slipped through.
+        raise ValueError(
+            f"event {event_id} is still a candidate (not yet corroborated) — "
+            "refusing to summarize/approve it"
+        )
+    draft = draft_event(conn, event_id)
+    store_draft(conn, draft)
+    conn.commit()
     return {
         "event_id": event_id,
-        "outlets": sorted(outlets),
-        "corroboration": corroboration,
-        "single_source": bool(single_source),
-        "citations": len(citations),
-        "chars": len(summary_text),
-        "title": title,
-        "category": category,
-        "model": model_used,
+        "outlets": draft["outlets"],
+        "corroboration": draft["corroboration"],
+        "single_source": draft["single_source"],
+        "citations": len(draft["citations"]),
+        "chars": len(draft["summary_text"]),
+        "title": draft["title"],
+        "category": draft["category"],
+        "model": draft["model"],
     }
 
 

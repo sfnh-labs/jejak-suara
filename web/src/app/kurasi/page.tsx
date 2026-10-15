@@ -3,6 +3,7 @@ import {
   PAGE_SIZE,
   reasonLabel,
   getKindCounts,
+  getLatestReport,
   getQueue,
   getQueueCounts,
   type Filter,
@@ -49,10 +50,11 @@ export default async function Kurasi({
   const filter: Filter = allowed.find((f) => f.key === sp.filter)?.key ?? "unreviewed";
   const page = Math.max(1, Number(sp.page) || 1);
 
-  const [rows, counts, kindCounts] = await Promise.all([
+  const [rows, counts, kindCounts, report] = await Promise.all([
     getQueue(kind, filter, page),
     getQueueCounts(kind),
     getKindCounts(),
+    getLatestReport(),
   ]);
   const pages = Math.max(1, Math.ceil(counts[filter] / PAGE_SIZE));
 
@@ -63,6 +65,8 @@ export default async function Kurasi({
           <div className="eyebrow" style={{ marginBottom: 12 }}>
             Internal ·{" "}
             <Link href="/kurasi/kandidat" style={{ color: MUTED }}>Antrean nama baru</Link>
+            {" · "}
+            <Link href="/kurasi/pelajaran" style={{ color: MUTED }}>Pelajaran model</Link>
           </div>
           <h1
             style={{
@@ -82,6 +86,16 @@ export default async function Kurasi({
             dan <strong>langsung dipakai pipeline</strong>; situs publik
             mengikutinya pada push berikutnya ke Neon.
           </p>
+          {report ? (
+            // The nightly `kurasi` stage (jejak/kurasi.py).
+            <p style={{ fontSize: 12.5, color: MUTED, margin: "10px 0 0" }}>
+              Putaran kurasi terakhir {day(report.run_at)}: {report.drafted.reworks + report.drafted.cv} draf disusun
+              {report.drafted.failed ? `, ${report.drafted.failed} gagal` : ""}
+              {" · "}{report.learned.summary + report.learned.cv} pelajaran baru, {report.lessons_active} aktif
+              {report.name_prefixes.length ? ` · nama diawali ${report.name_prefixes.join(", ")} tidak lagi diajukan` : ""}
+              {" · "}<Link href="/kurasi/pelajaran" style={{ color: MUTED }}>lihat pelajaran</Link>
+            </p>
+          ) : null}
         </header>
 
         <nav style={{ display: "flex", gap: 22, padding: "18px 0 0", fontSize: 15, fontWeight: 600, fontFamily: "var(--font-serif)" }}>

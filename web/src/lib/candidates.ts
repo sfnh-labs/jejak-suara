@@ -13,9 +13,10 @@ import { lquery as query, lrun, ltx, pipelineOp } from "./localDb";
  * a promote by the pipeline's own code (scripts/kurasi_ops.py), a reject
  * here. `applied_at` records that it was.
  */
-export type CandidateVerdict = "promote" | "reject";
+/** `alias`: the name is a figure already tracked, written another way. */
+export type CandidateVerdict = "promote" | "reject" | "alias";
 
-export const CANDIDATE_VERDICTS: readonly CandidateVerdict[] = ["promote", "reject"];
+export const CANDIDATE_VERDICTS: readonly CandidateVerdict[] = ["promote", "reject", "alias"];
 
 export function isCandidateVerdict(value: unknown): value is CandidateVerdict {
   return (
@@ -51,6 +52,8 @@ export interface CandidateRow {
   full_name: string | null;
   aliases: string | null;
   curated_role: string | null;
+  /** promote: the page address chosen · alias: the figure it was matched to. */
+  curated_slug: string | null;
   decided_at: string | null;
   applied_at: string | null;
   notes: string | null;
@@ -131,7 +134,7 @@ export async function getCandidates(
 
   const rows = await query<RawRow>(
     `SELECT slug, name, outlets, mentions, role, headlines,
-            records, verdict, full_name, aliases, curated_role,
+            records, verdict, full_name, aliases, curated_role, curated_slug,
             decided_at, applied_at, notes
        FROM candidate_review
       WHERE ${where}
@@ -182,14 +185,17 @@ export async function setCandidateVerdict(
   curatedPositions?: string | null
 ): Promise<void> {
   const now = new Date().toISOString();
-  if (verdict === "promote") {
+  // A name from a record page may be below the queue's bar and so have no
+  // row yet; it gets one, so its decision is kept like any other.
+  await ensureRows([slug]);
+  if (verdict === "promote" || verdict === "alias") {
     await lrun(
       `UPDATE candidate_review
-          SET verdict = 'promote', full_name = ?2, aliases = ?3, curated_role = ?4,
+          SET verdict = ?8, full_name = ?2, aliases = ?3, curated_role = ?4,
               curated_slug = ?5, curated_positions = ?6, decided_at = ?7, applied_at = NULL
         WHERE slug = ?1 AND applied_at IS NULL`,
       [slug, fullName || null, aliases || null, curatedRole || null, curatedSlug || null,
-       curatedPositions || null, now]
+       curatedPositions || null, now, verdict]
     );
     try {
       await pipelineOp("candidate", slug);
@@ -244,6 +250,7 @@ export async function setCandidateNote(slug: string, notes: string | null): Prom
 export async function rejectCandidates(slugs: string[]): Promise<void> {
   if (slugs.length === 0) return;
   const now = new Date().toISOString();
+  await ensureRows(slugs);
   await ltx(async () => {
     await lrun(
       `UPDATE figure_candidates SET status = 'rejected'
@@ -257,4 +264,14 @@ export async function rejectCandidates(slugs: string[]): Promise<void> {
       [slugs, now]
     );
   });
+}
+
+/** Give mined names a candidate_review row if they have none (no evidence
+ *  columns yet; the next queue refresh fills them if they qualify). */
+async function ensureRows(slugs: string[]): Promise<void> {
+  await lrun(
+    `INSERT OR IGNORE INTO candidate_review (slug, name)
+     SELECT slug, name FROM figure_candidates WHERE slug IN (SELECT value FROM json_each(?))`,
+    [slugs]
+  );
 }

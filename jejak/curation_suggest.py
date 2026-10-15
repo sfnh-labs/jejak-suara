@@ -48,6 +48,7 @@ REASONS = {
     "mixed": "Campuran beberapa kejadian",
     "hoax": "Hoaks / sudah dibantah",
     "garbled": "Judul/ringkasan rusak",
+    "cv_material": "Bahan CV, bukan peristiwa",
     "other": "Lainnya",
 }
 # Similar coverage says nothing about these: a duplicate is a duplicate of one

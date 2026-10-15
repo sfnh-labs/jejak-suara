@@ -107,3 +107,19 @@ def test_religious_honorific_marks_a_person(text, name):
 def test_shorter_form_is_left_for_the_curator():
     tracked = {"mahkamah agung sunarto": "mahkamah-agung-sunarto"}
     assert mentions._same_as_tracked("Mahkamah Agung", tracked) is None
+
+
+@pytest.mark.parametrize("text, name, role", [
+    ("disita dari tersangka yakni mantan Bupati Kebumen, Arif Sugiyanto. Arif hadir.",
+     "Arif Sugiyanto", "Bupati Kebumen"),
+    ("Wali Kota Surabaya, Eri Cahyadi, menyatakan siap.", "Eri Cahyadi", "Wali Kota Surabaya"),
+])
+def test_office_set_off_by_a_comma(text, name, role):
+    found = {(m.name, m.role) for m in mentions.extract(text)}
+    assert (name, role) in found
+    assert not any(m.name in ("Kebumen", "Surabaya") for m in mentions.extract(text))
+
+
+def test_a_list_of_people_is_not_one_office():
+    names = {m.name for m in mentions.extract("Bupati Kebumen, Wakil Bupati Ristawati hadir.")}
+    assert "Wakil Bupati Ristawati" not in names

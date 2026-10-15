@@ -105,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="let proven suggestions take events off the site "
                            "(same as JEJAK_AUTO_HIDE=1)")
     sub.add_parser("curation-report")
+    # Curation upkeep: draft what /kurasi left undone, learn from the curator.
+    sub.add_parser("kurasi")
     sub.add_parser("translate")
     sub.add_parser("run")
     p_bf = sub.add_parser("backfill")
@@ -211,6 +213,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "suggest":
             res = curation_suggest.run(conn, auto_hide=True if args.auto_hide else None)
             print("suggest:", res)
+        if args.cmd == "kurasi":
+            from . import kurasi
+            print("kurasi:", kurasi.run_stage(conn))
         if args.cmd == "curation-report":
             print(curation_suggest.report(conn))
         if args.cmd == "timeline":

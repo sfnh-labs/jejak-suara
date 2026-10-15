@@ -73,7 +73,8 @@ export async function getCv(figureId: string): Promise<Cv | null> {
   const positions = list<{ role?: string; org?: string; period?: string }>(row.positions);
   const facts = list<CvFact>(row.facts).filter((f) => f.label !== "Jabatan kini");
   const education = list<CvEducation>(row.education);
-  if (!row.bio && positions.length === 0 && facts.length === 0 && education.length === 0) {
+  // The bio is no longer shown, so on its own it is not a CV.
+  if (positions.length === 0 && facts.length === 0 && education.length === 0) {
     return null;
   }
 

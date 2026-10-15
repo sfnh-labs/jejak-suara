@@ -122,8 +122,9 @@ run_stage "ingest" -m jejak.cli ingest
 run_stage "backfill" -m jejak.cli backfill --days 6
 run_stage "fetch" -m jejak.cli fetch --limit 1000
 run_stage "mentions" -m jejak.cli mentions --limit 1000
-# The names queue in /kurasi/kandidat, from what mentions just mined.
-run_stage "names queue" scripts/kurasi_ops.py refresh
+# Curation upkeep (jejak/kurasi.py): draft any rework or CV request /kurasi
+# left undone, learn from the curator's decisions, rebuild the names queue.
+run_stage "kurasi" -m jejak.cli kurasi
 for stage in cluster link quotes translate summarize sentiment buzzer suggest; do
     run_stage "$stage" -m jejak.cli "$stage"
 done

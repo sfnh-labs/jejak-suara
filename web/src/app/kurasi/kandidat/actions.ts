@@ -34,6 +34,14 @@ export async function decide(formData: FormData): Promise<void> {
     revalidatePath("/kurasi", "layout");
     return;
   }
+  // The name is a figure already tracked: it becomes one of their aliases.
+  if (verdict === "alias") {
+    const figureId = String(formData.get("alias_of") ?? "").trim();
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
+    await setCandidateVerdict(slug, verdict, null, null, null, figureId, null);
+    revalidatePath("/kurasi", "layout");
+    return;
+  }
 
   const fullName = String(formData.get("full_name") ?? "").trim();
   const aliases = String(formData.get("aliases") ?? "").trim();

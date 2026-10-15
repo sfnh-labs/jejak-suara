@@ -119,8 +119,8 @@ try {
     # roster. Runs before clustering so a figure accepted since the last run
     # owns the articles clustered this cycle.
     Invoke-Stage "mentions" @("-m", "jejak.cli", "mentions", "--limit", "1000")
-    # The names queue in /kurasi/kandidat, from what mentions just mined.
-    Invoke-Stage "names queue" @("scripts\kurasi_ops.py", "refresh")
+    # Curation upkeep: undone drafts, learning from the curator, names queue.
+    Invoke-Stage "kurasi" @("-m", "jejak.cli", "kurasi")
 
     foreach ($stage in @("cluster", "link", "quotes", "translate", "summarize",
                          "sentiment", "buzzer", "suggest")) {

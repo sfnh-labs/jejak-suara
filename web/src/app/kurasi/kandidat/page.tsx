@@ -211,10 +211,10 @@ function CandidateItem({ row: r }: { row: CandidateRow }) {
                 fontWeight: 700,
                 letterSpacing: "0.08em",
                 textTransform: "uppercase",
-                color: r.verdict === "promote" ? "#3d6b4a" : "var(--color-clay)",
+                color: r.verdict === "reject" ? "var(--color-clay)" : "#3d6b4a",
               }}
             >
-              {r.verdict === "promote" ? "diterima" : "ditolak"}
+              {r.verdict === "promote" ? "diterima" : r.verdict === "alias" ? `alias ${r.curated_slug ?? ""}` : "ditolak"}
             </span>
           ) : null}
         </div>

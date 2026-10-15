@@ -16,6 +16,15 @@ import {
   setFollowupVerdict,
   setLinkVerdict,
   setRelatedFigure,
+  requestRework,
+  removeNotAPerson,
+  requestCvDraft,
+  acceptCvDraft,
+  discardCvDraft,
+  type CvDraft,
+  setLessonActive,
+  acceptRework,
+  discardRework,
 } from "@/lib/curation";
 
 /*
@@ -176,9 +185,10 @@ export async function editFigure(formData: FormData): Promise<void> {
     const eduDetails = column("edu_detail");
     const srcLabels = column("src_label");
     const srcUrls = column("src_url", 1000);
-    const bio = text(formData, "bio", 2000);
     profile = {
-      bio,
+      // Not curated: a figure is read from their records and current office,
+      // so the stored bio is left as it is.
+      bio: null,
       facts: factLabels
         .map((label, i) => ({ label, value: factValues[i] ?? "" }))
         .filter((f) => f.label && f.value),
@@ -211,6 +221,80 @@ export async function mergeFigures(formData: FormData): Promise<void> {
   if (!fromId || !intoId) throw new Error("figure_id and into_id are required");
   // The checkbox is the confirmation: a plain form has no dialog to ask with.
   if (formData.get("confirm") !== "1") throw new Error("merge not confirmed");
-  await mergeFigure(fromId, intoId);
+  // The buttons say which way: "into" folds this figure into the other,
+  // "here" folds the other into this one.
+  if (formData.get("direction") === "here") await mergeFigure(intoId, fromId);
+  else await mergeFigure(fromId, intoId);
   done(eventId(formData));
+}
+
+/**
+ * Ask for the event to be written again. Records only: another figure, the
+ * "about" framing and making it a peristiwa. Any event: a note.
+ */
+export async function rework(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const note = text(formData, "note", 2000) || null;
+  const rawFraming = optional(formData, "framing");
+  const framing = rawFraming === "own" || rawFraming === "about" ? rawFraming : null;
+  const figure = text(formData, "new_figure_id", 120).toLowerCase() || null;
+  if (figure && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figure)) throw new Error("invalid figure");
+  await requestRework(id, { note, framing, newFigureId: figure, toPeristiwa: formData.get("to_peristiwa") === "1" });
+  done(id);
+}
+
+export async function decideRework(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const requestId = eventId(formData, "request_id");
+  if (formData.get("decision") === "accept") await acceptRework(requestId);
+  else await discardRework(requestId);
+  done(id);
+}
+
+/** "Bukan orang": retire a figure that is a place, an office or a fragment. */
+export async function notAPerson(formData: FormData): Promise<void> {
+  const figureId = text(formData, "figure_id", 120);
+  if (!figureId) throw new Error("figure_id is required");
+  if (formData.get("confirm") !== "1") throw new Error("not confirmed");
+  await removeNotAPerson(figureId);
+  done(eventId(formData));
+}
+
+/** "Jadikan info CV": draft CV entries for a figure from this event's articles. */
+export async function cvDraft(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const figureId = text(formData, "figure_id", 120).toLowerCase();
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
+  await requestCvDraft(id, figureId, text(formData, "note", 1000) || null);
+  done(id);
+}
+
+/** Accept the CV entries as the curator left them, or throw the draft away. */
+export async function decideCvDraft(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const proposalId = eventId(formData, "proposal_id");
+  if (formData.get("decision") !== "accept") {
+    await discardCvDraft(proposalId);
+    done(id);
+    return;
+  }
+  const column = (field: string, max = 300) => formData.getAll(field).map((v) => String(v).trim().slice(0, max));
+  const [roles, orgs, periods] = [column("cv_role"), column("cv_org"), column("cv_period")];
+  const [labels, values] = [column("cv_label"), column("cv_value", 500)];
+  const [years, details] = [column("cv_year"), column("cv_detail", 500)];
+  const [srcLabels, srcUrls] = [column("cv_src_label"), column("cv_src_url", 1000)];
+  const kept: CvDraft = {
+    positions: roles.map((role, i) => ({ role, org: orgs[i] ?? "", period: periods[i] ?? "" })).filter((x) => x.role),
+    facts: labels.map((label, i) => ({ label, value: values[i] ?? "" })).filter((x) => x.label && x.value),
+    education: details.map((detail, i) => (years[i] ? { year: years[i], detail } : { detail })).filter((x) => x.detail),
+    sources: srcUrls.map((url, i) => ({ label: srcLabels[i] || url, url })).filter((x) => /^https?:\/\//.test(x.url)),
+  };
+  await acceptCvDraft(proposalId, kept);
+  done(id);
+}
+
+export async function toggleLesson(formData: FormData): Promise<void> {
+  const id = eventId(formData, "lesson_id");
+  await setLessonActive(id, formData.get("active") === "1");
+  revalidatePath("/kurasi/pelajaran");
 }

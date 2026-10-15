@@ -277,8 +277,8 @@ export async function getPeristiwa(limit = 60, ids?: number[]): Promise<Peristiw
            FROM event_figures ef
            LEFT JOIN figures f ON f.id = ef.figure_id
           -- A figure struck in /kurasi is gone from jejak.db's event_figures,
-          -- and the push prunes it here.
-          WHERE ef.event_id = e.id
+          -- and the push prunes it here; a retired one is never shown.
+          WHERE ef.event_id = e.id AND COALESCE(f.active, true)
        ) rel ON TRUE
       WHERE e.kind = 'peristiwa'
         AND ${LIVE("e")}
