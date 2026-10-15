@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   PAGE_SIZE,
+  reasonLabel,
   getKindCounts,
   getQueue,
   getQueueCounts,
@@ -24,6 +25,8 @@ const KINDS: { key: Kind; label: string }[] = [
 
 const FILTERS: { key: Filter; label: string; kinds: Kind[] }[] = [
   { key: "unreviewed", label: "Belum ditinjau", kinds: ["record", "peristiwa"] },
+  { key: "suggested", label: "Disarankan turun", kinds: ["record", "peristiwa"] },
+  { key: "auto", label: "Disembunyikan otomatis", kinds: ["record", "peristiwa"] },
   { key: "links", label: "Usulan tautan", kinds: ["record"] },
   { key: "live", label: "Tayang", kinds: ["record", "peristiwa"] },
   { key: "rejected", label: "Diturunkan", kinds: ["record", "peristiwa"] },
@@ -100,7 +103,7 @@ export default async function Kurasi({
         </nav>
 
         <div style={{ display: "flex", gap: 18, padding: "14px 0 6px", fontSize: 13, fontWeight: 600, flexWrap: "wrap" }}>
-          {allowed.map((f) => (
+          {allowed.filter((f) => f.key !== "auto" || counts.auto > 0 || filter === "auto").map((f) => (
             <Link
               key={f.key}
               href={href(kind, f.key)}
@@ -170,6 +173,13 @@ function QueueItem({ row: r }: { row: QueueRow }) {
           {r.curated ? (
             <span style={{ fontWeight: 600, color: r.curated === "rejected" ? "var(--color-clay)" : MUTED }}>
               · {r.curated === "rejected" ? "diturunkan" : "sudah diperiksa"}
+              {r.curated === "rejected" && r.reasons.length > 0 ? `: ${r.reasons.map(reasonLabel).join(", ")}` : ""}
+            </span>
+          ) : r.suggestion ? (
+            <span style={{ fontWeight: 600, color: "#7a5a12" }}>
+              · {r.suggestion.auto_hide ? "disembunyikan otomatis" : "saran turun"}
+              {r.suggestion.reason ? `: ${reasonLabel(r.suggestion.reason)}` : ""}
+              {r.suggestion.confidence !== null ? ` (${Math.round(r.suggestion.confidence * 100)}%)` : ""}
             </span>
           ) : null}
         </div>

@@ -18,12 +18,19 @@ import type {
  * by /kurasi; it is a Postgres-only column the pipeline never touches, so a
  * rejection survives the next crawl's sync (scripts/sync_to_neon.py).
  *
+ * A third, weaker gate: an event the pipeline's suggester auto-hid
+ * (curation_suggestions.auto_hide, off unless enabled and proven precise)
+ * stays down only while no curator has ruled on it. Any verdict wins.
+ *
  * IS DISTINCT FROM, not `<>`: a plain inequality is NULL for the untouched
  * rows, which is every event nobody has curated yet, and would hide the site.
  */
 export const LIVE = (alias: string) =>
   `${alias}.status IN ('new', 'summarized', 'approved')
-   AND ${alias}.curated IS DISTINCT FROM 'rejected'`;
+   AND ${alias}.curated IS DISTINCT FROM 'rejected'
+   AND (${alias}.curated IS NOT NULL OR NOT EXISTS (
+     SELECT 1 FROM curation_suggestions cs
+      WHERE cs.event_id = ${alias}.id AND cs.auto_hide = 1))`;
 
 /**
  * Everything a record card needs, aggregated per event.

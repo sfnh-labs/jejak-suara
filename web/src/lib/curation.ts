@@ -32,6 +32,48 @@ export function isVerdict(value: unknown): value is Verdict {
   return typeof value === "string" && (VERDICTS as readonly string[]).includes(value);
 }
 
+/**
+ * Why an event came down. Every takedown names one (or more); the codes are
+ * the labels jejak/curation_suggest.py learns from, so they are kept in step
+ * with REASONS there. Order is the order /kurasi lists them in.
+ */
+export const REASONS = [
+  { code: "wrong_person", label: "Salah orang", hint: "Liputan tentang orang lain, misalnya nama sama." },
+  { code: "not_their_action", label: "Bukan tindakan tokoh", hint: "Tokoh hanya disebut atau dikutip, bukan pelakunya." },
+  { code: "trivial", label: "Remeh / seremonial", hint: "Kunjungan, ucapan selamat, seremoni tanpa substansi." },
+  { code: "not_newsworthy", label: "Tak relevan untuk rekam jejak", hint: "Benar, tetapi tak berarti bagi rekam jejak tokoh ini." },
+  { code: "duplicate", label: "Duplikat", hint: "Sudah ada catatan atau peristiwa yang sama." },
+  { code: "hoax", label: "Hoaks / sudah dibantah", hint: "Klaimnya keliru atau sudah dibantah." },
+  { code: "garbled", label: "Judul/ringkasan rusak", hint: "Isinya ada, tetapi judul atau ringkasannya kacau." },
+  { code: "other", label: "Lainnya", hint: "Tulis alasannya di catatan." },
+] as const;
+
+export type ReasonCode = (typeof REASONS)[number]["code"];
+
+export function isReasonCode(value: unknown): value is ReasonCode {
+  return typeof value === "string" && REASONS.some((r) => r.code === value);
+}
+
+export function reasonLabel(code: string | null | undefined): string {
+  return REASONS.find((r) => r.code === code)?.label ?? code ?? "";
+}
+
+/** The pipeline's guess at what the curator would do; see curation_suggest.py. */
+export interface Suggestion {
+  reason: ReasonCode | null;
+  confidence: number | null;
+  support: number;
+  examples: number[];
+  auto_hide: boolean;
+}
+
+/** Why the curator ruled as they did, as recorded beside the verdict. */
+export interface Ruling {
+  reasons: ReasonCode[];
+  note: string | null;
+  suggested: string | null;
+}
+
 export type LinkVerdict = "confirmed" | "rejected";
 
 export function isLinkVerdict(value: unknown): value is LinkVerdict {
@@ -40,15 +82,26 @@ export function isLinkVerdict(value: unknown): value is LinkVerdict {
 
 export type Kind = "record" | "peristiwa";
 
-/** Which slice of the queue to show. `links` = records with unruled proposals. */
-export type Filter = "unreviewed" | "live" | "rejected" | "links";
+/**
+ * Which slice of the queue to show. `links` = records with unruled proposals;
+ * `suggested` = unreviewed events the suggester would take down; `auto` =
+ * events it did take down, waiting for a curator to confirm or restore.
+ */
+export type Filter = "unreviewed" | "suggested" | "auto" | "live" | "rejected" | "links";
 
 const PUBLIC = "e.status IN ('new', 'summarized', 'approved')";
 
+const AUTO_HIDDEN = `e.curated IS NULL AND EXISTS (
+    SELECT 1 FROM curation_suggestions cs WHERE cs.event_id = e.id AND cs.auto_hide = 1)`;
+
 const FILTER_SQL: Record<Filter, string> = {
-  live: "e.curated IS DISTINCT FROM 'rejected'",
+  live: `e.curated IS DISTINCT FROM 'rejected' AND NOT (${AUTO_HIDDEN})`,
   rejected: "e.curated = 'rejected'",
   unreviewed: "e.curated IS NULL",
+  suggested: `e.curated IS NULL AND EXISTS (
+    SELECT 1 FROM curation_suggestions cs
+     WHERE cs.event_id = e.id AND cs.reason IS NOT NULL AND cs.auto_hide = 0)`,
+  auto: AUTO_HIDDEN,
   links: `EXISTS (
     SELECT 1 FROM record_links l
      WHERE l.record_id = e.id
@@ -72,6 +125,50 @@ export interface QueueRow {
   /** Proposed peristiwa links nobody has ruled on (records only). */
   open_links: number;
   confirmed_links: number;
+  /** Takedown reasons, for a rejected row. */
+  reasons: ReasonCode[];
+  suggestion: Suggestion | null;
+}
+
+interface SuggestionColumns {
+  s_reason: ReasonCode | null;
+  s_confidence: number | null;
+  s_support: number | null;
+  s_examples: string | null;
+  s_auto_hide: number | null;
+  scored: boolean;
+}
+
+const SUGGESTION_SELECT = `cs.reason AS s_reason, cs.confidence AS s_confidence,
+            cs.support AS s_support, cs.examples AS s_examples,
+            cs.auto_hide AS s_auto_hide, cs.event_id IS NOT NULL AS scored`;
+
+function jsonCodes(raw: string | null | undefined): ReasonCode[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isReasonCode) : [];
+  } catch {
+    return [];
+  }
+}
+
+function suggestionOf(r: SuggestionColumns): Suggestion | null {
+  if (!r.scored || (!r.s_reason && !r.s_auto_hide)) return null;
+  let examples: number[] = [];
+  try {
+    const parsed: unknown = JSON.parse(r.s_examples ?? "[]");
+    if (Array.isArray(parsed)) examples = parsed.filter((x): x is number => typeof x === "number");
+  } catch {
+    // a malformed list only costs the "like these" links
+  }
+  return {
+    reason: isReasonCode(r.s_reason) ? r.s_reason : null,
+    confidence: r.s_confidence === null ? null : Number(r.s_confidence),
+    support: Number(r.s_support ?? 0),
+    examples,
+    auto_hide: Number(r.s_auto_hide ?? 0) === 1,
+  };
 }
 
 export const PAGE_SIZE = 50;
@@ -86,9 +183,9 @@ export async function getQueue(
   filter: Filter,
   page = 1
 ): Promise<QueueRow[]> {
-  return query<QueueRow>(
+  const rows = await query<Omit<QueueRow, "reasons" | "suggestion"> & SuggestionColumns & { reasons: string | null }>(
     `SELECT e.id AS event_id, e.kind, e.figure_id, f.name AS figure_name,
-            e.event_date, e.title, e.curated,
+            e.event_date, e.title, e.curated, cr.reasons, ${SUGGESTION_SELECT},
             COALESCE(src.outlet_count, 0)  AS outlet_count,
             COALESCE(src.article_count, 0) AS article_count,
             es.event_id IS NOT NULL        AS has_summary,
@@ -97,6 +194,8 @@ export async function getQueue(
        FROM events e
        LEFT JOIN figures f ON f.id = e.figure_id
        LEFT JOIN event_summaries es ON es.event_id = e.id
+       LEFT JOIN curation_reasons cr ON cr.event_id = e.id
+       LEFT JOIN curation_suggestions cs ON cs.event_id = e.id
        LEFT JOIN LATERAL (
          SELECT count(DISTINCT a.source)::int AS outlet_count,
                 count(*)::int                 AS article_count
@@ -114,28 +213,27 @@ export async function getQueue(
              OR (e.kind = 'peristiwa' AND p.peristiwa_id = e.id)
        ) lk ON TRUE
       WHERE e.kind = $1 AND ${PUBLIC} AND ${FILTER_SQL[filter]}
-      ORDER BY e.event_date DESC NULLS LAST, e.id DESC
+      ORDER BY ${filter === "suggested" ? "cs.confidence DESC NULLS LAST," : ""}
+               e.event_date DESC NULLS LAST, e.id DESC
       LIMIT $2 OFFSET $3`,
     [kind, PAGE_SIZE, (Math.max(page, 1) - 1) * PAGE_SIZE]
   );
+  return rows.map(({ s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored, reasons, ...r }) => ({
+    ...r,
+    reasons: jsonCodes(reasons),
+    suggestion: suggestionOf({ s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored }),
+  }));
 }
 
 export async function getQueueCounts(kind: Kind): Promise<Record<Filter, number>> {
+  const keys = Object.keys(FILTER_SQL) as Filter[];
   const row = await queryOne<Record<Filter, string>>(
-    `SELECT count(*) FILTER (WHERE ${FILTER_SQL.unreviewed}) AS unreviewed,
-            count(*) FILTER (WHERE ${FILTER_SQL.live})       AS live,
-            count(*) FILTER (WHERE ${FILTER_SQL.rejected})   AS rejected,
-            count(*) FILTER (WHERE ${FILTER_SQL.links})      AS links
+    `SELECT ${keys.map((k) => `count(*) FILTER (WHERE ${FILTER_SQL[k]}) AS ${k}`).join(",\n            ")}
        FROM events e
       WHERE e.kind = $1 AND ${PUBLIC}`,
     [kind]
   );
-  return {
-    unreviewed: Number(row?.unreviewed ?? 0),
-    live: Number(row?.live ?? 0),
-    rejected: Number(row?.rejected ?? 0),
-    links: Number(row?.links ?? 0),
-  };
+  return Object.fromEntries(keys.map((k) => [k, Number(row?.[k] ?? 0)])) as Record<Filter, number>;
 }
 
 export async function getKindCounts(): Promise<Record<Kind, number>> {
@@ -270,6 +368,10 @@ export interface Item {
   /** Peristiwa around the record's date that are not linked yet (records only). */
   nearby: { event_id: number; title: string | null; event_date: string | null }[];
   next_id: number | null;
+  ruling: Ruling | null;
+  suggestion: Suggestion | null;
+  /** The labelled events the suggestion leans on, for "like these". */
+  examples: { event_id: number; title: string | null; reasons: ReasonCode[] }[];
 }
 
 function parseAliases(raw: unknown): string[] {
@@ -409,16 +511,37 @@ async function getLinks(kind: Kind, eventId: number): Promise<LinkRow[]> {
 }
 
 export async function getItem(eventId: number): Promise<Item | null> {
-  const ev = await queryOne<Omit<Item, "sources" | "owner" | "named" | "links" | "nearby" | "next_id">>(
+  const row = await queryOne<
+    Omit<Item, "sources" | "owner" | "named" | "links" | "nearby" | "next_id" | "ruling" | "suggestion" | "examples">
+    & SuggestionColumns
+    & { r_reasons: string | null; r_note: string | null; r_suggested: string | null }
+  >(
     `SELECT e.id AS event_id, e.kind, e.figure_id, e.event_date, e.last_seen,
             e.title, e.event_type, e.status, e.curated,
-            es.summary_text AS summary
+            es.summary_text AS summary,
+            cr.reasons AS r_reasons, cr.note AS r_note, cr.suggested AS r_suggested,
+            ${SUGGESTION_SELECT}
        FROM events e
        LEFT JOIN event_summaries es ON es.event_id = e.id
+       LEFT JOIN curation_reasons cr ON cr.event_id = e.id
+       LEFT JOIN curation_suggestions cs ON cs.event_id = e.id
       WHERE e.id = $1`,
     [eventId]
   );
-  if (!ev) return null;
+  if (!row) return null;
+  const { s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored, r_reasons, r_note, r_suggested, ...ev } = row;
+  const suggestion = suggestionOf({ s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored });
+  const ruling: Ruling | null = r_reasons === null && r_note === null
+    ? null
+    : { reasons: jsonCodes(r_reasons), note: r_note, suggested: r_suggested };
+  const examples = suggestion?.examples.length
+    ? await query<{ event_id: number; title: string | null; reasons: string | null }>(
+        `SELECT cr.event_id, COALESCE(e.title, cr.title) AS title, cr.reasons
+           FROM curation_reasons cr LEFT JOIN events e ON e.id = cr.event_id
+          WHERE cr.event_id = ANY($1::int[])`,
+        [suggestion.examples.slice(0, 5)]
+      )
+    : [];
 
   const [articles, owner, related, links, next] = await Promise.all([
     query<ItemSource & { body: string | null }>(
@@ -516,15 +639,57 @@ export async function getItem(eventId: number): Promise<Item | null> {
     links,
     nearby,
     next_id: next?.id ?? null,
+    ruling,
+    suggestion,
+    examples: examples.map((x) => ({ ...x, reasons: jsonCodes(x.reasons) })),
   };
 }
 
 // ---------------------------------------------------------------------------
 // Writes
 
-/** Record a verdict. `null` clears it, putting the event back in `unreviewed`. */
-export async function setCuration(eventId: number, verdict: Verdict | null): Promise<void> {
-  await query(`UPDATE events SET curated = $1 WHERE id = $2`, [verdict, eventId]);
+/**
+ * Record a verdict and why. `null` clears it, putting the event back in
+ * `unreviewed` and dropping its label.
+ *
+ * The label snapshots the event as the curator saw it, so it still means
+ * something after the pipeline re-clusters or drops the event. One statement,
+ * so the verdict and its reasons never disagree.
+ */
+export async function setCuration(
+  eventId: number,
+  verdict: Verdict | null,
+  reasons: ReasonCode[] = [],
+  note: string | null = null,
+  suggested: string | null = null
+): Promise<void> {
+  if (verdict === null) {
+    await query(
+      `WITH d AS (DELETE FROM curation_reasons WHERE event_id = $1 RETURNING 1)
+       UPDATE events SET curated = NULL WHERE id = $1`,
+      [eventId]
+    );
+    return;
+  }
+  await query(
+    `WITH u AS (UPDATE events SET curated = $2 WHERE id = $1 RETURNING id)
+     INSERT INTO curation_reasons
+            (event_id, verdict, reasons, note, kind, figure_id, title, summary,
+             outlets, suggested, decided_at)
+     SELECT e.id, $2, $3, $4, e.kind, e.figure_id, e.title, es.summary_text,
+            (SELECT count(DISTINCT a.source)::int FROM articles a WHERE a.event_id = e.id),
+            $5, now()::text
+       FROM events e
+       LEFT JOIN event_summaries es ON es.event_id = e.id
+      WHERE e.id = $1
+     ON CONFLICT (event_id) DO UPDATE
+       SET verdict = EXCLUDED.verdict, reasons = EXCLUDED.reasons,
+           note = EXCLUDED.note, title = EXCLUDED.title,
+           summary = EXCLUDED.summary, outlets = EXCLUDED.outlets,
+           suggested = COALESCE(EXCLUDED.suggested, curation_reasons.suggested),
+           decided_at = EXCLUDED.decided_at`,
+    [eventId, verdict, JSON.stringify(reasons), note, suggested]
+  );
 }
 
 /**

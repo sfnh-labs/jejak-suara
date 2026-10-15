@@ -129,6 +129,12 @@ TABLES: tuple[Table, ...] = (
     Table("corrections", "id", (
         "id", "event_id", "submitted_by", "body", "status", "created_at",
     ), serial=True),
+    # The suggester's output (jejak/curation_suggest.py). Its labels go the
+    # other way: curation_reasons is curator-owned and never pushed.
+    Table("curation_suggestions", "event_id", (
+        "event_id", "reason", "confidence", "support", "examples",
+        "auto_hide", "model", "scored_at",
+    )),
 )
 
 

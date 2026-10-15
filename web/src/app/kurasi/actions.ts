@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   isLinkVerdict,
+  isReasonCode,
   isVerdict,
   mergeFigure,
   positionTitle,
@@ -50,14 +51,36 @@ function done(id: number) {
   revalidatePath(`/kurasi/${id}`);
 }
 
-/** Take an event down, mark it checked, or clear the verdict. */
+/**
+ * Take an event down, mark it checked, or clear the verdict.
+ *
+ * A takedown has to say why: the reasons are what the suggester learns from.
+ * A plain form cannot require "at least one of these checkboxes", so a
+ * takedown without one comes back to the page with a message rather than an
+ * error page.
+ */
 export async function curate(formData: FormData): Promise<void> {
   const id = eventId(formData);
   const verdict = optional(formData, "verdict");
   if (verdict !== null && !isVerdict(verdict)) {
     throw new Error(`invalid verdict: ${verdict}`);
   }
-  await setCuration(id, verdict);
+  const reasons = [...new Set(formData.getAll("reason").map(String))].filter(isReasonCode);
+  const note = text(formData, "note", 1000) || null;
+  if (verdict === "rejected" && reasons.length === 0) {
+    redirect(`/kurasi/${id}?perlu=alasan#keputusan`);
+  }
+  if (reasons.includes("other") && !note) {
+    redirect(`/kurasi/${id}?perlu=catatan#keputusan`);
+  }
+  const suggested = optional(formData, "suggested");
+  await setCuration(
+    id,
+    verdict,
+    verdict === "rejected" ? reasons : [],
+    note,
+    suggested !== null && isReasonCode(suggested) ? suggested : null
+  );
   done(id);
 
   // "Simpan & lanjut": the per-item flow, straight on to the next unreviewed.

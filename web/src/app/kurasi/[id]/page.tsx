@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getFigureOptions, getItem, positionTitle, type FigureOption, type FigureRef, type Position, type Profile, type Item, type LinkRow, type NamedPerson } from "@/lib/curation";
+import { REASONS, getFigureOptions, getItem, positionTitle, reasonLabel, type FigureOption, type FigureRef, type Position, type Profile, type Item, type LinkRow, type NamedPerson } from "@/lib/curation";
 import { decide } from "../kandidat/actions";
 import { AcceptCandidateForm } from "../AcceptCandidateForm";
 import { curate, editFigure, mergeFigures, relateFigure, ruleLink } from "../actions";
@@ -13,8 +13,15 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function KurasiItem({ params }: { params: Promise<{ id: string }> }) {
+export default async function KurasiItem({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ perlu?: string }>;
+}) {
   const { id } = await params;
+  const { perlu } = await searchParams;
   const eventId = Number(id);
   if (!Number.isInteger(eventId) || eventId <= 0) notFound();
   const [item, figures] = await Promise.all([getItem(eventId), getFigureOptions()]);
@@ -64,7 +71,7 @@ export default async function KurasiItem({ params }: { params: Promise<{ id: str
           ) : null}
         </header>
 
-        <VerdictBar item={item} sections={sections} />
+        <VerdictBar item={item} sections={sections} missing={perlu} />
         <FigureOptions figures={figures} />
 
         <Card n={n("isi")} id="isi" title="Isi" note="Ringkasan yang tayang dan artikel yang menjadi sumbernya. Baca ini dulu sebelum memutuskan.">
@@ -282,15 +289,33 @@ function Hidden({ fields }: { fields: Record<string, string | number> }) {
 /**
  * The decision, kept in view while the sections below are read: sticky, so
  * "Tayang" or "Turunkan" is one click away from wherever the evidence is.
+ *
+ * "Turunkan" opens a reason picker rather than acting at once: the reasons
+ * are what the pipeline's suggester learns from (jejak/curation_suggest.py),
+ * and its guess, when it has one, is ticked already.
  */
-function VerdictBar({ item, sections }: { item: Item; sections: { id: string; title: string }[] }) {
+function VerdictBar({
+  item,
+  sections,
+  missing,
+}: {
+  item: Item;
+  sections: { id: string; title: string }[];
+  missing?: string;
+}) {
   const next = item.next_id ?? "";
+  const s = item.suggestion;
+  const autoHidden = !item.curated && s?.auto_hide;
   const [tone, status]: [PillTone, string] =
     item.curated === "rejected" ? ["danger", "Diturunkan dari situs"] :
     item.curated === "kept" ? ["accept", "Sudah diperiksa · tayang"] :
+    autoHidden ? ["pending", "Disembunyikan otomatis · belum ditinjau"] :
     ["neutral", "Tayang · belum ditinjau"];
+  const suggested = !item.curated && s?.reason ? s.reason : "";
+  const ticked = new Set<string>(item.curated === "rejected" ? item.ruling?.reasons ?? [] : suggested ? [suggested] : []);
   return (
     <div
+      id="keputusan"
       style={{
         position: "sticky", top: 0, zIndex: 5, background: SURFACE, border: `1px solid ${RULE}`,
         borderRadius: 8, padding: "10px 14px", boxShadow: "0 2px 10px rgba(22, 19, 15, 0.06)",
@@ -302,16 +327,53 @@ function VerdictBar({ item, sections }: { item: Item; sections: { id: string; ti
         <span style={{ flex: "1 1 auto" }} />
         {item.curated !== "kept" ? (
           <form action={curate}>
-            <Hidden fields={{ event_id: item.event_id, verdict: "kept", next }} />
-            <button type="submit" style={button("accept")}>Tayang, lanjut →</button>
+            <Hidden fields={{ event_id: item.event_id, verdict: "kept", next, suggested }} />
+            <button type="submit" style={button("accept")}>
+              {autoHidden || item.curated === "rejected" ? "Tayangkan, lanjut →" : "Tayang, lanjut →"}
+            </button>
           </form>
         ) : null}
-        {item.curated !== "rejected" ? (
-          <form action={curate}>
-            <Hidden fields={{ event_id: item.event_id, verdict: "rejected", next }} />
-            <button type="submit" style={button("danger")}>Turunkan, lanjut →</button>
+        <details open={Boolean(missing)} style={{ position: "static" }}>
+          <summary style={{ ...button(item.curated === "rejected" ? "quiet" : "danger"), listStyle: "none", display: "inline-block" }}>
+            {item.curated === "rejected" ? "Ubah alasan…" : "Turunkan…"}
+          </summary>
+          <form
+            action={curate}
+            style={{
+              position: "absolute", left: 0, right: 0, top: "calc(100% + 4px)", zIndex: 6,
+              background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8, padding: "14px 16px",
+              boxShadow: "0 8px 24px rgba(22, 19, 15, 0.14)", display: "grid", gap: 10,
+            }}
+          >
+            <Hidden fields={{ event_id: item.event_id, verdict: "rejected", next: item.curated === "rejected" ? "" : next, suggested }} />
+            <div style={{ fontSize: 12.5, color: INK, fontWeight: 600 }}>
+              Kenapa diturunkan? <span style={{ color: MUTED, fontWeight: 400 }}>Pilih satu atau lebih.</span>
+            </div>
+            {missing === "alasan" ? <Warn>Pilih setidaknya satu alasan.</Warn> : null}
+            {missing === "catatan" ? <Warn>Alasan “Lainnya” perlu catatan.</Warn> : null}
+            <div style={{ display: "grid", gap: 6, gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))" }}>
+              {REASONS.map((r) => (
+                <label key={r.code} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: INK, cursor: "pointer" }}>
+                  <input type="checkbox" name="reason" value={r.code} defaultChecked={ticked.has(r.code)} style={{ marginTop: 3 }} />
+                  <span>
+                    {r.label}
+                    {r.code === suggested ? <span style={{ color: "#7a5a12", fontSize: 11.5, fontWeight: 700 }}> · saran</span> : null}
+                    <span style={{ display: "block", fontSize: 11.5, color: MUTED }}>{r.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <label style={label}>
+              Catatan (opsional, wajib untuk “Lainnya”)
+              <textarea name="note" rows={2} maxLength={1000} defaultValue={item.ruling?.note ?? ""} style={{ ...input, resize: "vertical" }} />
+            </label>
+            <div>
+              <button type="submit" style={button("danger")}>
+                {item.curated === "rejected" ? "Simpan alasan" : "Turunkan, lanjut →"}
+              </button>
+            </div>
           </form>
-        ) : null}
+        </details>
         {item.curated ? (
           <form action={curate}>
             <Hidden fields={{ event_id: item.event_id, verdict: "" }} />
@@ -321,6 +383,14 @@ function VerdictBar({ item, sections }: { item: Item; sections: { id: string; ti
           </form>
         ) : null}
       </div>
+      {item.curated === "rejected" && item.ruling ? (
+        <div style={{ fontSize: 12.5, color: "var(--color-mud)", marginTop: 8 }}>
+          <strong style={{ color: INK }}>Alasan:</strong>{" "}
+          {item.ruling.reasons.map(reasonLabel).join(", ") || "—"}
+          {item.ruling.note ? <> · <em>{item.ruling.note}</em></> : null}
+        </div>
+      ) : null}
+      {!item.curated && s ? <SuggestionLine item={item} /> : null}
       <nav style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${RULE}` }}>
         {sections.map((x, i) => (
           <a key={x.id} href={`#${x.id}`} style={{ color: MUTED, textDecoration: "none" }}>
@@ -328,6 +398,36 @@ function VerdictBar({ item, sections }: { item: Item; sections: { id: string; ti
           </a>
         ))}
       </nav>
+    </div>
+  );
+}
+
+function Warn({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontSize: 12.5, color: "var(--color-clay)", fontWeight: 600 }}>{children}</div>;
+}
+
+/** "Saran: Remeh / seremonial — mirip 12 yang pernah diturunkan", with the examples. */
+function SuggestionLine({ item }: { item: Item }) {
+  const s = item.suggestion!;
+  return (
+    <div style={{ fontSize: 12.5, color: "#7a5a12", marginTop: 8, display: "grid", gap: 3 }}>
+      <div>
+        <strong>{s.auto_hide ? "Disembunyikan otomatis:" : "Saran:"}</strong>{" "}
+        {s.reason ? reasonLabel(s.reason) : "turunkan"}
+        {s.confidence !== null ? ` · ${Math.round(s.confidence * 100)}%` : ""}
+        {s.support > 0 ? ` · mirip ${s.support} yang pernah kamu turunkan dengan alasan ini` : ""}
+        {s.auto_hide ? ". Tayangkan bila keliru; keputusanmu selalu menang." : ""}
+      </div>
+      {item.examples.length > 0 ? (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12 }}>
+          <span style={{ color: MUTED }}>Contoh:</span>
+          {item.examples.map((x) => (
+            <Link key={x.event_id} href={`/kurasi/${x.event_id}`} style={{ color: MUTED, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {x.title ?? `#${x.event_id}`}
+            </Link>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

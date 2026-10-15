@@ -11,6 +11,8 @@
     python -m jejak.cli sentiment            # public-reaction scores for approved events
     python -m jejak.cli figure-stance        # stance toward the figure, from comments naming them
     python -m jejak.cli buzzer               # coordinated-engagement detection
+    python -m jejak.cli suggest [--auto-hide] # guess curator verdicts from /kurasi labels
+    python -m jejak.cli curation-report      # what the /kurasi labels say, for rule-writing
     python -m jejak.cli timeline <figure_id> # approved, publishable events
 
 Taking an event off the public site is not done here — that is `/kurasi` in the
@@ -34,6 +36,7 @@ from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
 from . import db, fetch, figure_stance, ingest, link, mentions, quotes, sentiment, summarize, timeline as timeline_mod
 from . import translate
+from . import curation_suggest
 from . import youtube_ingest
 
 _BULAN = [
@@ -97,6 +100,11 @@ def main(argv: list[str] | None = None) -> int:
     p_fs.add_argument("--audit", action="store_true",
                       help="print which words matched each figure, then stop")
     sub.add_parser("buzzer")
+    p_sg = sub.add_parser("suggest")
+    p_sg.add_argument("--auto-hide", action="store_true",
+                      help="let proven suggestions take events off the site "
+                           "(same as JEJAK_AUTO_HIDE=1)")
+    sub.add_parser("curation-report")
     sub.add_parser("translate")
     sub.add_parser("run")
     p_bf = sub.add_parser("backfill")
@@ -199,6 +207,11 @@ def main(argv: list[str] | None = None) -> int:
                       f"score={r['anomaly_score']:.3f} "
                       f"anomaly={r['anomaly_pct']:.1f}% "
                       f"signals=[{sig_str}]")
+        if args.cmd == "suggest":
+            res = curation_suggest.run(conn, auto_hide=True if args.auto_hide else None)
+            print("suggest:", res)
+        if args.cmd == "curation-report":
+            print(curation_suggest.report(conn))
         if args.cmd == "timeline":
             for ev in timeline_mod.for_figure(conn, args.figure_id):
                 print(f"\n● {_fmt_date(ev['date'])}  (corroborated by {ev['corroboration']} outlet/s)")

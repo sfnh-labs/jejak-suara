@@ -15,6 +15,9 @@ stamps `applied_at` in Neon so none is carried out twice:
                          link.py never re-proposes a rejected pair
   event_figure_rejections a related figure struck from a peristiwa;
                          promote_peristiwa stops re-adding them
+  curation_reasons       why each event was kept or taken down; mirrored
+                         whole into curation_labels every run, since it is
+                         what jejak/curation_suggest.py learns from
 
     python scripts/apply_curation.py            # show what would happen
     python scripts/apply_curation.py --apply
@@ -191,6 +194,35 @@ def figure_rejections(pg, conn: sqlite3.Connection) -> list[tuple[tuple[int, str
     return done
 
 
+LABEL_COLS = ("event_id", "verdict", "reasons", "note", "kind", "figure_id",
+              "title", "summary", "outlets", "suggested", "decided_at")
+
+
+def curation_labels(pg, conn: sqlite3.Connection) -> int:
+    """Replace the local copy of the curator's labels with Neon's. Returns the count.
+
+    The whole table every time rather than unapplied rows: jejak.db is a
+    disposable working copy, and a rebuilt one has to get every label back.
+    """
+    import psycopg2.errors
+
+    try:
+        with pg.cursor() as cur:
+            cur.execute(f"SELECT {', '.join(LABEL_COLS)} FROM curation_reasons")
+            rows = cur.fetchall()
+    except psycopg2.errors.UndefinedTable:
+        # Neon predates the table; the next push's apply_schema creates it.
+        pg.rollback()
+        return 0
+    conn.execute("DELETE FROM curation_labels")
+    conn.executemany(
+        f"INSERT INTO curation_labels ({', '.join(LABEL_COLS)}) "
+        f"VALUES ({', '.join('?' * len(LABEL_COLS))})",
+        rows,
+    )
+    return len(rows)
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -213,11 +245,13 @@ def main(argv: list[str] | None = None) -> int:
         merges = figure_merges(pg, conn)
         links = link_verdicts(pg, conn)
         struck = figure_rejections(pg, conn)
+        labels = curation_labels(pg, conn)
         print("\n== figures, links and related figures")
         for _, line in [*edits, *merges, *links, *struck]:
             print(("apply " if args.apply else "would ") + line)
         if not (edits or merges or links or struck):
             print("nothing waiting to be applied")
+        print(f"\n== curation labels\n{'copied' if args.apply else 'would copy'} {labels}")
         if not args.apply:
             conn.rollback()
             return 0

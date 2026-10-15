@@ -138,6 +138,47 @@ CREATE TABLE IF NOT EXISTS event_figure_rejections (
     PRIMARY KEY (event_id, figure_id)
 );
 
+-- Why the curator ruled on an event as they did: the training labels behind
+-- the suggestions in /kurasi. One row per event with a verdict, written beside
+-- events.curated and deleted when the verdict is cleared. The snapshot columns
+-- keep a label readable after the pipeline re-clusters or drops the event.
+-- apply_curation.py mirrors the whole table into SQLite's curation_labels
+-- every run (not just unapplied rows: jejak.db is disposable, the labels are
+-- not), so there is no applied_at. No foreign key: --reset truncates events
+-- with CASCADE, and these must survive it.
+CREATE TABLE IF NOT EXISTS curation_reasons (
+    event_id   INTEGER PRIMARY KEY,
+    verdict    TEXT NOT NULL,     -- 'rejected' | 'kept'
+    reasons    TEXT NOT NULL,     -- JSON array of codes (REASONS in curation.ts)
+    note       TEXT,
+    kind       TEXT,
+    figure_id  TEXT,
+    title      TEXT,
+    summary    TEXT,
+    outlets    INTEGER,
+    -- The reason /kurasi suggested when the decision was made, if any:
+    -- how often the curator agreed is the suggester's real accuracy.
+    suggested  TEXT,
+    decided_at TEXT NOT NULL
+);
+
+-- Pipeline-owned: jejak/curation_suggest.py's guess at what the curator would
+-- do with an event nobody has ruled on yet, pushed like any other table.
+-- auto_hide = 1 takes the event off the site (data.ts LIVE) until a curator
+-- rules on it; it is only ever set for a reason whose measured precision
+-- cleared the bar, and only when the pipeline runs with auto-hide enabled.
+CREATE TABLE IF NOT EXISTS curation_suggestions (
+    event_id   INTEGER PRIMARY KEY,
+    reason     TEXT,              -- NULL: nothing suggested (looks like a keep)
+    confidence REAL,
+    support    INTEGER,           -- similar labelled events that share the reason
+    examples   TEXT,              -- JSON array of those events' ids
+    auto_hide  INTEGER NOT NULL DEFAULT 0,
+    model      TEXT,
+    scored_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_curation_suggestions_auto ON curation_suggestions(auto_hide);
+
 CREATE TABLE IF NOT EXISTS articles (
     id           TEXT PRIMARY KEY,
     figure_id    TEXT,               -- NULL = general news, peristiwa material

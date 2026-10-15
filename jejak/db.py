@@ -245,6 +245,37 @@ CREATE TABLE IF NOT EXISTS article_embeddings (
     vec        BLOB NOT NULL
 );
 
+-- The curator's verdicts and reasons from /kurasi (Postgres curation_reasons),
+-- mirrored whole by scripts/apply_curation.py on every run. Local only: Neon
+-- is their home, this is the copy jejak/curation_suggest.py learns from.
+CREATE TABLE IF NOT EXISTS curation_labels (
+    event_id   INTEGER PRIMARY KEY,
+    verdict    TEXT NOT NULL,      -- 'rejected' | 'kept'
+    reasons    TEXT NOT NULL,      -- JSON array of reason codes
+    note       TEXT,
+    kind       TEXT,
+    figure_id  TEXT,
+    title      TEXT,
+    summary    TEXT,
+    outlets    INTEGER,
+    suggested  TEXT,
+    decided_at TEXT NOT NULL
+);
+
+-- What the suggester expects the curator to do with each unruled event.
+-- Pushed to Neon, where /kurasi shows it and, for auto_hide = 1, the public
+-- site leaves the event out until a curator rules on it.
+CREATE TABLE IF NOT EXISTS curation_suggestions (
+    event_id   INTEGER PRIMARY KEY,
+    reason     TEXT,
+    confidence REAL,
+    support    INTEGER,
+    examples   TEXT,               -- JSON array of labelled event ids
+    auto_hide  INTEGER NOT NULL DEFAULT 0,
+    model      TEXT,
+    scored_at  TEXT NOT NULL
+);
+
 -- Correction / right-of-reply requests (legal safety valve).
 CREATE TABLE IF NOT EXISTS corrections (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

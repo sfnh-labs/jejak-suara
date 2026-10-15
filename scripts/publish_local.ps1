@@ -119,7 +119,7 @@ try {
     Invoke-Stage "mentions" @("-m", "jejak.cli", "mentions", "--limit", "1000")
 
     foreach ($stage in @("cluster", "link", "quotes", "translate", "summarize",
-                         "sentiment", "buzzer")) {
+                         "sentiment", "buzzer", "suggest")) {
         Invoke-Stage $stage @("-m", "jejak.cli", $stage)
     }
 
