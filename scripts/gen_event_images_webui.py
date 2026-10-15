@@ -28,6 +28,38 @@ ADETAILER_UNIT = {
 
 # (event_id, title, scene) — trimmed to 2-4 figures; crowds mangle at 8 steps.
 EVENTS = [
+    (23621, 'KPK Lakukan Operasi Tangkap Tangan di BNPB',
+     'anti-corruption commission sting at a disaster agency office, two investigators in dark jackets carrying sealed evidence boxes past a startled official at a desk covered in paperwork, an agency signboard on the wall'),
+    (23618, 'Kapal Wisata KM Feronia Tenggelam di Labuan Bajo, 24 Penumpang Selamat',
+     'tourist boat sinks near a harbour island, rescuers in a small wooden boat pulling two relieved passengers in orange life jackets aboard, a half-submerged tour boat and rocky islands behind them'),
+    (23605, '100 Hektare Kebakaran di Cagar Alam Gunung Lokon',
+     'forest fire on a volcanic nature reserve, two firefighters in helmets dragging a hose up a slope, orange flames and rising smoke on the ridge, a volcano cone in the distance'),
+    (23581, 'BI Sulsel dan Koderal VI Bawa Rp25 Miliar ke Pulau 3T',
+     'central bank and navy carry cash to remote islands, a bank officer and a navy sailor lifting a sealed cash box from a gray warship onto a wooden jetty, a small island village behind them'),
+    (23337, 'Menlu RI Tegaskan Komitmen Mendukung Palestina',
+     'foreign minister reaffirms support for Palestine, a diplomat in a dark suit at a lectern before a wall of international flags, an aide beside him holding a folder, one hand raised in emphasis'),
+    (23321, 'Ijazah Wapres Gibran Masih Jadi Polemik',
+     'diploma controversy around the vice president, a young man in a suit holding a framed certificate and looking down at it, two officials across a table examining a stack of documents with a magnifying glass'),
+    (23313, 'Kabut Asap Akibat Karhutla Menyelimuti Sejumlah Daerah',
+     'haze from forest fires blankets a town, a commuter in a face mask on a motorbike and a street vendor in a mask beside a stall, a dim orange sun barely visible through grey smoke over rooftops'),
+    (23305, 'Kapolri Rombak Jabatan Strategis Korlantas dan TNI AU',
+     'police chief reshuffles senior posts, a police general in dress uniform handing a decree scroll to a bowing officer, an air force officer standing at attention beside them, the national emblem behind'),
+    (23103, 'Pertandingan Final FIFA ASEAN Cup 2026 Terlaksana di GBK, Indonesia Juara',
+     'football final won at a national stadium, two players in red shirts raising a golden trophy together on the pitch, a coach hugging one of them, floodlights and empty stands behind them at dusk'),
+    (22930, 'Presiden Prabowo Lantik Syahganda Nainggolan Menjadi Kepala Bakom',
+     'swearing-in of an agency head, the president in a formal batik jacket standing before a new official who raises his right hand over a holy book held by an attendant, palace pillars and the national emblem behind'),
+    (22890, 'Presiden Prabowo Melantik Pejabat Baru',
+     'president inaugurates new officials, the president at a wooden table presenting a decree scroll to a newly appointed minister in a dark suit, two aides standing by with folders, palace hall behind'),
+    (22748, 'Pencalonan dan Pengangkatan Jenderal Suyudi Sebagai Kapolri',
+     'police general nominated as national police chief, a police general in dress uniform with medals standing before a parliamentary panel seated at a long table, one hand raised as he answers questions'),
+    (22562, 'Pertemuan Antara Prabowo dan Megawati untuk Makan Nasi Goreng',
+     'two political elders share a casual meal, a heavyset president and an elderly woman party chair seated across a small table with two plates of fried rice, warm lamplight, a quiet garden through the window'),
+    (23121, 'Gempa Mengguncang Sumba Barat Daya, Rusak Ribuan Bangunan',
+     'earthquake damages homes in an island district, two villagers carrying a salvaged cooking pot past a house with a collapsed thatched roof, cracked walls, hills and palm trees behind'),
+    (23348, 'Pemerintah Tetapkan Kebakaran Hutan Masih Dalam Kontrol',
+     'government declares the wildfires under control, a minister in a field jacket and a forestry officer standing at a command tent table with a map of burned areas, a thin smoke line far behind'),
+    (22523, 'Pengunduran Diri dan Sidang Terdakwa Roy Suryo',
+     "court hearing for a defendant, a man in a dark suit seated in the defendant's chair beside his lawyer, a robed judge at the high bench and a clerk, a wooden courtroom with a scales emblem"),
     (762, "KPK ajak publik pantau sidang Yaqut",
      "KPK court trial hearing, a formal Indonesian courtroom with a wooden judges bench, "
      "a judge in a black robe seated behind the bench, a defendant standing at a podium "
@@ -134,9 +166,14 @@ if __name__ == "__main__":
         for a in sys.argv:
             if a.startswith("--count="):
                 limit = int(a.split("=", 1)[1])
+        until = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--until=")), None)
         done = 0
         for eid, title, scene in EVENTS:
             if limit is not None and done >= limit:
+                break
+            # an event takes ~17 min; do not start one that cannot finish by the deadline
+            if until and time.strftime("%H:%M", time.localtime(time.time() + 1100)) >= until:
+                print(f"deadline {until} reached, stopping")
                 break
             if glob.glob(os.path.join(OUT_DIR, f"{eid}-*.*")):
                 print(f"[{eid}] {title} -- already done, skipping")

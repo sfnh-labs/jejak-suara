@@ -53,3 +53,6 @@ scripts/.publish_local.lock
 scripts/publish_local.launchd.err
 scripts/.last_neon_push
 scripts/*.log.prev
+
+# full-size generated PNGs; web/public ships compressed .webp
+/originals/
