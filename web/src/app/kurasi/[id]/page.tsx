@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { REASONS, getFigureOptions, getItem, positionTitle, reasonLabel, type FigureOption, type FigureRef, type Position, type Profile, type Item, type LinkRow, type NamedPerson } from "@/lib/curation";
+import { REASONS, getFigureOptions, getFollowupCandidates, getItem, getReading, positionTitle, reasonLabel, type FigureOption, type FigureRef, type FollowupCandidate, type FollowupRow, type Position, type Profile, type Item, type LinkRow, type NamedPerson } from "@/lib/curation";
 import { decide } from "../kandidat/actions";
 import { AcceptCandidateForm } from "../AcceptCandidateForm";
-import { curate, editFigure, mergeFigures, relateFigure, ruleLink } from "../actions";
+import { ArticleReader, type ReaderTerm } from "../ArticleReader";
+import { addFollowup, curate, editFigure, mergeFigures, relateFigure, ruleFollowup, ruleLink } from "../actions";
+import { storyImageSource, storylines } from "@/lib/data";
+import { EventBanner } from "../EventImage";
+import { placeGroups, provinceLabel, provincesIn } from "@/lib/places";
 import { ACCEPT, INK, MUTED, RULE, SURFACE, button, day, input, label } from "../ui";
 
 export const dynamic = "force-dynamic";
@@ -18,18 +22,42 @@ export default async function KurasiItem({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ perlu?: string }>;
+  searchParams: Promise<{ perlu?: string; cari?: string; baca?: string }>;
 }) {
   const { id } = await params;
-  const { perlu } = await searchParams;
+  const { perlu, cari = "", baca } = await searchParams;
   const eventId = Number(id);
   if (!Number.isInteger(eventId) || eventId <= 0) notFound();
   const [item, figures] = await Promise.all([getItem(eventId), getFigureOptions()]);
   if (!item) notFound();
+  const [candidates, reading] = await Promise.all([
+    getFollowupCandidates(item, cari.slice(0, 100)),
+    baca ? getReading(eventId, baca.slice(0, 128)) : null,
+  ]);
+  // The page's own address with the reading pane set or cleared; the other
+  // parameters ride along so opening an article loses nothing.
+  const here = (article: string | null) => {
+    const q = new URLSearchParams();
+    if (perlu) q.set("perlu", perlu);
+    if (cari) q.set("cari", cari);
+    if (article) q.set("baca", article);
+    const qs = q.toString();
+    return `/kurasi/${eventId}${qs ? `?${qs}` : ""}`;
+  };
+  const terms = readerTerms(item);
+  // The banner the site would show, borrowed ones included (peristiwa only).
+  const image = item.kind === "peristiwa"
+    ? storyImageSource(eventId, (await storylines([eventId], { evenHidden: [eventId] })).get(eventId) ?? [], item.title)
+    : null;
 
   const isRecord = item.kind === "record";
   const outlets = new Set(item.sources.map((s) => s.source)).size;
   const queue = `/kurasi?kind=${item.kind}`;
+  // Headlines set in provinces nothing connects: the commonest sign that
+  // clustering merged two stories (a Lokon wildfire with a Tangerang factory
+  // fire). Peristiwa only; a record follows one person around the country.
+  const places = isRecord ? [] : placeGroups(item.sources.map((s) => s.title));
+  const scattered = places.length > 1;
 
   // Numbered in reading order; the record-only "Pelaku" shifts the rest.
   const sections = [
@@ -37,12 +65,24 @@ export default async function KurasiItem({
     ...(isRecord ? [{ id: "pelaku", title: "Pelaku" }] : []),
     { id: "nama", title: isRecord ? "Disebut dalam liputan" : "Tokoh terkait" },
     { id: "tautan", title: isRecord ? "Bagian dari peristiwa" : "Catatan di dalamnya" },
+    { id: "lini", title: "Lini cerita" },
   ];
   const n = (key: string) => sections.findIndex((x) => x.id === key) + 1;
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <div className="container-page" style={{ maxWidth: 920, paddingBottom: 96 }}>
+      {/* Side by side only when wide enough for both; narrower, the article
+          opens under its own line in the list instead. */}
+      <style>{`
+        .kurasi-reader-side { display: none; }
+        @media (min-width: 1180px) {
+          .kurasi-split.reading { display: grid; grid-template-columns: minmax(0, 920px) minmax(0, 1fr); gap: 28px; align-items: start; }
+          .kurasi-split.reading .kurasi-reader-side { display: block; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; padding: 22px 0 40px; overscroll-behavior: contain; }
+          .kurasi-split.reading .kurasi-reader-inline { display: none; }
+        }
+      `}</style>
+      <div className={`container-page kurasi-split${reading ? " reading" : ""}`} style={{ maxWidth: reading ? 1640 : 920, paddingBottom: 96 }}>
+        <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "22px 0 0", fontSize: 12.5, flexWrap: "wrap" }}>
           <Link href={queue} style={{ color: MUTED }}>← Antrean {isRecord ? "catatan" : "peristiwa"}</Link>
           {item.next_id ? (
@@ -51,6 +91,7 @@ export default async function KurasiItem({
         </div>
 
         <header style={{ padding: "18px 0 18px" }}>
+          {isRecord ? null : <EventBanner eventId={item.event_id} image={image} />}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
             <Pill tone="ink">{isRecord ? "Catatan" : "Peristiwa"} #{item.event_id}</Pill>
             <Pill>
@@ -59,11 +100,19 @@ export default async function KurasiItem({
             </Pill>
             <Pill>{outlets} media · {item.sources.length} artikel</Pill>
             {outlets <= 1 ? <Pill tone="danger">⚠ satu sumber</Pill> : null}
+            {scattered ? <Pill tone="danger">⚠ beda provinsi</Pill> : null}
             {item.event_type && item.event_type !== "other" ? <Pill>{item.event_type}</Pill> : null}
           </div>
           <h1 style={{ fontFamily: "var(--font-serif)", fontWeight: 500, fontSize: "clamp(24px, 4vw, 32px)", lineHeight: 1.2, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
             {item.title ?? "(tanpa judul)"}
           </h1>
+          {scattered ? (
+            <p style={{ fontSize: 13, color: "var(--color-clay)", margin: "0 0 8px", lineHeight: 1.5 }}>
+              Judul artikelnya menyebut tempat yang berbeda:{" "}
+              {places.map((g) => `${g.provinces.map(provinceLabel).join(" / ")} (${g.count})`).join(" · ")}.
+              {" "}Bisa jadi beberapa kejadian yang tergabung; periksa artikel sumbernya. Bila ya, turunkan dengan alasan “Campuran beberapa kejadian”.
+            </p>
+          ) : null}
           {isRecord && item.figure_id && item.curated !== "rejected" ? (
             <Link href={`/tokoh/${item.figure_id}/${item.event_id}`} target="_blank" style={{ fontSize: 12.5, color: MUTED }}>
               Lihat di situs ↗
@@ -84,17 +133,44 @@ export default async function KurasiItem({
               Belum dirangkum. Yang tayang adalah judul dari hasil klaster.
             </p>
           )}
-          <SubPanel title={`Artikel sumber (${item.sources.length})`} collapsible open={!item.summary}>
+          <SubPanel
+            title={`Artikel sumber (${item.sources.length})`}
+            note="Klik judul untuk membacanya di sini; ↗ membuka situs aslinya."
+            collapsible
+            open={!item.summary || scattered || Boolean(reading)}
+          >
             <ol style={{ margin: 0, padding: 0, listStyle: "none" }}>
               {item.sources.map((a, i) => (
-                <li key={`${a.url}-${i}`} style={{ padding: "10px 0", borderTop: i ? `1px solid ${RULE}` : "none" }}>
+                <li
+                  key={`${a.url}-${i}`}
+                  style={{
+                    padding: "10px 0", borderTop: i ? `1px solid ${RULE}` : "none",
+                    ...(reading?.id === a.id ? { boxShadow: "inset 3px 0 0 var(--color-clay)", paddingLeft: 12 } : {}),
+                  }}
+                >
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 2 }}>
                     {a.source} · {day(a.published_at)}
+                    {scattered && provincesIn(a.title).size > 0
+                      ? <span style={{ color: "var(--color-clay)" }}> · {[...provincesIn(a.title)].map(provinceLabel).join(", ")}</span>
+                      : null}
                   </div>
-                  <a href={a.url} target="_blank" rel="noreferrer" style={{ color: INK, fontSize: 14, lineHeight: 1.45 }}>{a.title ?? a.url}</a>
+                  <Link
+                    href={here(reading?.id === a.id ? null : a.id)}
+                    scroll={false}
+                    style={{ color: INK, fontSize: 14, lineHeight: 1.45, fontWeight: reading?.id === a.id ? 600 : 400 }}
+                  >
+                    {a.title ?? a.url}
+                  </Link>
+                  {a.has_body ? null : <span style={{ fontSize: 11.5, color: MUTED }}> · hanya ringkasan</span>}{" "}
+                  <a href={a.url} target="_blank" rel="noreferrer" aria-label="Buka di situs asli" style={{ color: MUTED, fontSize: 12.5, textDecoration: "none" }}>↗</a>
                   {a.lead ? (
                     <div style={{ fontSize: 12.5, color: MUTED, marginTop: 3, lineHeight: 1.5 }}>
                       {a.lead.slice(0, 240)}{a.lead.length > 240 ? "…" : ""}
+                    </div>
+                  ) : null}
+                  {reading?.id === a.id ? (
+                    <div className="kurasi-reader-inline" style={{ marginTop: 12 }}>
+                      <ArticleReader article={reading} terms={terms} closeHref={here(null)} />
                     </div>
                   ) : null}
                 </li>
@@ -147,15 +223,56 @@ export default async function KurasiItem({
           {isRecord ? <AddLink item={item} /> : null}
         </Card>
 
+        <Card
+          n={n("lini")}
+          id="lini"
+          title="Lini cerita"
+          count={item.followups.earlier.length + item.followups.later.length}
+          note={
+            isRecord
+              ? "Catatan tokoh yang sama sebelum dan sesudah ini, bila ini kelanjutannya: diumumkan lalu direvisi, dijanjikan lalu ditepati. Hanya yang kamu konfirmasi yang tampil sebagai lini cerita di situs."
+              : "Peristiwa sebelum dan sesudah ini, bila ini kelanjutannya: RUU diusulkan lalu disahkan, pencarian dimulai lalu dihentikan. Hanya yang kamu konfirmasi yang tampil di situs, dan peristiwa tanpa gambar memakai gambar dari lini ceritanya."
+          }
+        >
+          <FollowupList item={item} />
+          <AddFollowup item={item} candidates={candidates} search={cari} />
+        </Card>
+
         <p style={{ fontSize: 12, color: MUTED, margin: "22px 0 0", lineHeight: 1.6, maxWidth: 640 }}>
           <Pill tone="pending">menunggu pipeline</Pill>{" "}
           artinya keputusan sudah berlaku di situs, tetapi belum disalin ke basis data pipeline. Itu terjadi
           otomatis pada putaran malam (<code>scripts/apply_curation.py</code>); sampai saat itu artikel baru
           masih dicocokkan dengan data lama.
         </p>
+        </div>
+        {reading ? (
+          <aside className="kurasi-reader-side" aria-label="Artikel yang sedang dibaca">
+            <ArticleReader article={reading} terms={terms} closeHref={here(null)} />
+          </aside>
+        ) : null}
       </div>
     </div>
   );
+}
+
+/**
+ * The names the reading pane marks: the record's own figure, the other
+ * tracked figures this coverage names, and the new names waiting for a
+ * verdict. Two-letter terms are skipped; they would mark half of every page.
+ */
+function readerTerms(item: Item): ReaderTerm[] {
+  const out: ReaderTerm[] = [];
+  const add = (texts: string[], kind: ReaderTerm["kind"], label: string) => {
+    for (const text of new Set(texts.map((t) => t.trim()))) {
+      if (text.length > 2) out.push({ text, kind, label });
+    }
+  };
+  if (item.owner) add([item.owner.name, ...item.owner.aliases], "owner", item.owner.name);
+  for (const p of item.named) {
+    if (p.kind === "figure") add([p.name, ...p.aliases], "figure", p.name);
+    else if (!p.verdict) add([p.name], "candidate", p.name);
+  }
+  return out;
 }
 
 /** A numbered block with its own header, so where a section starts and ends is never in doubt. */
@@ -814,6 +931,135 @@ function AddLink({ item }: { item: Item }) {
           ))}
         </select>
         <button type="submit" style={button("ink")}>Tautkan</button>
+      </form>
+    </SubPanel>
+  );
+}
+
+/**
+ * One list in date order, this event marked where it falls: the dates already
+ * say which came first, so there are no "before"/"after" headings. Each row
+ * still carries its pair the right way round for the verdict.
+ */
+function FollowupList({ item }: { item: Item }) {
+  const { earlier, later } = item.followups;
+  if (earlier.length + later.length === 0) {
+    return <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Pipeline belum mengusulkan kelanjutan untuk ini.</p>;
+  }
+  const byDate = (x: FollowupRow, y: FollowupRow) => (x.event_date ?? "").localeCompare(y.event_date ?? "") || x.event_id - y.event_id;
+  const self: FollowupRow = { event_id: item.event_id, title: null, event_date: item.event_date, score: null, evidence: [], verdict: null, proposed: false };
+  const rows = [
+    ...earlier.map((f) => ({ f, pair: { earlier_id: f.event_id, later_id: item.event_id } })),
+    { f: self, pair: null },
+    ...later.map((f) => ({ f, pair: { earlier_id: item.event_id, later_id: f.event_id } })),
+  ].sort((x, y) => byDate(x.f, y.f));
+  return (
+    <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+      {rows.map((r, i) =>
+        r.pair ? (
+          <FollowupItem key={r.f.event_id} row={r.f} pair={r.pair} first={i === 0} />
+        ) : (
+          <li key="ini" style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "10px 0", borderTop: i === 0 ? "none" : `1px solid ${RULE}` }}>
+            <span style={{ fontSize: 11.5, color: MUTED, minWidth: 70 }}>{day(item.event_date)}</span>
+            <strong style={{ fontFamily: "var(--font-serif)", fontSize: 15, fontWeight: 600 }}>
+              {item.kind === "record" ? "Catatan" : "Peristiwa"} ini
+            </strong>
+          </li>
+        )
+      )}
+    </ul>
+  );
+}
+
+function FollowupItem({ row: f, pair, first }: { row: FollowupRow; pair: { earlier_id: number; later_id: number }; first: boolean }) {
+  const [tone, text]: [PillTone, string] =
+    f.verdict === "confirmed" ? ["accept", "Dikonfirmasi · tampil di situs"] :
+    f.verdict === "rejected" ? ["danger", "Ditolak"] :
+    f.proposed ? ["pending", "Usulan pipeline"] : ["neutral", "Ditambahkan"];
+  return (
+    <li style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap", padding: "12px 0", borderTop: first ? "none" : `1px solid ${RULE}`, opacity: f.verdict === "rejected" ? 0.6 : 1 }}>
+      <div style={{ flex: "1 1 420px", minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+          <Pill tone={tone}>{text}</Pill>
+          <span style={{ fontSize: 11.5, color: MUTED }}>
+            {day(f.event_date)}
+            {f.score !== null ? ` · skor ${f.score.toFixed(2)}` : ""}
+          </span>
+        </div>
+        <Link href={`/kurasi/${f.event_id}`} style={{ fontFamily: "var(--font-serif)", fontSize: 16, color: INK, lineHeight: 1.4 }}>
+          {f.title ?? `#${f.event_id}`}
+        </Link>
+        {f.evidence.length > 0 ? (
+          <div style={{ fontSize: 12, color: MUTED, marginTop: 3 }}>kata yang sama: {f.evidence.join(", ")}</div>
+        ) : null}
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        {f.verdict !== "confirmed" ? (
+          <form action={ruleFollowup}>
+            <Hidden fields={{ ...pair, verdict: "confirmed" }} />
+            <button type="submit" style={button("accept")}>Benar</button>
+          </form>
+        ) : null}
+        {f.verdict !== "rejected" ? (
+          <form action={ruleFollowup}>
+            <Hidden fields={{ ...pair, verdict: "rejected" }} />
+            <button type="submit" style={button("quiet")}>Bukan</button>
+          </form>
+        ) : null}
+        {f.verdict ? (
+          <form action={ruleFollowup}>
+            <Hidden fields={{ ...pair, verdict: "" }} />
+            <button type="submit" style={button("quiet")}>Batalkan</button>
+          </form>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * Follow-ups the pipeline did not propose, picked from a list: events nearby
+ * that share distinctive words, or any found by title. The dates decide which
+ * one came first, so there is no direction to choose.
+ */
+function AddFollowup({ item, candidates, search }: { item: Item; candidates: FollowupCandidate[]; search: string }) {
+  const what = item.kind === "record" ? "catatan tokoh ini" : "peristiwa";
+  return (
+    <SubPanel
+      title={item.kind === "record" ? "Sambungkan catatan lain" : "Sambungkan peristiwa lain"}
+      note={search
+        ? `Hasil pencarian judul “${search}”.`
+        : `Saran: ${what} dalam ±60 hari yang berbagi kata khas dengan ini. Urutannya mengikuti tanggal.`}
+    >
+      {candidates.length === 0 ? (
+        <p style={{ fontSize: 13, color: MUTED, margin: "0 0 10px" }}>
+          {search ? "Tidak ada judul yang cocok." : "Tidak ada saran. Coba cari judulnya di bawah."}
+        </p>
+      ) : (
+        <ul style={{ listStyle: "none", margin: "0 0 12px", padding: 0 }}>
+          {candidates.map((c, i) => (
+            <li key={c.event_id} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "9px 0", borderTop: i === 0 ? "none" : `1px solid ${RULE}` }}>
+              <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 2 }}>
+                  {day(c.event_date)} · <strong style={{ color: INK, fontWeight: 600 }}>{c.before ? "sebelum ini" : "sesudah ini"}</strong>
+                  {c.shared.length > 0 ? ` · ${c.shared.join(", ")}` : ""}
+                </div>
+                <Link href={`/kurasi/${c.event_id}`} style={{ fontFamily: "var(--font-serif)", fontSize: 15, color: INK, lineHeight: 1.4 }}>
+                  {c.title ?? `#${c.event_id}`}
+                </Link>
+              </div>
+              <form action={addFollowup}>
+                <Hidden fields={{ event_id: item.event_id, other_id: c.event_id }} />
+                <button type="submit" style={button("ink")}>Tautkan</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form method="get" action={`/kurasi/${item.event_id}#lini`} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input name="cari" defaultValue={search} placeholder="Cari judul, misal “Virgo”" style={{ ...input, flex: "1 1 260px" }} aria-label="Cari judul" />
+        <button type="submit" style={button("quiet")}>Cari</button>
+        {search ? <Link href={`/kurasi/${item.event_id}#lini`} style={{ fontSize: 12.5, color: MUTED, alignSelf: "center" }}>Kembali ke saran</Link> : null}
       </form>
     </SubPanel>
   );

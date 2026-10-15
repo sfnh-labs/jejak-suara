@@ -102,6 +102,9 @@ TABLES: tuple[Table, ...] = (
     Table("record_links", "record_id",
           ("record_id", "peristiwa_id", "score", "evidence", "created_at"),
           conflict=("record_id", "peristiwa_id")),
+    Table("followup_links", "earlier_id",
+          ("earlier_id", "later_id", "score", "evidence", "created_at"),
+          conflict=("earlier_id", "later_id")),
     Table("articles", "id", (
         "id", "figure_id", "source", "url", "title", "summary", "body",
         "body_original", "body_lang", "fetch_status", "published_at",

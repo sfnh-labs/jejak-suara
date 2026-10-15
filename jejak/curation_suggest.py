@@ -45,13 +45,16 @@ REASONS = {
     "trivial": "Remeh / seremonial",
     "not_newsworthy": "Tak relevan untuk rekam jejak",
     "duplicate": "Duplikat",
+    "mixed": "Campuran beberapa kejadian",
     "hoax": "Hoaks / sudah dibantah",
     "garbled": "Judul/ringkasan rusak",
     "other": "Lainnya",
 }
 # Similar coverage says nothing about these: a duplicate is a duplicate of one
-# particular event, and "other" is whatever the note says.
-UNSUGGESTABLE = {"duplicate", "other"}
+# particular event, a mixed event is a clustering slip in that one cluster
+# (labelled for the clustering, not for this model), and "other" is whatever
+# the note says.
+UNSUGGESTABLE = {"duplicate", "mixed", "other"}
 
 MODEL = "knn-v1"
 PUBLIC = "status IN ('new', 'summarized', 'approved')"

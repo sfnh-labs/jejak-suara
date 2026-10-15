@@ -13,6 +13,7 @@ stamps `applied_at` in Neon so none is carried out twice:
                          records move and it is retired
   record_link_verdicts   confirmed / rejected record → peristiwa links;
                          link.py never re-proposes a rejected pair
+  followup_verdicts      confirmed / rejected follow-up pairs, the same way
   event_figure_rejections a related figure struck from a peristiwa;
                          promote_peristiwa stops re-adding them
   curation_reasons       why each event was kept or taken down; mirrored
@@ -162,6 +163,51 @@ def link_verdicts(pg, conn: sqlite3.Connection) -> list[tuple[tuple[int, int], s
     return done
 
 
+def followup_verdicts(pg, conn: sqlite3.Connection) -> list[tuple[tuple[int, int], str]]:
+    """Follow-up rulings, as link_verdicts does for record links."""
+    import psycopg2.errors
+
+    try:
+        with pg.cursor() as cur:
+            cur.execute(
+                "SELECT earlier_id, later_id, verdict FROM followup_verdicts "
+                "WHERE applied_at IS NULL ORDER BY decided_at"
+            )
+            pending = cur.fetchall()
+    except psycopg2.errors.UndefinedTable:
+        pg.rollback()
+        return []
+    done = []
+    for earlier, later, verdict in pending:
+        key = (earlier, later)
+        known = conn.execute(
+            "SELECT count(*) FROM events WHERE id IN (?, ?)", key
+        ).fetchone()[0]
+        if known < 2:
+            done.append((key, f"follow-up {earlier}->{later}: event missing locally (skipped)"))
+            continue
+        if verdict is None:
+            conn.execute(
+                "UPDATE followup_links SET verdict = NULL WHERE earlier_id = ? AND later_id = ?", key
+            )
+            conn.execute(
+                "DELETE FROM followup_links "
+                "WHERE earlier_id = ? AND later_id = ? AND origin = 'curator'", key
+            )
+            verdict = "withdrawn"
+        else:
+            conn.execute(
+                """INSERT INTO followup_links
+                       (earlier_id, later_id, origin, verdict, created_at)
+                   VALUES (?, ?, 'curator', ?, ?)
+                   ON CONFLICT (earlier_id, later_id) DO UPDATE SET
+                       verdict = excluded.verdict""",
+                (earlier, later, verdict, _now()),
+            )
+        done.append((key, f"follow-up {earlier}->{later}: {verdict}"))
+    return done
+
+
 def figure_rejections(pg, conn: sqlite3.Connection) -> list[tuple[tuple[int, str, bool], str]]:
     with pg.cursor() as cur:
         cur.execute(
@@ -244,12 +290,13 @@ def main(argv: list[str] | None = None) -> int:
         edits = figure_edits(pg, conn)
         merges = figure_merges(pg, conn)
         links = link_verdicts(pg, conn)
+        followups = followup_verdicts(pg, conn)
         struck = figure_rejections(pg, conn)
         labels = curation_labels(pg, conn)
         print("\n== figures, links and related figures")
-        for _, line in [*edits, *merges, *links, *struck]:
+        for _, line in [*edits, *merges, *links, *followups, *struck]:
             print(("apply " if args.apply else "would ") + line)
-        if not (edits or merges or links or struck):
+        if not (edits or merges or links or followups or struck):
             print("nothing waiting to be applied")
         print(f"\n== curation labels\n{'copied' if args.apply else 'would copy'} {labels}")
         if not args.apply:
@@ -285,6 +332,22 @@ def main(argv: list[str] | None = None) -> int:
                 "DELETE FROM record_link_verdicts "
                 "WHERE verdict IS NULL AND applied_at IS NOT NULL"
             )
+            cur.executemany(
+                "UPDATE followup_verdicts SET applied_at = %s "
+                "WHERE earlier_id = %s AND later_id = %s",
+                [(now, *key) for key, _ in followups],
+            )
+            if followups:
+                cur.execute(
+                    """DELETE FROM followup_links l USING followup_verdicts v
+                        WHERE v.earlier_id = l.earlier_id AND v.later_id = l.later_id
+                          AND v.verdict IS NULL AND v.applied_at IS NOT NULL
+                          AND l.score IS NULL"""
+                )
+                cur.execute(
+                    "DELETE FROM followup_verdicts "
+                    "WHERE verdict IS NULL AND applied_at IS NOT NULL"
+                )
             cur.executemany(
                 "UPDATE event_figure_rejections SET applied_at = %s "
                 "WHERE event_id = %s AND figure_id = %s",

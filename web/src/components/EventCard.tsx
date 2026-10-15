@@ -1,6 +1,7 @@
 import Link from "next/link";
 import FigurePortrait from "./FigurePortrait";
 import { SourcesDisclosure } from "./SourceList";
+import StoryLine from "./StoryLine";
 import SummaryList, { withoutTitleRepeats } from "./SummaryList";
 import { dayBadge, firstName } from "@/lib/design";
 import { topicChip, topicLabel, topicOf } from "@/lib/topics";
@@ -132,6 +133,12 @@ export function EventBody({
       </div>
 
       <RelatedFigures figures={related} />
+
+      {peristiwa.story?.length ? (
+        <div style={{ marginTop: 14 }}>
+          <StoryLine steps={peristiwa.story} />
+        </div>
+      ) : null}
     </>
   );
 }

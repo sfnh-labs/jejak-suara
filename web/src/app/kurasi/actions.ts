@@ -11,7 +11,9 @@ import {
   saveFigureEdit,
   type Position,
   type Profile,
+  confirmFollowupBetween,
   setCuration,
+  setFollowupVerdict,
   setLinkVerdict,
   setRelatedFigure,
 } from "@/lib/curation";
@@ -102,6 +104,28 @@ export async function ruleLink(formData: FormData): Promise<void> {
   await setLinkVerdict(recordId, peristiwaId, verdict);
   done(recordId);
   done(peristiwaId);
+}
+
+/** Confirm, reject or withdraw a follow-up pair already listed. */
+export async function ruleFollowup(formData: FormData): Promise<void> {
+  const earlier = eventId(formData, "earlier_id");
+  const later = eventId(formData, "later_id");
+  const verdict = optional(formData, "verdict");
+  if (verdict !== null && !isLinkVerdict(verdict)) {
+    throw new Error(`invalid follow-up verdict: ${verdict}`);
+  }
+  await setFollowupVerdict(earlier, later, verdict);
+  done(earlier);
+  done(later);
+}
+
+/** Chain a suggested or searched-for event to this one; the dates decide which came first. */
+export async function addFollowup(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const other = eventId(formData, "other_id");
+  await confirmFollowupBetween(id, other);
+  done(id);
+  done(other);
 }
 
 /** Correct a figure's display name, office and alias list. */

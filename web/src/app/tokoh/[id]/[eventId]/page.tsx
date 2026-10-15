@@ -1,3 +1,4 @@
+import StoryLine from "@/components/StoryLine";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Nav from "@/components/Nav";
@@ -12,6 +13,7 @@ import {
   getEventComments,
   getEventNeighbours,
   getRecordPeristiwa,
+  storylines,
 } from "@/lib/data";
 import {
   formatCount,
@@ -55,12 +57,14 @@ export default async function DetailCatatan({
   const record = await getEvent(numericId);
   if (!record || record.figure_id !== id) notFound();
 
-  const [comments, buzzer, neighbours, partOf] = await Promise.all([
+  const [comments, buzzer, neighbours, partOf, stories] = await Promise.all([
     getEventComments(numericId),
     getBuzzerSignal(numericId),
     getEventNeighbours(id, record.event_date),
     getRecordPeristiwa(numericId),
+    storylines([numericId]),
   ]);
+  const story = stories.get(numericId) ?? [];
 
   const display = toDisplayScore(record.sentiment_score);
   const figureDisplay = figureDisplayScore(record.figure_stance);
@@ -127,6 +131,14 @@ export default async function DetailCatatan({
                 </span>
               </div>
             ))}
+          </div>
+        ) : null}
+
+        {story.length > 1 ? (
+          // The figure's own story: this action and the ones it follows up or
+          // that follow it, as a curator confirmed them in /kurasi.
+          <div style={{ margin: "-12px 0 26px" }}>
+            <StoryLine steps={story} href={(eid) => `/tokoh/${id}/${eid}`} />
           </div>
         ) : null}
 

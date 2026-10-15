@@ -110,7 +110,7 @@ run_stage "import cv" scripts/import_cv.py --apply
 
 run_stage "ingest" -m jejak.cli ingest
 run_stage "backfill" -m jejak.cli backfill --days 6
-run_stage "fetch" -m jejak.cli fetch --limit 200
+run_stage "fetch" -m jejak.cli fetch --limit 1000
 run_stage "mentions" -m jejak.cli mentions --limit 1000
 for stage in cluster link quotes translate summarize sentiment buzzer suggest; do
     run_stage "$stage" -m jejak.cli "$stage"

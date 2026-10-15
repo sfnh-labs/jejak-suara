@@ -1,4 +1,5 @@
-"""Stage 2b — Propose which records belong to which peristiwa.
+"""Stage 2b — Propose which records belong to which peristiwa, and which
+events follow up which (link_followups, below).
 
 Clustering puts every article in exactly one event: an article attributed to a
 tracked figure goes into that figure's record, everything else into a
@@ -28,7 +29,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 from .cluster import _parse, _tokens
@@ -159,3 +160,125 @@ def link_records(conn: sqlite3.Connection) -> dict[str, int]:
     conn.commit()
     return stats
 
+
+
+# ---------------------------------------------------------------------------
+# Follow-ups
+#
+# Clustering merges coverage only within a window of days, so a story that
+# runs for weeks — a bill proposed then passed, a search launched then called
+# off — leaves a chain of unconnected events. This proposes the chain.
+#
+# Similarity alone is not enough: same-genre stories about different incidents
+# (two house fires, two weather forecasts, two unrelated KPK cases) score as
+# high as a true follow-up. What a follow-up has that they do not is a rare
+# term in both events' *titles* — the ship's name, the bill, the suspect.
+# Measured on the live data (2026-10): requiring one cut 1,127 candidate pairs
+# to ~300, most of them genuine; without it, about half were genre matches.
+
+FOLLOWUP_MIN_SCORE = 0.45
+FOLLOWUP_MIN_GAP_DAYS = 1      # the later one starts at least this much later
+FOLLOWUP_MAX_GAP_DAYS = 60     # ... and no longer than this after the first ends
+FOLLOWUP_TITLE_MAX_EVENTS = 10 # a shared title term found in at most this many titles
+FOLLOWUP_TITLE_MAX_DF = 60     # ... and in at most this many events' text
+PER_FOLLOWUP = 2               # predecessors proposed per event
+
+
+def _title_tokens(conn: sqlite3.Connection) -> dict[int, set[str]]:
+    return {r[0]: _tokens(r[1] or "") for r in conn.execute("SELECT id, title FROM events")}
+
+
+def link_followups(conn: sqlite3.Connection) -> dict[str, int]:
+    """Refresh proposed follow-up links. Never deletes a row; ruled pairs are left alone.
+
+    Peristiwa are paired with peristiwa; a record only with earlier records of
+    the same figure, since a figure's own story is what their page tells.
+    """
+    import numpy as np
+
+    stats = {"proposed": 0, "updated": 0}
+    groups: list[dict[int, dict]] = []
+    peristiwa = _load(conn, "peristiwa")
+    records = _load(conn, "record")
+    every = list(peristiwa.values()) + list(records.values())
+    if len(every) < 2:
+        return stats
+    centre = np.vstack([v for ev in every for v in ev["vecs"]]).mean(axis=0)
+    for ev in every:
+        m = np.vstack(ev["vecs"]).mean(axis=0) - centre
+        ev["mean"] = m / (np.linalg.norm(m) or 1.0)
+    df = Counter(t for ev in every for t in ev["tokens"])
+    titles = _title_tokens(conn)
+    title_df = Counter(t for toks in titles.values() for t in toks)
+
+    groups.append(peristiwa)
+    by_figure: dict[str, dict[int, dict]] = defaultdict(dict)
+    for rid, rec in records.items():
+        by_figure[rec["figure"]][rid] = rec
+    groups.extend(by_figure.values())
+
+    ruled = {
+        (r[0], r[1]) for r in conn.execute(
+            "SELECT earlier_id, later_id FROM followup_links WHERE verdict IS NOT NULL"
+        )
+    }
+    day = 86400.0
+    found: dict[int, list[tuple[float, int, list[str]]]] = defaultdict(list)
+    for group in groups:
+        ids = list(group)
+        if len(ids) < 2:
+            continue
+        mat = np.stack([group[i]["mean"] for i in ids])
+        sims = mat @ mat.T
+        start = np.array([group[i]["start"].timestamp() for i in ids])
+        end = np.array([group[i]["end"].timestamp() for i in ids])
+        # Row = earlier, column = later.
+        ok = (
+            (sims >= FOLLOWUP_MIN_SCORE)
+            & (start[None, :] >= start[:, None] + FOLLOWUP_MIN_GAP_DAYS * day)
+            & (start[None, :] <= end[:, None] + FOLLOWUP_MAX_GAP_DAYS * day)
+        )
+        for a, b in zip(*np.nonzero(ok)):
+            early, late = ids[a], ids[b]
+            in_titles = {
+                t for t in titles.get(early, set()) & titles.get(late, set())
+                if title_df[t] <= FOLLOWUP_TITLE_MAX_EVENTS and df[t] <= FOLLOWUP_TITLE_MAX_DF
+            }
+            if not in_titles:
+                continue
+            shared = group[early]["tokens"] & group[late]["tokens"]
+            specific = sorted((t for t in shared if df[t] <= SPECIFIC_MAX_EVENTS),
+                              key=lambda t: (df[t], t))
+            evidence = sorted(in_titles) + [t for t in specific if t not in in_titles]
+            if len(evidence) < MIN_SPECIFIC:
+                continue
+            found[late].append((float(sims[a, b]), early, evidence[:8]))
+
+    now = datetime.now(timezone.utc).isoformat()
+    for late, cands in found.items():
+        for score, early, evidence in sorted(cands, reverse=True)[:PER_FOLLOWUP]:
+            if (early, late) in ruled:
+                continue
+            ev_json = json.dumps(evidence, ensure_ascii=False)
+            score = round(score, 4)
+            existing = conn.execute(
+                "SELECT score, evidence FROM followup_links WHERE earlier_id = ? AND later_id = ?",
+                (early, late),
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    """INSERT INTO followup_links
+                           (earlier_id, later_id, score, evidence, origin, created_at)
+                       VALUES (?, ?, ?, ?, 'pipeline', ?)""",
+                    (early, late, score, ev_json, now),
+                )
+                stats["proposed"] += 1
+            elif (existing[0], existing[1]) != (score, ev_json):
+                conn.execute(
+                    "UPDATE followup_links SET score = ?, evidence = ? "
+                    "WHERE earlier_id = ? AND later_id = ?",
+                    (score, ev_json, early, late),
+                )
+                stats["updated"] += 1
+    conn.commit()
+    return stats

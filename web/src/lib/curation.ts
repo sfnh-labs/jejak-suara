@@ -43,6 +43,7 @@ export const REASONS = [
   { code: "trivial", label: "Remeh / seremonial", hint: "Kunjungan, ucapan selamat, seremoni tanpa substansi." },
   { code: "not_newsworthy", label: "Tak relevan untuk rekam jejak", hint: "Benar, tetapi tak berarti bagi rekam jejak tokoh ini." },
   { code: "duplicate", label: "Duplikat", hint: "Sudah ada catatan atau peristiwa yang sama." },
+  { code: "mixed", label: "Campuran beberapa kejadian", hint: "Artikelnya tentang kejadian berbeda yang tergabung, mis. dua kebakaran di provinsi lain." },
   { code: "hoax", label: "Hoaks / sudah dibantah", hint: "Klaimnya keliru atau sudah dibantah." },
   { code: "garbled", label: "Judul/ringkasan rusak", hint: "Isinya ada, tetapi judul atau ringkasannya kacau." },
   { code: "other", label: "Lainnya", hint: "Tulis alasannya di catatan." },
@@ -84,10 +85,11 @@ export type Kind = "record" | "peristiwa";
 
 /**
  * Which slice of the queue to show. `links` = records with unruled proposals;
+ * `followups` = events with an unruled follow-up proposal on either side;
  * `suggested` = unreviewed events the suggester would take down; `auto` =
  * events it did take down, waiting for a curator to confirm or restore.
  */
-export type Filter = "unreviewed" | "suggested" | "auto" | "live" | "rejected" | "links";
+export type Filter = "unreviewed" | "suggested" | "auto" | "live" | "rejected" | "links" | "followups";
 
 const PUBLIC = "e.status IN ('new', 'summarized', 'approved')";
 
@@ -102,6 +104,13 @@ const FILTER_SQL: Record<Filter, string> = {
     SELECT 1 FROM curation_suggestions cs
      WHERE cs.event_id = e.id AND cs.reason IS NOT NULL AND cs.auto_hide = 0)`,
   auto: AUTO_HIDDEN,
+  followups: `EXISTS (
+    SELECT 1 FROM followup_links l
+     WHERE (l.earlier_id = e.id OR l.later_id = e.id)
+       AND NOT EXISTS (SELECT 1 FROM followup_verdicts v
+                        WHERE v.earlier_id = l.earlier_id
+                          AND v.later_id = l.later_id
+                          AND v.verdict IS NOT NULL))`,
   links: `EXISTS (
     SELECT 1 FROM record_links l
      WHERE l.record_id = e.id
@@ -250,6 +259,10 @@ export async function getKindCounts(): Promise<Record<Kind, number>> {
 // One event
 
 export interface ItemSource {
+  /** The article's id, for opening it in the reading pane. */
+  id: string;
+  /** Whether the pipeline holds its text, so it can be read here. */
+  has_body: boolean;
   source: string;
   url: string;
   title: string | null;
@@ -350,6 +363,17 @@ export interface LinkRow {
   proposed: boolean;
 }
 
+/** A follow-up pair seen from one end: the event on the other side. */
+export interface FollowupRow {
+  event_id: number;
+  title: string | null;
+  event_date: string | null;
+  score: number | null;
+  evidence: string[];
+  verdict: LinkVerdict | null;
+  proposed: boolean;
+}
+
 export interface Item {
   event_id: number;
   kind: Kind;
@@ -370,6 +394,8 @@ export interface Item {
   next_id: number | null;
   ruling: Ruling | null;
   suggestion: Suggestion | null;
+  /** What this event follows up, and what follows it up. */
+  followups: { earlier: FollowupRow[]; later: FollowupRow[] };
   /** The labelled events the suggestion leans on, for "like these". */
   examples: { event_id: number; title: string | null; reasons: ReasonCode[] }[];
 }
@@ -390,6 +416,57 @@ function plain(html: string | null): string | null {
   if (!html) return null;
   const text = html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
   return text || null;
+}
+
+/** Shorter than this, a stored body is a failed fetch's leftovers (a cookie
+ *  notice, "Baca berita tanpa iklan"), not something to read. */
+const MIN_READABLE = 200;
+
+export interface ReadingArticle {
+  id: string;
+  source: string;
+  url: string;
+  title: string | null;
+  published_at: string | null;
+  lead: string | null;
+  /** Paragraphs, in Indonesian (a translation when `lang` says otherwise). */
+  paragraphs: string[];
+  /** The language the article was published in, when it was not Indonesian. */
+  lang: string | null;
+  /** The stored text stops at a paywall ("Arsip premium…"). */
+  truncated: boolean;
+}
+
+/** How an outlet's paywall ends the text the fetcher was given. */
+const PAYWALL = /Arsip premium dapat diakses|Gabung Premium KOMPAS\.com PLUS|Baca selengkapnya di aplikasi/i;
+
+/**
+ * One of the event's articles, as the curation page's reading pane shows it:
+ * the text the pipeline fetched, so the curator need not leave the page — most
+ * news sites refuse to be framed.
+ *
+ * Only an article of this event: the id comes from the URL.
+ */
+export async function getReading(eventId: number, articleId: string): Promise<ReadingArticle | null> {
+  const row = await queryOne<{
+    id: string; source: string; url: string; title: string | null;
+    published_at: string | null; summary: string | null; body: string | null; body_lang: string | null;
+  }>(
+    `SELECT id, source, url, title, published_at, summary, body, body_lang
+       FROM articles WHERE id = $1 AND event_id = $2`,
+    [articleId, eventId]
+  );
+  if (!row) return null;
+  const body = row.body?.trim() ?? "";
+  const paragraphs = body.length >= MIN_READABLE
+    ? body.split(/\n+/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean)
+    : [];
+  return {
+    id: row.id, source: row.source, url: row.url, title: row.title,
+    published_at: row.published_at, lead: plain(row.summary), paragraphs,
+    lang: row.body_lang && row.body_lang !== "id" ? row.body_lang : null,
+    truncated: PAYWALL.test(body),
+  };
 }
 
 function escapeRegExp(s: string): string {
@@ -482,6 +559,29 @@ async function namedPeople(
   return out.sort((a, b) => b.articles - a.articles || a.name.localeCompare(b.name));
 }
 
+async function getFollowups(eventId: number): Promise<{ earlier: FollowupRow[]; later: FollowupRow[] }> {
+  const rows = await query<FollowupRow & { evidence: string | null; side: "earlier" | "later" }>(
+    `SELECT CASE WHEN p.later_id = $1 THEN 'earlier' ELSE 'later' END AS side,
+            o.id AS event_id, o.title, o.event_date,
+            l.score, l.evidence, v.verdict, l.earlier_id IS NOT NULL AS proposed
+       FROM (SELECT earlier_id, later_id FROM followup_links
+              WHERE earlier_id = $1 OR later_id = $1
+              UNION
+             SELECT earlier_id, later_id FROM followup_verdicts
+              WHERE earlier_id = $1 OR later_id = $1) p
+       JOIN events o ON o.id = CASE WHEN p.later_id = $1 THEN p.earlier_id ELSE p.later_id END
+       LEFT JOIN followup_links l ON l.earlier_id = p.earlier_id AND l.later_id = p.later_id
+       LEFT JOIN followup_verdicts v ON v.earlier_id = p.earlier_id AND v.later_id = p.later_id
+      ORDER BY (v.verdict = 'confirmed') DESC NULLS LAST,
+               (v.verdict = 'rejected') ASC NULLS FIRST,
+               l.score DESC NULLS LAST`,
+    [eventId]
+  );
+  const out = { earlier: [] as FollowupRow[], later: [] as FollowupRow[] };
+  for (const { side, ...r } of rows) out[side].push({ ...r, evidence: parseAliases(r.evidence) });
+  return out;
+}
+
 async function getLinks(kind: Kind, eventId: number): Promise<LinkRow[]> {
   // The same pairs seen from either end: a record page lists peristiwa, a
   // peristiwa page lists records.
@@ -543,9 +643,9 @@ export async function getItem(eventId: number): Promise<Item | null> {
       )
     : [];
 
-  const [articles, owner, related, links, next] = await Promise.all([
-    query<ItemSource & { body: string | null }>(
-      `SELECT source, url, title, published_at, summary AS lead, body
+  const [articles, owner, related, links, next, followups] = await Promise.all([
+    query<Omit<ItemSource, "has_body"> & { body: string | null }>(
+      `SELECT id, source, url, title, published_at, summary AS lead, body
          FROM articles WHERE event_id = $1
         ORDER BY published_at NULLS FIRST, id`,
       [eventId]
@@ -583,6 +683,7 @@ export async function getItem(eventId: number): Promise<Item | null> {
         LIMIT 1`,
       [ev.kind, eventId, ev.event_date]
     ),
+    getFollowups(eventId),
   ]);
 
   // A struck figure wins over the still-present event_figures row.
@@ -620,7 +721,11 @@ export async function getItem(eventId: number): Promise<Item | null> {
 
   return {
     ...ev,
-    sources: articles.map(({ body, ...a }) => ({ ...a, lead: plain(a.lead) || plain(body)?.slice(0, 280) || null })),
+    sources: articles.map(({ body, ...a }) => ({
+      ...a,
+      lead: plain(a.lead) || plain(body)?.slice(0, 280) || null,
+      has_body: (body?.trim().length ?? 0) >= MIN_READABLE,
+    })),
     owner: owner
       ? {
           id: owner.id, name: owner.name, role: owner.role, active: owner.active,
@@ -641,6 +746,7 @@ export async function getItem(eventId: number): Promise<Item | null> {
     next_id: next?.id ?? null,
     ruling,
     suggestion,
+    followups,
     examples: examples.map((x) => ({ ...x, reasons: jsonCodes(x.reasons) })),
   };
 }
@@ -717,6 +823,157 @@ export async function setLinkVerdict(
        SET verdict = EXCLUDED.verdict, decided_at = EXCLUDED.decided_at,
            applied_at = NULL`,
     [recordId, peristiwaId, verdict]
+  );
+}
+
+/** An event the curator might chain to the one open, before or after it. */
+export interface FollowupCandidate {
+  event_id: number;
+  title: string | null;
+  event_date: string | null;
+  /** Whether it happened before the open event, by date. */
+  before: boolean;
+  /** Distinctive words both share; why it is suggested. */
+  shared: string[];
+}
+
+const STOP = new Set(`yang dengan untuk dari dalam akan pada tidak juga atau sudah karena bahwa oleh
+saat setelah masih para lebih belum hingga agar bisa harus jadi menjadi terkait soal usai jelang
+antara sebut minta tegaskan ungkap kata menyatakan menolak menyampaikan mengatakan meminta
+tentang terhadap kepada sebagai bersama secara akibat berbagai beberapa daerah indonesia
+presiden menteri pemerintah warga tahun hari baru kembali sumber lalu memiliki tersebut atas
+sekitar satu dua tiga menurut mungkin waktu butuh membutuhkan berhasil peristiwa sejumlah
+banyak telah dapat adalah ialah merupakan dilakukan melakukan memberikan diberikan pihak
+kegiatan upaya rencana`.split(/\s+/));
+
+function words(text: string | null | undefined): Set<string> {
+  return new Set(
+    (text ?? "")
+      // "[Sumber 2]" citation markers in summaries.
+      .replace(/\[sumber[^\]]*\]/gi, " ")
+      .toLowerCase().normalize("NFKD").replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/).filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w))
+  );
+}
+
+/**
+ * Events the curator might chain to this one, so a follow-up is picked from
+ * a list instead of typed in by number.
+ *
+ * Same kind, and for a record the same figure: a figure's story is told on
+ * their page. Without a search, the ones within FOLLOWUP_WINDOW_DAYS that
+ * share the most distinctive title-and-summary words (a word scores by how
+ * rare it is among the candidates, so "kebakaran" counts for less than
+ * "garibaldi"); with one, any whose title contains it.
+ * Pairs already proposed or ruled on are left out — they are listed above.
+ */
+const FOLLOWUP_WINDOW_DAYS = 60;
+
+export async function getFollowupCandidates(item: Item, search = ""): Promise<FollowupCandidate[]> {
+  const exclude = [item.event_id, ...item.followups.earlier.map((f) => f.event_id), ...item.followups.later.map((f) => f.event_id)];
+  const q = search.trim();
+  const rows = await query<{ event_id: number; title: string | null; event_date: string | null; summary: string | null }>(
+    `SELECT e.id AS event_id, e.title, e.event_date, es.summary_text AS summary
+       FROM events e
+       LEFT JOIN event_summaries es ON es.event_id = e.id
+      WHERE e.kind = $1 AND ${PUBLIC} AND e.curated IS DISTINCT FROM 'rejected'
+        AND e.id <> ALL($2::int[])
+        AND ($3::text IS NULL OR e.figure_id = $3)
+        AND CASE WHEN $5::text <> '' THEN e.title ILIKE '%' || $5 || '%'
+                 ELSE e.event_date IS NOT NULL AND $4::text IS NOT NULL
+                      AND e.event_date::timestamptz
+                          BETWEEN $4::timestamptz - interval '${FOLLOWUP_WINDOW_DAYS} days'
+                              AND $4::timestamptz + interval '${FOLLOWUP_WINDOW_DAYS} days'
+            END
+      ORDER BY e.event_date DESC NULLS LAST
+      LIMIT ${q ? 20 : 1500}`,
+    [item.kind, exclude, item.kind === "record" ? item.figure_id : null, item.event_date, q.replace(/[%_\\]/g, "\\$&")]
+  );
+  // A record's own figure is in every one of their records; it says nothing.
+  const own = new Set(
+    item.owner ? [...words(item.owner.name), ...item.owner.aliases.flatMap((a) => [...words(a)])] : []
+  );
+  const mine = new Set([...words(`${item.title ?? ""} ${item.summary ?? ""}`)].filter((w) => !own.has(w)));
+  const myTitle = words(item.title);
+  const docs = rows.map((r) => ({ r, w: words(`${r.title ?? ""} ${r.summary ?? ""}`), t: words(r.title) }));
+  const df = new Map<string, number>();
+  for (const { w } of docs) for (const t of w) if (mine.has(t)) df.set(t, (df.get(t) ?? 0) + 1);
+  // Shared by more than one candidate in ten, a word is the beat, not the story.
+  const common = Math.max(3, docs.length / 10);
+  const at = item.event_date ?? "";
+  const scored = docs.map(({ r, w, t }) => {
+    const shared = [...w]
+      .filter((x) => mine.has(x) && (df.get(x) ?? 0) <= common)
+      .sort((a, b) => (df.get(a) ?? 0) - (df.get(b) ?? 0));
+    // What a headline says is the story; a word in a title on either side counts triple.
+    const inTitle = shared.filter((x) => myTitle.has(x) || t.has(x));
+    const score = shared.reduce((n, x) => n + (inTitle.includes(x) ? 3 : 1) / (df.get(x) ?? 1), 0);
+    return {
+      score,
+      cand: {
+        event_id: r.event_id, title: r.title, event_date: r.event_date,
+        before: (r.event_date ?? "") < at || ((r.event_date ?? "") === at && r.event_id < item.event_id),
+        shared: shared.slice(0, 5),
+      },
+      inTitle: inTitle.length,
+    };
+  });
+  if (q) return scored.map((x) => x.cand).slice(0, 10);
+  return scored
+    .filter((x) => x.cand.shared.length >= 2 && x.inTitle >= 1)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((x) => x.cand);
+}
+
+/**
+ * Chain two events as a confirmed follow-up, whichever way round they were
+ * given: the earlier by date is the one followed up. Equal dates fall back to
+ * the lower id, which is the one clustered first.
+ */
+export async function confirmFollowupBetween(a: number, b: number): Promise<void> {
+  const rows = await query<{ id: number; event_date: string | null }>(
+    `SELECT id, event_date FROM events WHERE id = ANY($1::int[])`,
+    [[a, b]]
+  );
+  const ea = rows.find((r) => r.id === a);
+  const eb = rows.find((r) => r.id === b);
+  if (!ea || !eb) throw new Error("unknown event");
+  const aFirst = (ea.event_date ?? "") < (eb.event_date ?? "")
+    || ((ea.event_date ?? "") === (eb.event_date ?? "") && a < b);
+  await setFollowupVerdict(aFirst ? a : b, aFirst ? b : a, "confirmed");
+}
+
+/**
+ * Rule on a follow-up pair, or (`null`) withdraw the ruling — kept as a
+ * verdict-less row until apply_curation.py has undone it in the pipeline,
+ * exactly as for record links. Both events must be the same kind, and a
+ * record's follow-up must be the same figure's.
+ */
+export async function setFollowupVerdict(
+  earlierId: number,
+  laterId: number,
+  verdict: LinkVerdict | null
+): Promise<void> {
+  if (earlierId === laterId) throw new Error("an event cannot follow itself");
+  const rows = await query<{ id: number; kind: string; figure_id: string | null; event_date: string | null }>(
+    `SELECT id, kind, figure_id, event_date FROM events WHERE id = ANY($1::int[])`,
+    [[earlierId, laterId]]
+  );
+  const early = rows.find((r) => r.id === earlierId);
+  const late = rows.find((r) => r.id === laterId);
+  if (!early || !late) throw new Error("unknown event");
+  if (early.kind !== late.kind) throw new Error("a follow-up joins two events of the same kind");
+  if (early.kind === "record" && early.figure_id !== late.figure_id) {
+    throw new Error("a record's follow-up must be the same figure's record");
+  }
+  await query(
+    `INSERT INTO followup_verdicts (earlier_id, later_id, verdict, decided_at)
+     VALUES ($1, $2, $3, now()::text)
+     ON CONFLICT (earlier_id, later_id) DO UPDATE
+       SET verdict = EXCLUDED.verdict, decided_at = EXCLUDED.decided_at,
+           applied_at = NULL`,
+    [earlierId, laterId, verdict]
   );
 }
 

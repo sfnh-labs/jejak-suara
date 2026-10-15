@@ -9,6 +9,7 @@ import {
   type Kind,
   type QueueRow,
 } from "@/lib/curation";
+import { EventThumb } from "./EventImage";
 import { INK, MUTED, RULE, day } from "./ui";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,7 @@ const FILTERS: { key: Filter; label: string; kinds: Kind[] }[] = [
   { key: "suggested", label: "Disarankan turun", kinds: ["record", "peristiwa"] },
   { key: "auto", label: "Disembunyikan otomatis", kinds: ["record", "peristiwa"] },
   { key: "links", label: "Usulan tautan", kinds: ["record"] },
+  { key: "followups", label: "Usulan kelanjutan", kinds: ["record", "peristiwa"] },
   { key: "live", label: "Tayang", kinds: ["record", "peristiwa"] },
   { key: "rejected", label: "Diturunkan", kinds: ["record", "peristiwa"] },
 ];
@@ -148,43 +150,46 @@ function QueueItem({ row: r }: { row: QueueRow }) {
     <li style={{ borderBottom: `1px solid ${RULE}` }}>
       <Link
         href={`/kurasi/${r.event_id}`}
-        style={{ display: "block", padding: "13px 0", color: INK, textDecoration: "none" }}
+        style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "13px 0", color: INK, textDecoration: "none" }}
       >
-        <div style={{ fontSize: 11.5, color: MUTED, display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
-          <span>{day(r.event_date)}</span>
-          {r.figure_name || r.figure_id ? (
-            <>
-              <span>·</span>
-              <span style={{ fontWeight: 600, color: "var(--color-mud)" }}>{r.figure_name ?? r.figure_id}</span>
-            </>
-          ) : null}
-          <span>·</span>
-          <span>{r.outlet_count} media, {r.article_count} artikel</span>
-          {r.outlet_count <= 1 ? (
-            <span style={{ color: "var(--color-clay)", fontWeight: 600 }}>⚠ satu sumber</span>
-          ) : null}
-          {!r.has_summary ? <span>· belum dirangkum</span> : null}
-          {r.open_links > 0 ? (
-            <span style={{ color: "var(--color-clay)", fontWeight: 600 }}>
-              · {r.open_links} usulan tautan
-            </span>
-          ) : null}
-          {r.confirmed_links > 0 ? <span>· {r.confirmed_links} tertaut</span> : null}
-          {r.curated ? (
-            <span style={{ fontWeight: 600, color: r.curated === "rejected" ? "var(--color-clay)" : MUTED }}>
-              · {r.curated === "rejected" ? "diturunkan" : "sudah diperiksa"}
-              {r.curated === "rejected" && r.reasons.length > 0 ? `: ${r.reasons.map(reasonLabel).join(", ")}` : ""}
-            </span>
-          ) : r.suggestion ? (
-            <span style={{ fontWeight: 600, color: "#7a5a12" }}>
-              · {r.suggestion.auto_hide ? "disembunyikan otomatis" : "saran turun"}
-              {r.suggestion.reason ? `: ${reasonLabel(r.suggestion.reason)}` : ""}
-              {r.suggestion.confidence !== null ? ` (${Math.round(r.suggestion.confidence * 100)}%)` : ""}
-            </span>
-          ) : null}
-        </div>
-        <div style={{ fontFamily: "var(--font-serif)", fontSize: 16.5, lineHeight: 1.35 }}>
-          {r.title ?? `(tanpa judul) #${r.event_id}`}
+        {r.kind === "peristiwa" ? <EventThumb eventId={r.event_id} title={r.title} /> : null}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11.5, color: MUTED, display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
+            <span>{day(r.event_date)}</span>
+            {r.figure_name || r.figure_id ? (
+              <>
+                <span>·</span>
+                <span style={{ fontWeight: 600, color: "var(--color-mud)" }}>{r.figure_name ?? r.figure_id}</span>
+              </>
+            ) : null}
+            <span>·</span>
+            <span>{r.outlet_count} media, {r.article_count} artikel</span>
+            {r.outlet_count <= 1 ? (
+              <span style={{ color: "var(--color-clay)", fontWeight: 600 }}>⚠ satu sumber</span>
+            ) : null}
+            {!r.has_summary ? <span>· belum dirangkum</span> : null}
+            {r.open_links > 0 ? (
+              <span style={{ color: "var(--color-clay)", fontWeight: 600 }}>
+                · {r.open_links} usulan tautan
+              </span>
+            ) : null}
+            {r.confirmed_links > 0 ? <span>· {r.confirmed_links} tertaut</span> : null}
+            {r.curated ? (
+              <span style={{ fontWeight: 600, color: r.curated === "rejected" ? "var(--color-clay)" : MUTED }}>
+                · {r.curated === "rejected" ? "diturunkan" : "sudah diperiksa"}
+                {r.curated === "rejected" && r.reasons.length > 0 ? `: ${r.reasons.map(reasonLabel).join(", ")}` : ""}
+              </span>
+            ) : r.suggestion ? (
+              <span style={{ fontWeight: 600, color: "#7a5a12" }}>
+                · {r.suggestion.auto_hide ? "disembunyikan otomatis" : "saran turun"}
+                {r.suggestion.reason ? `: ${reasonLabel(r.suggestion.reason)}` : ""}
+                {r.suggestion.confidence !== null ? ` (${Math.round(r.suggestion.confidence * 100)}%)` : ""}
+              </span>
+            ) : null}
+          </div>
+          <div style={{ fontFamily: "var(--font-serif)", fontSize: 16.5, lineHeight: 1.35 }}>
+            {r.title ?? `(tanpa judul) #${r.event_id}`}
+          </div>
         </div>
       </Link>
     </li>

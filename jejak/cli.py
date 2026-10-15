@@ -168,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             print("cluster:", cluster_mod.cluster(conn))
         if args.cmd in ("link", "run"):
             print("link:", link.link_records(conn))
+            print("follow-ups:", link.link_followups(conn))
         if args.cmd in ("quotes", "run"):
             print("quotes:", quotes.quote_pending(conn))
         if args.cmd in ("summarize", "run"):

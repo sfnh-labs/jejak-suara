@@ -141,6 +141,11 @@ def reattribute(conn: sqlite3.Connection,
         for table in ("event_summaries", "event_figures", "sentiment",
                       "comments", "buzzer_signals"):
             conn.execute(f"DELETE FROM {table} WHERE event_id IN ({marks})", orphans)
+        # Links name events by two columns; either end gone takes the link.
+        for table, a, b in (("record_links", "record_id", "peristiwa_id"),
+                            ("followup_links", "earlier_id", "later_id")):
+            conn.execute(f"DELETE FROM {table} WHERE {a} IN ({marks}) OR {b} IN ({marks})",
+                         orphans + orphans)
         conn.execute(f"DELETE FROM events WHERE id IN ({marks})", orphans)
         stats["events_removed"] = len(orphans)
 

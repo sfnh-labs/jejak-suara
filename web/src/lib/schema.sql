@@ -75,6 +75,19 @@ CREATE TABLE IF NOT EXISTS record_links (
 );
 CREATE INDEX IF NOT EXISTS idx_record_links_peristiwa ON record_links(peristiwa_id);
 
+-- One event following up an earlier one of the same kind (jejak/link.py
+-- link_followups). Proposals, pipeline-owned and pushed like record_links;
+-- the ruling lives apart, in followup_verdicts.
+CREATE TABLE IF NOT EXISTS followup_links (
+    earlier_id INTEGER NOT NULL,
+    later_id   INTEGER NOT NULL,
+    score      REAL,
+    evidence   TEXT,          -- JSON array of the shared terms, title terms first
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (earlier_id, later_id)
+);
+CREATE INDEX IF NOT EXISTS idx_followup_links_later ON followup_links(later_id);
+
 -- Curator-owned tables below. Postgres is their only home — no sync writes
 -- them — and scripts/apply_curation.py copies each decision into the pipeline,
 -- stamping applied_at so it is carried out once.
@@ -90,6 +103,18 @@ CREATE TABLE IF NOT EXISTS record_link_verdicts (
     decided_at   TEXT NOT NULL,
     applied_at   TEXT,
     PRIMARY KEY (record_id, peristiwa_id)
+);
+
+-- Rulings on follow-up pairs, as record_link_verdicts are for record links:
+-- 'confirmed' ones form the "Lini cerita" on the site, 'rejected' ones are
+-- never proposed again, NULL is a withdrawn ruling still to reach the pipeline.
+CREATE TABLE IF NOT EXISTS followup_verdicts (
+    earlier_id INTEGER NOT NULL,
+    later_id   INTEGER NOT NULL,
+    verdict    TEXT,           -- 'confirmed' | 'rejected' | NULL (withdrawn)
+    decided_at TEXT NOT NULL,
+    applied_at TEXT,
+    PRIMARY KEY (earlier_id, later_id)
 );
 
 -- A curator's correction to a tracked figure's name, office or aliases. Shown

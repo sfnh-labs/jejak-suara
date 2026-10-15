@@ -103,6 +103,25 @@ CREATE TABLE IF NOT EXISTS record_links (
 );
 CREATE INDEX IF NOT EXISTS idx_record_links_peristiwa ON record_links(peristiwa_id);
 
+-- One event following up an earlier one: a bill proposed, then passed; a
+-- search launched, then called off. Same kind on both sides — peristiwa to
+-- peristiwa, or a figure's record to an earlier record of the same figure.
+-- Proposed by jejak/link.py (link_followups), ruled on in /kurasi; the
+-- columns mean what they do in record_links.
+CREATE TABLE IF NOT EXISTS followup_links (
+    earlier_id   INTEGER NOT NULL,
+    later_id     INTEGER NOT NULL,
+    score        REAL,
+    evidence     TEXT,                      -- JSON array of the shared terms
+    origin       TEXT NOT NULL DEFAULT 'pipeline',
+    verdict      TEXT,
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (earlier_id, later_id),
+    FOREIGN KEY (earlier_id) REFERENCES events(id),
+    FOREIGN KEY (later_id) REFERENCES events(id)
+);
+CREATE INDEX IF NOT EXISTS idx_followup_links_later ON followup_links(later_id);
+
 -- Related figures a curator struck from a peristiwa. promote_peristiwa
 -- re-derives event_figures from the coverage every run, and an alias that
 -- also names someone else would put the wrong person straight back; this is
@@ -290,9 +309,17 @@ CREATE TABLE IF NOT EXISTS corrections (
 
 
 def connect(path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+    # Several stages can share the file at once (a long fetch backfill beside
+    # a publish run), so wait for a lock rather than fail after sqlite's 5s.
+    conn = sqlite3.connect(path, timeout=60)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL lets readers and one writer work side by side. Switching needs a
+    # moment with no other connection open; until then it simply stays as is.
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 

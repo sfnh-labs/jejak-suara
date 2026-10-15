@@ -107,9 +107,11 @@ try {
     # An article with no body is summarized from its headline alone (backfilled
     # rows carry no RSS lead either), and nothing re-summarizes an event when a
     # body arrives later - so a fetch queue that cannot keep up turns into
-    # history made of headlines. Six days a cycle yields ~150 figure articles;
-    # 200 drains that plus the RSS intake, at ~1s each.
-    Invoke-Stage "fetch" @("-m", "jejak.cli", "fetch", "--limit", "200")
+    # history made of headlines. Six days a cycle yields ~150 figure articles,
+    # but the RSS intake is larger than that: at 200 a third of September and
+    # October went unfetched, leaving /kurasi nothing to read. 1000 (~17 min at
+    # ~1s each) keeps up with room to drain a backlog.
+    Invoke-Stage "fetch" @("-m", "jejak.cli", "fetch", "--limit", "1000")
 
     # Figure discovery. Mines the articles fetched above for people named in
     # them; anyone named by enough distinct outlets goes to the curator's
