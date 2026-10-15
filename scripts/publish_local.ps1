@@ -90,6 +90,8 @@ try {
     }
 
     # /kurasi writes its decisions straight into jejak.db; nothing to bring down.
+    # That makes it the only copy of the curator's work: back it up first.
+    Invoke-Stage "backup" @("scripts\backup_db.py")
     # Generated CVs into the roster; figures a curator edited are skipped.
     Invoke-Stage "import cv" @("scripts\import_cv.py", "--apply")
 

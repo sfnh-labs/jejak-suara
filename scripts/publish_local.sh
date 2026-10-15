@@ -108,7 +108,11 @@ elif [ "$last_push" != "$today" ] && [ "$last_push" \< "$yesterday" ]; then
 fi
 
 # /kurasi writes its decisions straight into jejak.db, so there is nothing to
-# bring down before the stages: they already follow the curator.
+# bring down before the stages: they already follow the curator. That also
+# makes jejak.db the only copy of the curator's work, so it is backed up first
+# (backups/, newest 7 kept).
+run_stage "backup" scripts/backup_db.py \
+    || log "backup failed - continuing; check disk space in backups/."
 
 # Generated CVs (cv/<figure-id>.json) into the roster. A figure a curator has
 # edited is marked and skipped.
