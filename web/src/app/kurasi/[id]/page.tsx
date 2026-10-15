@@ -239,10 +239,8 @@ export default async function KurasiItem({
         </Card>
 
         <p style={{ fontSize: 12, color: MUTED, margin: "22px 0 0", lineHeight: 1.6, maxWidth: 640 }}>
-          <Pill tone="pending">menunggu pipeline</Pill>{" "}
-          artinya keputusan sudah berlaku di situs, tetapi belum disalin ke basis data pipeline. Itu terjadi
-          otomatis pada putaran malam (<code>scripts/apply_curation.py</code>); sampai saat itu artikel baru
-          masih dicocokkan dengan data lama.
+          Keputusan di sini langsung tersimpan di <code>jejak.db</code> dan dipakai pipeline pada putaran
+          berikutnya. Situs publik mengikutinya setelah push ke Neon.
         </p>
         </div>
         {reading ? (
@@ -390,8 +388,6 @@ function Pill({ tone = "neutral", title, children }: { tone?: PillTone; title?: 
     </span>
   );
 }
-
-const PENDING_HINT = "Sudah berlaku di situs. Pipeline menyalinnya pada putaran malam berikutnya.";
 
 function Hidden({ fields }: { fields: Record<string, string | number> }) {
   return (
@@ -550,7 +546,6 @@ function SuggestionLine({ item }: { item: Item }) {
 }
 
 function FigureHeading({ figure }: { figure: FigureRef | NamedPerson }) {
-  const pending = "edit_pending" in figure && figure.edit_pending;
   const active = "active" in figure ? figure.active : true;
   return (
     <span style={{ display: "inline-flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -564,7 +559,6 @@ function FigureHeading({ figure }: { figure: FigureRef | NamedPerson }) {
       ) : null}
       <code style={{ fontSize: 11.5, color: MUTED }}>/tokoh/{figure.id}</code>
       {!active ? <Pill tone="danger">nonaktif</Pill> : null}
-      {pending ? <Pill tone="pending" title={PENDING_HINT}>disunting · menunggu pipeline</Pill> : null}
     </span>
   );
 }
@@ -825,11 +819,12 @@ function CandidateRow({ person: p }: { person: NamedPerson }) {
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ fontFamily: "var(--font-serif)", fontSize: 17, fontWeight: 600 }}>{p.name}</span>
         <Pill tone={p.verdict === "promote" ? "accept" : "danger"}>{p.verdict === "promote" ? "diterima" : "ditolak"}</Pill>
-        <Pill tone="pending" title={PENDING_HINT}>menunggu pipeline</Pill>
-        <form action={decide}>
-          <Hidden fields={{ slug: p.id, verdict: "" }} />
-          <button type="submit" style={button("quiet")}>Batalkan</button>
-        </form>
+        {p.verdict === "reject" ? (
+          <form action={decide}>
+            <Hidden fields={{ slug: p.id, verdict: "" }} />
+            <button type="submit" style={button("quiet")}>Batalkan</button>
+          </form>
+        ) : null}
       </div>
     );
   }

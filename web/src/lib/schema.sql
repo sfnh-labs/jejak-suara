@@ -70,27 +70,31 @@ CREATE TABLE IF NOT EXISTS record_links (
     peristiwa_id INTEGER NOT NULL,
     score        REAL,
     evidence     TEXT,          -- JSON array of the rare words both share
+    origin       TEXT,          -- 'pipeline' | 'curator'
+    verdict      TEXT,          -- 'confirmed' | 'rejected' | NULL; set in /kurasi (jejak.db)
     created_at   TEXT NOT NULL,
     PRIMARY KEY (record_id, peristiwa_id)
 );
 CREATE INDEX IF NOT EXISTS idx_record_links_peristiwa ON record_links(peristiwa_id);
 
 -- One event following up an earlier one of the same kind (jejak/link.py
--- link_followups). Proposals, pipeline-owned and pushed like record_links;
--- the ruling lives apart, in followup_verdicts.
+-- link_followups). Pushed from jejak.db with the curator's ruling, like
+-- record_links.
 CREATE TABLE IF NOT EXISTS followup_links (
     earlier_id INTEGER NOT NULL,
     later_id   INTEGER NOT NULL,
     score      REAL,
     evidence   TEXT,          -- JSON array of the shared terms, title terms first
+    origin     TEXT,
+    verdict    TEXT,          -- 'confirmed' | 'rejected' | NULL
     created_at TEXT NOT NULL,
     PRIMARY KEY (earlier_id, later_id)
 );
 CREATE INDEX IF NOT EXISTS idx_followup_links_later ON followup_links(later_id);
 
--- Curator-owned tables below. Postgres is their only home — no sync writes
--- them — and scripts/apply_curation.py copies each decision into the pipeline,
--- stamping applied_at so it is carried out once.
+-- Legacy curator tables, from when /kurasi wrote to Neon. /kurasi now writes
+-- jejak.db (scripts/migrate_kurasi_local.py moved their contents down) and
+-- nothing reads or writes these any more; kept until they are dropped.
 
 -- 'confirmed' links are shown on the public site; 'rejected' ones are never
 -- proposed again. A confirmed row with no record_links counterpart is a link

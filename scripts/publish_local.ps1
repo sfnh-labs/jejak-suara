@@ -89,10 +89,8 @@ try {
         Log "Ollama is up."
     }
 
-    # Curator decisions from /kurasi go in first, so this cycle's attribution,
-    # clustering and linking already follow them.
-    Invoke-Stage "apply curation" @("scripts\apply_curation.py", "--apply")
-    # Generated CVs into the roster; after curation, so curated figures are skipped.
+    # /kurasi writes its decisions straight into jejak.db; nothing to bring down.
+    # Generated CVs into the roster; figures a curator edited are skipped.
     Invoke-Stage "import cv" @("scripts\import_cv.py", "--apply")
 
     Invoke-Stage "ingest" @("-m", "jejak.cli", "ingest")
@@ -119,6 +117,8 @@ try {
     # roster. Runs before clustering so a figure accepted since the last run
     # owns the articles clustered this cycle.
     Invoke-Stage "mentions" @("-m", "jejak.cli", "mentions", "--limit", "1000")
+    # The names queue in /kurasi/kandidat, from what mentions just mined.
+    Invoke-Stage "names queue" @("scripts\kurasi_ops.py", "refresh")
 
     foreach ($stage in @("cluster", "link", "quotes", "translate", "summarize",
                          "sentiment", "buzzer", "suggest")) {

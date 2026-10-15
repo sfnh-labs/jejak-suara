@@ -78,9 +78,9 @@ export default async function Kurasi({
           <p style={{ fontSize: 14.5, lineHeight: 1.6, color: "var(--color-mud)", margin: 0, maxWidth: 600 }}>
             Satu catatan atau peristiwa per halaman. Dari situ kamu memutus
             apakah ia tayang, siapa tokoh di dalamnya, dan peristiwa mana yang
-            menaunginya. Semua keputusan <strong>langsung berlaku di situs</strong>,
-            lalu diteruskan ke pipeline pada putaran berikutnya
-            (<code style={{ fontSize: 13 }}>scripts/apply_curation.py</code>).
+            menaunginya. Keputusan disimpan di <code style={{ fontSize: 13 }}>jejak.db</code>{" "}
+            dan <strong>langsung dipakai pipeline</strong>; situs publik
+            mengikutinya pada push berikutnya ke Neon.
           </p>
         </header>
 

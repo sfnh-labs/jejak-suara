@@ -1,4 +1,4 @@
-import { query, queryOne } from "./db";
+import { lquery as query, lqueryOne as queryOne, lrun, ltx, pipelineOp } from "./localDb";
 
 /**
  * Curation, one event at a time.
@@ -8,11 +8,9 @@ import { query, queryOne } from "./db";
  * who acts in a record, the people its coverage names, and which peristiwa the
  * record is part of.
  *
- * Every decision here is written to a Postgres-only column or table that no
- * sync touches, and takes effect on the site at once. The pipeline catches up
- * through scripts/apply_curation.py, which copies each decision into SQLite so
- * the next crawl attributes, links and relates figures the way the curator
- * said.
+ * Reads and writes jejak.db, the pipeline's own database (localDb.ts): a
+ * decision is in force for the next crawl the moment it is made, and reaches
+ * the public site with the next push to Neon.
  */
 
 /**
@@ -97,7 +95,7 @@ const AUTO_HIDDEN = `e.curated IS NULL AND EXISTS (
     SELECT 1 FROM curation_suggestions cs WHERE cs.event_id = e.id AND cs.auto_hide = 1)`;
 
 const FILTER_SQL: Record<Filter, string> = {
-  live: `e.curated IS DISTINCT FROM 'rejected' AND NOT (${AUTO_HIDDEN})`,
+  live: `e.curated IS NOT 'rejected' AND NOT (${AUTO_HIDDEN})`,
   rejected: "e.curated = 'rejected'",
   unreviewed: "e.curated IS NULL",
   suggested: `e.curated IS NULL AND EXISTS (
@@ -106,18 +104,9 @@ const FILTER_SQL: Record<Filter, string> = {
   auto: AUTO_HIDDEN,
   followups: `EXISTS (
     SELECT 1 FROM followup_links l
-     WHERE (l.earlier_id = e.id OR l.later_id = e.id)
-       AND NOT EXISTS (SELECT 1 FROM followup_verdicts v
-                        WHERE v.earlier_id = l.earlier_id
-                          AND v.later_id = l.later_id
-                          AND v.verdict IS NOT NULL))`,
+     WHERE (l.earlier_id = e.id OR l.later_id = e.id) AND l.verdict IS NULL)`,
   links: `EXISTS (
-    SELECT 1 FROM record_links l
-     WHERE l.record_id = e.id
-       AND NOT EXISTS (SELECT 1 FROM record_link_verdicts v
-                        WHERE v.record_id = l.record_id
-                          AND v.peristiwa_id = l.peristiwa_id
-                          AND v.verdict IS NOT NULL))`,
+    SELECT 1 FROM record_links l WHERE l.record_id = e.id AND l.verdict IS NULL)`,
 };
 
 export interface QueueRow {
@@ -130,7 +119,7 @@ export interface QueueRow {
   curated: Verdict | null;
   outlet_count: number;
   article_count: number;
-  has_summary: boolean;
+  has_summary: boolean | number;
   /** Proposed peristiwa links nobody has ruled on (records only). */
   open_links: number;
   confirmed_links: number;
@@ -145,7 +134,7 @@ interface SuggestionColumns {
   s_support: number | null;
   s_examples: string | null;
   s_auto_hide: number | null;
-  scored: boolean;
+  scored: boolean | number;
 }
 
 const SUGGESTION_SELECT = `cs.reason AS s_reason, cs.confidence AS s_confidence,
@@ -203,32 +192,27 @@ export async function getQueue(
        FROM events e
        LEFT JOIN figures f ON f.id = e.figure_id
        LEFT JOIN event_summaries es ON es.event_id = e.id
-       LEFT JOIN curation_reasons cr ON cr.event_id = e.id
+       LEFT JOIN curation_labels cr ON cr.event_id = e.id
        LEFT JOIN curation_suggestions cs ON cs.event_id = e.id
-       LEFT JOIN LATERAL (
-         SELECT count(DISTINCT a.source)::int AS outlet_count,
-                count(*)::int                 AS article_count
-           FROM articles a WHERE a.event_id = e.id
-       ) src ON TRUE
-       LEFT JOIN LATERAL (
-         SELECT count(*) FILTER (WHERE v.verdict IS NULL)::int        AS open_links,
-                count(*) FILTER (WHERE v.verdict = 'confirmed')::int  AS confirmed_links
-           FROM (SELECT record_id, peristiwa_id FROM record_links
-                  UNION
-                 SELECT record_id, peristiwa_id FROM record_link_verdicts) p
-           LEFT JOIN record_link_verdicts v
-             ON v.record_id = p.record_id AND v.peristiwa_id = p.peristiwa_id
-          WHERE (e.kind = 'record' AND p.record_id = e.id)
-             OR (e.kind = 'peristiwa' AND p.peristiwa_id = e.id)
-       ) lk ON TRUE
-      WHERE e.kind = $1 AND ${PUBLIC} AND ${FILTER_SQL[filter]}
+       LEFT JOIN (
+         SELECT event_id, count(DISTINCT source) AS outlet_count, count(*) AS article_count
+           FROM articles WHERE event_id IS NOT NULL GROUP BY event_id
+       ) src ON src.event_id = e.id
+       LEFT JOIN (
+         SELECT CASE WHEN ?1 = 'record' THEN record_id ELSE peristiwa_id END AS event_id,
+                count(*) FILTER (WHERE verdict IS NULL)        AS open_links,
+                count(*) FILTER (WHERE verdict = 'confirmed')  AS confirmed_links
+           FROM record_links GROUP BY 1
+       ) lk ON lk.event_id = e.id
+      WHERE e.kind = ?1 AND ${PUBLIC} AND ${FILTER_SQL[filter]}
       ORDER BY ${filter === "suggested" ? "cs.confidence DESC NULLS LAST," : ""}
                e.event_date DESC NULLS LAST, e.id DESC
-      LIMIT $2 OFFSET $3`,
+      LIMIT ?2 OFFSET ?3`,
     [kind, PAGE_SIZE, (Math.max(page, 1) - 1) * PAGE_SIZE]
   );
   return rows.map(({ s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored, reasons, ...r }) => ({
     ...r,
+    has_summary: Boolean(r.has_summary),
     reasons: jsonCodes(reasons),
     suggestion: suggestionOf({ s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored }),
   }));
@@ -239,7 +223,7 @@ export async function getQueueCounts(kind: Kind): Promise<Record<Filter, number>
   const row = await queryOne<Record<Filter, string>>(
     `SELECT ${keys.map((k) => `count(*) FILTER (WHERE ${FILTER_SQL[k]}) AS ${k}`).join(",\n            ")}
        FROM events e
-      WHERE e.kind = $1 AND ${PUBLIC}`,
+      WHERE e.kind = ? AND ${PUBLIC}`,
     [kind]
   );
   return Object.fromEntries(keys.map((k) => [k, Number(row?.[k] ?? 0)])) as Record<Filter, number>;
@@ -330,8 +314,6 @@ export interface FigureRef {
   profile: Profile;
   cv_checked_at: string | null;
   active: boolean;
-  /** Set while the edit waits for apply_curation.py to reach the pipeline. */
-  edit_pending: boolean;
 }
 
 /** Someone the coverage names. `articles` = how many of the event's articles. */
@@ -453,7 +435,7 @@ export async function getReading(eventId: number, articleId: string): Promise<Re
     published_at: string | null; summary: string | null; body: string | null; body_lang: string | null;
   }>(
     `SELECT id, source, url, title, published_at, summary, body, body_lang
-       FROM articles WHERE id = $1 AND event_id = $2`,
+       FROM articles WHERE id = ? AND event_id = ?`,
     [articleId, eventId]
   );
   if (!row) return null;
@@ -509,9 +491,11 @@ async function namedPeople(
     query<{ id: string; name: string; role: string | null; aliases: string | null; positions: string | null }>(
       `SELECT id, name, role, aliases, positions FROM figures WHERE active`
     ),
+    // Decided names are carried out at once (kurasi_ops.py), so an applied
+    // verdict is a settled one: only undecided names are still a question.
     query<{ slug: string; name: string; role: string | null; verdict: string | null; full_name: string | null; records: string | null }>(
       `SELECT slug, name, COALESCE(curated_role, role) AS role, verdict, full_name, records
-         FROM figure_candidates
+         FROM candidate_review
         WHERE slug NOT IN (SELECT id FROM figures)
           AND (verdict IS NULL OR applied_at IS NULL)`
     ),
@@ -560,25 +544,22 @@ async function namedPeople(
 }
 
 async function getFollowups(eventId: number): Promise<{ earlier: FollowupRow[]; later: FollowupRow[] }> {
-  const rows = await query<FollowupRow & { evidence: string | null; side: "earlier" | "later" }>(
-    `SELECT CASE WHEN p.later_id = $1 THEN 'earlier' ELSE 'later' END AS side,
+  const rows = await query<Omit<FollowupRow, "proposed"> & { evidence: string | null; side: "earlier" | "later"; proposed: number }>(
+    `SELECT CASE WHEN l.later_id = ?1 THEN 'earlier' ELSE 'later' END AS side,
             o.id AS event_id, o.title, o.event_date,
-            l.score, l.evidence, v.verdict, l.earlier_id IS NOT NULL AS proposed
-       FROM (SELECT earlier_id, later_id FROM followup_links
-              WHERE earlier_id = $1 OR later_id = $1
-              UNION
-             SELECT earlier_id, later_id FROM followup_verdicts
-              WHERE earlier_id = $1 OR later_id = $1) p
-       JOIN events o ON o.id = CASE WHEN p.later_id = $1 THEN p.earlier_id ELSE p.later_id END
-       LEFT JOIN followup_links l ON l.earlier_id = p.earlier_id AND l.later_id = p.later_id
-       LEFT JOIN followup_verdicts v ON v.earlier_id = p.earlier_id AND v.later_id = p.later_id
-      ORDER BY (v.verdict = 'confirmed') DESC NULLS LAST,
-               (v.verdict = 'rejected') ASC NULLS FIRST,
+            l.score, l.evidence, l.verdict, l.origin IS NOT 'curator' AS proposed
+       FROM followup_links l
+       JOIN events o ON o.id = CASE WHEN l.later_id = ?1 THEN l.earlier_id ELSE l.later_id END
+      WHERE l.earlier_id = ?1 OR l.later_id = ?1
+      ORDER BY (l.verdict = 'confirmed') DESC NULLS LAST,
+               (l.verdict = 'rejected') ASC NULLS FIRST,
                l.score DESC NULLS LAST`,
     [eventId]
   );
   const out = { earlier: [] as FollowupRow[], later: [] as FollowupRow[] };
-  for (const { side, ...r } of rows) out[side].push({ ...r, evidence: parseAliases(r.evidence) });
+  for (const { side, ...r } of rows) {
+    out[side].push({ ...r, proposed: Boolean(r.proposed), evidence: parseAliases(r.evidence) });
+  }
   return out;
 }
 
@@ -588,26 +569,21 @@ async function getLinks(kind: Kind, eventId: number): Promise<LinkRow[]> {
   const [self, other] = kind === "record"
     ? ["record_id", "peristiwa_id"]
     : ["peristiwa_id", "record_id"];
-  const rows = await query<LinkRow & { evidence: string | null }>(
-    `SELECT p.${other} AS event_id, o.title, o.event_date,
+  const rows = await query<Omit<LinkRow, "proposed"> & { evidence: string | null; proposed: number }>(
+    `SELECT l.${other} AS event_id, o.title, o.event_date,
             f.name AS figure_name,
-            l.score, l.evidence, v.verdict,
-            l.record_id IS NOT NULL AS proposed
-       FROM (SELECT record_id, peristiwa_id FROM record_links WHERE ${self} = $1
-              UNION
-             SELECT record_id, peristiwa_id FROM record_link_verdicts WHERE ${self} = $1) p
-       JOIN events o ON o.id = p.${other}
+            l.score, l.evidence, l.verdict,
+            l.origin IS NOT 'curator' AS proposed
+       FROM record_links l
+       JOIN events o ON o.id = l.${other}
        LEFT JOIN figures f ON f.id = o.figure_id
-       LEFT JOIN record_links l
-         ON l.record_id = p.record_id AND l.peristiwa_id = p.peristiwa_id
-       LEFT JOIN record_link_verdicts v
-         ON v.record_id = p.record_id AND v.peristiwa_id = p.peristiwa_id
-      ORDER BY (v.verdict = 'confirmed') DESC NULLS LAST,
-               (v.verdict = 'rejected') ASC NULLS FIRST,
+      WHERE l.${self} = ?
+      ORDER BY (l.verdict = 'confirmed') DESC NULLS LAST,
+               (l.verdict = 'rejected') ASC NULLS FIRST,
                l.score DESC NULLS LAST`,
     [eventId]
   );
-  return rows.map((r) => ({ ...r, evidence: parseAliases(r.evidence) }));
+  return rows.map((r) => ({ ...r, proposed: Boolean(r.proposed), evidence: parseAliases(r.evidence) }));
 }
 
 export async function getItem(eventId: number): Promise<Item | null> {
@@ -623,9 +599,9 @@ export async function getItem(eventId: number): Promise<Item | null> {
             ${SUGGESTION_SELECT}
        FROM events e
        LEFT JOIN event_summaries es ON es.event_id = e.id
-       LEFT JOIN curation_reasons cr ON cr.event_id = e.id
+       LEFT JOIN curation_labels cr ON cr.event_id = e.id
        LEFT JOIN curation_suggestions cs ON cs.event_id = e.id
-      WHERE e.id = $1`,
+      WHERE e.id = ?`,
     [eventId]
   );
   if (!row) return null;
@@ -637,8 +613,8 @@ export async function getItem(eventId: number): Promise<Item | null> {
   const examples = suggestion?.examples.length
     ? await query<{ event_id: number; title: string | null; reasons: string | null }>(
         `SELECT cr.event_id, COALESCE(e.title, cr.title) AS title, cr.reasons
-           FROM curation_reasons cr LEFT JOIN events e ON e.id = cr.event_id
-          WHERE cr.event_id = ANY($1::int[])`,
+           FROM curation_labels cr LEFT JOIN events e ON e.id = cr.event_id
+          WHERE cr.event_id IN (SELECT value FROM json_each(?))`,
         [suggestion.examples.slice(0, 5)]
       )
     : [];
@@ -646,7 +622,7 @@ export async function getItem(eventId: number): Promise<Item | null> {
   const [articles, owner, related, links, next, followups] = await Promise.all([
     query<Omit<ItemSource, "has_body"> & { body: string | null }>(
       `SELECT id, source, url, title, published_at, summary AS lead, body
-         FROM articles WHERE event_id = $1
+         FROM articles WHERE event_id = ?
         ORDER BY published_at NULLS FIRST, id`,
       [eventId]
     ),
@@ -654,31 +630,30 @@ export async function getItem(eventId: number): Promise<Item | null> {
       ? queryOne<{
           id: string; name: string; role: string | null; aliases: string | null; positions: string | null;
           bio: string | null; facts: string | null; education: string | null; sources: string | null;
-          cv_checked_at: string | null; active: boolean; edit_pending: boolean;
+          cv_checked_at: string | null; active: number;
         }>(
           `SELECT f.id, f.name, f.role, f.aliases, f.positions, f.bio, f.facts, f.education,
-                  f.sources, f.cv_checked_at, f.active,
-                  (fe.figure_id IS NOT NULL AND fe.applied_at IS NULL) AS edit_pending
+                  f.sources, f.cv_checked_at, f.active
              FROM figures f
-             LEFT JOIN figure_edits fe ON fe.figure_id = f.id
-            WHERE f.id = $1`,
+            WHERE f.id = ?`,
           [ev.figure_id]
         )
       : Promise.resolve(null),
     ev.kind === "peristiwa"
-      ? query<{ figure_id: string; struck: boolean }>(
-          `SELECT figure_id, false AS struck FROM event_figures WHERE event_id = $1
+      // A row in event_figure_rejections is a strike; the pipeline also
+      // dropped the event_figures row when it was made.
+      ? query<{ figure_id: string; struck: number }>(
+          `SELECT figure_id, 0 AS struck FROM event_figures WHERE event_id = ?1
             UNION
-           SELECT figure_id, true FROM event_figure_rejections
-            WHERE event_id = $1 AND struck`,
+           SELECT figure_id, 1 FROM event_figure_rejections WHERE event_id = ?1`,
           [eventId]
-        )
+        ).then((rows) => rows.map((r) => ({ figure_id: r.figure_id, struck: Boolean(r.struck) })))
       : Promise.resolve([]),
     getLinks(ev.kind, eventId),
     queryOne<{ id: number }>(
       `SELECT e.id FROM events e
-        WHERE e.kind = $1 AND ${PUBLIC} AND e.curated IS NULL AND e.id <> $2
-          AND (COALESCE(e.event_date, ''), e.id) < (COALESCE($3, ''), $2)
+        WHERE e.kind = ?1 AND ${PUBLIC} AND e.curated IS NULL AND e.id <> ?2
+          AND (COALESCE(e.event_date, ''), e.id) < (COALESCE(?3, ''), ?2)
         ORDER BY COALESCE(e.event_date, '') DESC, e.id DESC
         LIMIT 1`,
       [ev.kind, eventId, ev.event_date]
@@ -708,12 +683,10 @@ export async function getItem(eventId: number): Promise<Item | null> {
         `SELECT e.id AS event_id, e.title, e.event_date
            FROM events e
           WHERE e.kind = 'peristiwa' AND ${PUBLIC}
-            AND e.curated IS DISTINCT FROM 'rejected'
-            AND e.event_date::timestamptz
-                BETWEEN $1::timestamptz - interval '7 days'
-                    AND $1::timestamptz + interval '7 days'
-            AND e.id <> ALL($2::int[])
-          ORDER BY abs(extract(epoch FROM e.event_date::timestamptz - $1::timestamptz))
+            AND e.curated IS NOT 'rejected'
+            AND abs(julianday(e.event_date) - julianday(?1)) <= 7
+            AND e.id NOT IN (SELECT value FROM json_each(?2))
+          ORDER BY abs(julianday(e.event_date) - julianday(?1))
           LIMIT 40`,
         [ev.event_date ?? new Date().toISOString(), links.map((l) => l.event_id)]
       )
@@ -728,8 +701,8 @@ export async function getItem(eventId: number): Promise<Item | null> {
     })),
     owner: owner
       ? {
-          id: owner.id, name: owner.name, role: owner.role, active: owner.active,
-          edit_pending: owner.edit_pending, cv_checked_at: owner.cv_checked_at,
+          id: owner.id, name: owner.name, role: owner.role, active: Boolean(owner.active),
+          cv_checked_at: owner.cv_checked_at,
           aliases: parseAliases(owner.aliases),
           positions: parsePositions(owner.positions),
           profile: {
@@ -759,8 +732,9 @@ export async function getItem(eventId: number): Promise<Item | null> {
  * `unreviewed` and dropping its label.
  *
  * The label snapshots the event as the curator saw it, so it still means
- * something after the pipeline re-clusters or drops the event. One statement,
- * so the verdict and its reasons never disagree.
+ * something after the pipeline re-clusters or drops the event; it is what
+ * jejak/curation_suggest.py learns from. Written together with the verdict,
+ * so the two never disagree.
  */
 export async function setCuration(
   eventId: number,
@@ -769,39 +743,39 @@ export async function setCuration(
   note: string | null = null,
   suggested: string | null = null
 ): Promise<void> {
-  if (verdict === null) {
-    await query(
-      `WITH d AS (DELETE FROM curation_reasons WHERE event_id = $1 RETURNING 1)
-       UPDATE events SET curated = NULL WHERE id = $1`,
-      [eventId]
+  await ltx(async () => {
+    await lrun(`UPDATE events SET curated = ? WHERE id = ?`, [verdict, eventId]);
+    if (verdict === null) {
+      await lrun(`DELETE FROM curation_labels WHERE event_id = ?`, [eventId]);
+      return;
+    }
+    await lrun(
+      `INSERT INTO curation_labels
+              (event_id, verdict, reasons, note, kind, figure_id, title, summary,
+               outlets, suggested, decided_at)
+       SELECT e.id, ?2, ?3, ?4, e.kind, e.figure_id, e.title, es.summary_text,
+              (SELECT count(DISTINCT a.source) FROM articles a WHERE a.event_id = e.id),
+              ?5, ?6
+         FROM events e
+         LEFT JOIN event_summaries es ON es.event_id = e.id
+        WHERE e.id = ?1
+       ON CONFLICT (event_id) DO UPDATE
+         SET verdict = excluded.verdict, reasons = excluded.reasons,
+             note = excluded.note, title = excluded.title,
+             summary = excluded.summary, outlets = excluded.outlets,
+             suggested = COALESCE(excluded.suggested, curation_labels.suggested),
+             decided_at = excluded.decided_at`,
+      [eventId, verdict, JSON.stringify(reasons), note, suggested, new Date().toISOString()]
     );
-    return;
-  }
-  await query(
-    `WITH u AS (UPDATE events SET curated = $2 WHERE id = $1 RETURNING id)
-     INSERT INTO curation_reasons
-            (event_id, verdict, reasons, note, kind, figure_id, title, summary,
-             outlets, suggested, decided_at)
-     SELECT e.id, $2, $3, $4, e.kind, e.figure_id, e.title, es.summary_text,
-            (SELECT count(DISTINCT a.source)::int FROM articles a WHERE a.event_id = e.id),
-            $5, now()::text
-       FROM events e
-       LEFT JOIN event_summaries es ON es.event_id = e.id
-      WHERE e.id = $1
-     ON CONFLICT (event_id) DO UPDATE
-       SET verdict = EXCLUDED.verdict, reasons = EXCLUDED.reasons,
-           note = EXCLUDED.note, title = EXCLUDED.title,
-           summary = EXCLUDED.summary, outlets = EXCLUDED.outlets,
-           suggested = COALESCE(EXCLUDED.suggested, curation_reasons.suggested),
-           decided_at = EXCLUDED.decided_at`,
-    [eventId, verdict, JSON.stringify(reasons), note, suggested]
-  );
+  });
 }
 
 /**
- * Rule on a record → peristiwa pair. `null` withdraws the ruling: the row
- * stays, verdict-less, until apply_curation.py has cleared it in the pipeline
- * too, or a rejected pair would never be proposed again.
+ * Rule on a record → peristiwa pair, or (`null`) withdraw the ruling.
+ *
+ * The verdict sits on the link row itself. A pair the pipeline never proposed
+ * is the curator's own (`origin = 'curator'`) and goes when withdrawn; a
+ * rejected proposal stays, so link.py never proposes it again.
  */
 export async function setLinkVerdict(
   recordId: number,
@@ -809,21 +783,38 @@ export async function setLinkVerdict(
   verdict: LinkVerdict | null
 ): Promise<void> {
   const kinds = await query<{ id: number; kind: string }>(
-    `SELECT id, kind FROM events WHERE id = ANY($1::int[])`,
-    [[recordId, peristiwaId]]
+    `SELECT id, kind FROM events WHERE id IN (?, ?)`,
+    [recordId, peristiwaId]
   );
   const kindOf = new Map(kinds.map((k) => [k.id, k.kind]));
   if (kindOf.get(recordId) !== "record" || kindOf.get(peristiwaId) !== "peristiwa") {
     throw new Error("a link joins a record to a peristiwa");
   }
-  await query(
-    `INSERT INTO record_link_verdicts (record_id, peristiwa_id, verdict, decided_at)
-     VALUES ($1, $2, $3, now()::text)
-     ON CONFLICT (record_id, peristiwa_id) DO UPDATE
-       SET verdict = EXCLUDED.verdict, decided_at = EXCLUDED.decided_at,
-           applied_at = NULL`,
-    [recordId, peristiwaId, verdict]
-  );
+  await setPairVerdict("record_links", "record_id", "peristiwa_id", recordId, peristiwaId, verdict);
+}
+
+/** The shared write behind record links and follow-ups. */
+async function setPairVerdict(
+  table: "record_links" | "followup_links",
+  a: string,
+  b: string,
+  aId: number,
+  bId: number,
+  verdict: LinkVerdict | null
+): Promise<void> {
+  await ltx(async () => {
+    if (verdict === null) {
+      await lrun(`UPDATE ${table} SET verdict = NULL WHERE ${a} = ? AND ${b} = ?`, [aId, bId]);
+      await lrun(`DELETE FROM ${table} WHERE ${a} = ? AND ${b} = ? AND origin = 'curator'`, [aId, bId]);
+      return;
+    }
+    await lrun(
+      `INSERT INTO ${table} (${a}, ${b}, origin, verdict, created_at)
+       VALUES (?, ?, 'curator', ?, ?)
+       ON CONFLICT (${a}, ${b}) DO UPDATE SET verdict = excluded.verdict`,
+      [aId, bId, verdict, new Date().toISOString()]
+    );
+  });
 }
 
 /** An event the curator might chain to the one open, before or after it. */
@@ -876,14 +867,12 @@ export async function getFollowupCandidates(item: Item, search = ""): Promise<Fo
     `SELECT e.id AS event_id, e.title, e.event_date, es.summary_text AS summary
        FROM events e
        LEFT JOIN event_summaries es ON es.event_id = e.id
-      WHERE e.kind = $1 AND ${PUBLIC} AND e.curated IS DISTINCT FROM 'rejected'
-        AND e.id <> ALL($2::int[])
-        AND ($3::text IS NULL OR e.figure_id = $3)
-        AND CASE WHEN $5::text <> '' THEN e.title ILIKE '%' || $5 || '%'
-                 ELSE e.event_date IS NOT NULL AND $4::text IS NOT NULL
-                      AND e.event_date::timestamptz
-                          BETWEEN $4::timestamptz - interval '${FOLLOWUP_WINDOW_DAYS} days'
-                              AND $4::timestamptz + interval '${FOLLOWUP_WINDOW_DAYS} days'
+      WHERE e.kind = ?1 AND ${PUBLIC} AND e.curated IS NOT 'rejected'
+        AND e.id NOT IN (SELECT value FROM json_each(?2))
+        AND (?3 IS NULL OR e.figure_id = ?3)
+        AND CASE WHEN ?5 <> '' THEN e.title LIKE '%' || ?5 || '%' ESCAPE '\\'
+                 ELSE e.event_date IS NOT NULL AND ?4 IS NOT NULL
+                      AND abs(julianday(e.event_date) - julianday(?4)) <= ${FOLLOWUP_WINDOW_DAYS}
             END
       ORDER BY e.event_date DESC NULLS LAST
       LIMIT ${q ? 20 : 1500}`,
@@ -933,8 +922,8 @@ export async function getFollowupCandidates(item: Item, search = ""): Promise<Fo
  */
 export async function confirmFollowupBetween(a: number, b: number): Promise<void> {
   const rows = await query<{ id: number; event_date: string | null }>(
-    `SELECT id, event_date FROM events WHERE id = ANY($1::int[])`,
-    [[a, b]]
+    `SELECT id, event_date FROM events WHERE id IN (?, ?)`,
+    [a, b]
   );
   const ea = rows.find((r) => r.id === a);
   const eb = rows.find((r) => r.id === b);
@@ -945,10 +934,9 @@ export async function confirmFollowupBetween(a: number, b: number): Promise<void
 }
 
 /**
- * Rule on a follow-up pair, or (`null`) withdraw the ruling — kept as a
- * verdict-less row until apply_curation.py has undone it in the pipeline,
- * exactly as for record links. Both events must be the same kind, and a
- * record's follow-up must be the same figure's.
+ * Rule on a follow-up pair, or (`null`) withdraw the ruling, as for record
+ * links. Both events must be the same kind, and a record's follow-up must be
+ * the same figure's.
  */
 export async function setFollowupVerdict(
   earlierId: number,
@@ -957,8 +945,8 @@ export async function setFollowupVerdict(
 ): Promise<void> {
   if (earlierId === laterId) throw new Error("an event cannot follow itself");
   const rows = await query<{ id: number; kind: string; figure_id: string | null; event_date: string | null }>(
-    `SELECT id, kind, figure_id, event_date FROM events WHERE id = ANY($1::int[])`,
-    [[earlierId, laterId]]
+    `SELECT id, kind, figure_id, event_date FROM events WHERE id IN (?, ?)`,
+    [earlierId, laterId]
   );
   const early = rows.find((r) => r.id === earlierId);
   const late = rows.find((r) => r.id === laterId);
@@ -967,25 +955,16 @@ export async function setFollowupVerdict(
   if (early.kind === "record" && early.figure_id !== late.figure_id) {
     throw new Error("a record's follow-up must be the same figure's record");
   }
-  await query(
-    `INSERT INTO followup_verdicts (earlier_id, later_id, verdict, decided_at)
-     VALUES ($1, $2, $3, now()::text)
-     ON CONFLICT (earlier_id, later_id) DO UPDATE
-       SET verdict = EXCLUDED.verdict, decided_at = EXCLUDED.decided_at,
-           applied_at = NULL`,
-    [earlierId, laterId, verdict]
-  );
+  await setPairVerdict("followup_links", "earlier_id", "later_id", earlierId, laterId, verdict);
 }
 
 /**
- * Correct a tracked figure.
+ * Correct a tracked figure, in the roster the pipeline attributes with.
  *
- * Written to `figures` as well, so the site shows it now; `figure_edits` is
- * what survives the next push (sync_figures lays it back over the pipeline's
- * row) and what apply_curation.py hands to the pipeline.
- *
- * `positions` null leaves them as they are (a merge or a retirement says
- * nothing about offices); a list, even an empty one, replaces them.
+ * `positions` null leaves them as they are (a retirement says nothing about
+ * offices); a list, even an empty one, replaces them. Editing offices or the
+ * CV marks the figure `cv_curated`, so scripts/import_cv.py never overwrites
+ * a human correction.
  */
 export async function saveFigureEdit(
   figureId: string,
@@ -996,34 +975,20 @@ export async function saveFigureEdit(
   positions: Position[] | null = null,
   profile: Profile | null = null
 ): Promise<void> {
-  const json = JSON.stringify(aliases);
   const pos = positions === null ? null : JSON.stringify(positions);
   const cv = profile === null
     ? [null, null, null, null]
     : [profile.bio, JSON.stringify(profile.facts), JSON.stringify(profile.education), JSON.stringify(profile.sources)];
-  await query(
-    `INSERT INTO figure_edits (figure_id, name, role, aliases, active, positions,
-                               bio, facts, education, sources, edited_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now()::text)
-     ON CONFLICT (figure_id) DO UPDATE
-       SET name = EXCLUDED.name, role = EXCLUDED.role, aliases = EXCLUDED.aliases,
-           active = EXCLUDED.active,
-           positions = COALESCE(EXCLUDED.positions, figure_edits.positions),
-           bio = COALESCE(EXCLUDED.bio, figure_edits.bio),
-           facts = COALESCE(EXCLUDED.facts, figure_edits.facts),
-           education = COALESCE(EXCLUDED.education, figure_edits.education),
-           sources = COALESCE(EXCLUDED.sources, figure_edits.sources),
-           edited_at = EXCLUDED.edited_at, applied_at = NULL`,
-    [figureId, name, role, json, active, pos, ...cv]
+  const changed = await lrun(
+    `UPDATE figures SET name = ?2, role = ?3, aliases = ?4, active = ?5,
+            positions = COALESCE(?6, positions), bio = COALESCE(?7, bio),
+            facts = COALESCE(?8, facts), education = COALESCE(?9, education),
+            sources = COALESCE(?10, sources),
+            cv_curated = CASE WHEN ?6 IS NOT NULL OR ?7 IS NOT NULL THEN 1 ELSE cv_curated END
+      WHERE id = ?1`,
+    [figureId, name, role ?? "", JSON.stringify(aliases), active, pos, ...cv]
   );
-  await query(
-    `UPDATE figures SET name = $2, role = $3, aliases = $4, active = $5,
-            positions = COALESCE($6, positions), bio = COALESCE($7, bio),
-            facts = COALESCE($8, facts), education = COALESCE($9, education),
-            sources = COALESCE($10, sources)
-      WHERE id = $1`,
-    [figureId, name, role, json, active, pos, ...cv]
-  );
+  if (changed === 0) throw new Error(`unknown figure: ${figureId}`);
 }
 
 /** Every active figure, for the merge target picker. */
@@ -1034,74 +999,35 @@ export async function getFigureOptions(): Promise<FigureOption[]> {
 }
 
 /**
- * Fold a duplicate figure into the one it duplicates.
- *
- * The moves run as one statement, so the site never shows the records split
- * between the two. The alias union and the retirement go through
- * saveFigureEdit, which is what keeps them over the next push.
- * `figure_merges` hands the same decision to the pipeline
- * (apply_curation.py → jejak.roster.merge_figure).
+ * Fold a duplicate figure into the one it duplicates: its records move, its
+ * names join the other's aliases, and it is retired. Carried out by the
+ * pipeline's own jejak.roster.merge_figure (scripts/kurasi_ops.py).
  */
 export async function mergeFigure(fromId: string, intoId: string): Promise<void> {
-  if (fromId === intoId) throw new Error("cannot merge a figure into itself");
-  const rows = await query<{ id: string; name: string; role: string | null; aliases: string | null; active: boolean }>(
-    `SELECT id, name, role, aliases, active FROM figures WHERE id = ANY($1)`,
-    [[fromId, intoId]]
-  );
-  const from = rows.find((r) => r.id === fromId);
-  const into = rows.find((r) => r.id === intoId);
-  if (!from || !into) throw new Error("unknown figure");
-  if (!into.active) throw new Error(`${intoId} is retired; merge into an active figure`);
-
-  await query(
-    `WITH m AS (
-       INSERT INTO figure_merges (from_id, into_id, decided_at)
-       VALUES ($1, $2, now()::text)
-       ON CONFLICT (from_id) DO UPDATE
-         SET into_id = EXCLUDED.into_id, decided_at = EXCLUDED.decided_at, applied_at = NULL
-       RETURNING 1
-     ), e AS (
-       UPDATE events SET figure_id = $2 WHERE figure_id = $1 RETURNING 1
-     ), a AS (
-       UPDATE articles SET figure_id = $2 WHERE figure_id = $1 RETURNING 1
-     ), ef AS (
-       INSERT INTO event_figures (event_id, figure_id)
-       SELECT event_id, $2 FROM event_figures WHERE figure_id = $1
-       ON CONFLICT DO NOTHING RETURNING 1
-     ), efd AS (
-       DELETE FROM event_figures WHERE figure_id = $1 RETURNING 1
-     )
-     SELECT (SELECT count(*) FROM m) + (SELECT count(*) FROM e) + (SELECT count(*) FROM a)
-          + (SELECT count(*) FROM ef) + (SELECT count(*) FROM efd) AS n`,
-    [fromId, intoId]
-  );
-
-  const have = new Set([into.name, ...parseAliases(into.aliases)].map((a) => a.toLowerCase()));
-  const aliases = parseAliases(into.aliases);
-  for (const a of [from.name, ...parseAliases(from.aliases)]) {
-    if (a && !have.has(a.toLowerCase())) {
-      have.add(a.toLowerCase());
-      aliases.push(a);
-    }
-  }
-  await saveFigureEdit(intoId, into.name, into.role, aliases, true);
-  await saveFigureEdit(fromId, from.name, from.role, parseAliases(from.aliases), false);
+  await pipelineOp("merge", fromId, intoId);
 }
 
-/** Strike a related figure from a peristiwa, or (`struck = false`) restore it. */
+/**
+ * Strike a related figure from a peristiwa, or (`struck = false`) restore it.
+ * A strike is remembered in event_figure_rejections, so promote_peristiwa
+ * never adds the figure back.
+ */
 export async function setRelatedFigure(
   eventId: number,
   figureId: string,
   struck: boolean
 ): Promise<void> {
-  // A restore is kept as a row too: the pipeline may already hold the strike,
-  // and only apply_curation.py can lift it there.
-  await query(
-    `INSERT INTO event_figure_rejections (event_id, figure_id, struck, decided_at)
-     VALUES ($1, $2, $3, now()::text)
-     ON CONFLICT (event_id, figure_id) DO UPDATE
-       SET struck = EXCLUDED.struck, decided_at = EXCLUDED.decided_at,
-           applied_at = NULL`,
-    [eventId, figureId, struck]
-  );
+  await ltx(async () => {
+    if (struck) {
+      await lrun(
+        `INSERT OR IGNORE INTO event_figure_rejections (event_id, figure_id, decided_at)
+         VALUES (?, ?, ?)`,
+        [eventId, figureId, new Date().toISOString()]
+      );
+      await lrun(`DELETE FROM event_figures WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]);
+    } else {
+      await lrun(`DELETE FROM event_figure_rejections WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]);
+      await lrun(`INSERT OR IGNORE INTO event_figures (event_id, figure_id) VALUES (?, ?)`, [eventId, figureId]);
+    }
+  });
 }

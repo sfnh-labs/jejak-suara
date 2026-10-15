@@ -264,9 +264,9 @@ CREATE TABLE IF NOT EXISTS article_embeddings (
     vec        BLOB NOT NULL
 );
 
--- The curator's verdicts and reasons from /kurasi (Postgres curation_reasons),
--- mirrored whole by scripts/apply_curation.py on every run. Local only: Neon
--- is their home, this is the copy jejak/curation_suggest.py learns from.
+-- Why the curator kept or took down each event, written by /kurasi along with
+-- events.curated. What jejak/curation_suggest.py learns from. Local only: the
+-- site needs the verdict, which travels on events, not the reasoning.
 CREATE TABLE IF NOT EXISTS curation_labels (
     event_id   INTEGER PRIMARY KEY,
     verdict    TEXT NOT NULL,      -- 'rejected' | 'kept'
@@ -279,6 +279,30 @@ CREATE TABLE IF NOT EXISTS curation_labels (
     outlets    INTEGER,
     suggested  TEXT,
     decided_at TEXT NOT NULL
+);
+
+-- The names awaiting a curator in /kurasi/kandidat: evidence refreshed by
+-- jejak/candidate_queue.py from figure_mentions, decisions written by the
+-- curator. A promote or reject is applied the moment it is made
+-- (scripts/kurasi_ops.py); `applied_at` records that it was.
+CREATE TABLE IF NOT EXISTS candidate_review (
+    slug              TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    outlets           INTEGER NOT NULL DEFAULT 0,
+    mentions          INTEGER NOT NULL DEFAULT 0,
+    role              TEXT,            -- what the coverage called them most
+    headlines         TEXT,            -- JSON [{title, url, source, context}]
+    records           TEXT,            -- JSON [{id, title, figure_id}]
+    refreshed_at      TEXT,
+    verdict           TEXT,            -- 'promote' | 'reject' | NULL
+    full_name         TEXT,
+    aliases           TEXT,            -- pipe-separated
+    curated_role      TEXT,
+    curated_slug      TEXT,            -- the page address chosen, figures.id
+    curated_positions TEXT,            -- JSON [{role, org, period}]
+    notes             TEXT,
+    decided_at        TEXT,
+    applied_at        TEXT
 );
 
 -- What the suggester expects the curator to do with each unruled event.
@@ -347,6 +371,9 @@ _MIGRATIONS = {
         ("last_seen", "TEXT"),
         ("quote", "TEXT"),
         ("quote_url", "TEXT"),
+        # The curator's verdict ('rejected' | 'kept' | NULL), set in /kurasi.
+        # Pushed with the event; the site hides 'rejected'.
+        ("curated", "TEXT"),
     ],
     "sentiment": [
         ("samples_json", "TEXT"),

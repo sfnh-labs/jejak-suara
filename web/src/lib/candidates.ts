@@ -1,4 +1,4 @@
-import { query } from "./db";
+import { lquery as query, lrun, ltx, pipelineOp } from "./localDb";
 
 /**
  * The figure-discovery review queue.
@@ -8,10 +8,10 @@ import { query } from "./db";
  * is a single word, which in Indonesian sentence case is as likely to be the
  * first word of a sentence ("Dasar", "Lalu") as a surname ("Dasco").
  *
- * The verdict recorded here is a decision, not an action: the pipeline runs
- * against SQLite, so `scripts/apply_candidate_verdicts.py` reads these rows
- * back and does the promoting. `applied_at` is how a row says it has been
- * acted on.
+ * Kept in jejak.db's candidate_review, whose evidence the pipeline refreshes
+ * (jejak/candidate_queue.py). A verdict is carried out the moment it is made:
+ * a promote by the pipeline's own code (scripts/kurasi_ops.py), a reject
+ * here. `applied_at` records that it was.
  */
 export type CandidateVerdict = "promote" | "reject";
 
@@ -133,10 +133,10 @@ export async function getCandidates(
     `SELECT slug, name, outlets, mentions, role, headlines,
             records, verdict, full_name, aliases, curated_role,
             decided_at, applied_at, notes
-       FROM figure_candidates
+       FROM candidate_review
       WHERE ${where}
       ORDER BY outlets DESC, mentions DESC, name
-      LIMIT $1`,
+      LIMIT ?`,
     [limit]
   );
   return rows.map((r) => ({
@@ -151,8 +151,8 @@ export async function getCandidateCounts(): Promise<Record<CandidateFilter, numb
     `SELECT count(*) FILTER (WHERE verdict IS NULL)      AS undecided,
             count(*) FILTER (WHERE verdict = 'promote')  AS promote,
             count(*) FILTER (WHERE verdict = 'reject')   AS reject,
-            count(*)                                     AS all
-       FROM figure_candidates`
+            count(*)                                     AS "all"
+       FROM candidate_review`
   );
   return {
     undecided: Number(row?.undecided ?? 0),
@@ -163,12 +163,14 @@ export async function getCandidateCounts(): Promise<Record<CandidateFilter, numb
 }
 
 /**
- * Record a decision. `null` clears it, putting the row back in the queue.
+ * Record a decision and carry it out. `null` withdraws a reject, putting the
+ * row back in the queue; a promote cannot be withdrawn — the figure exists,
+ * and retiring it is done on its own page.
  *
- * `fullName` and `aliases` only mean anything alongside 'promote': they are
- * how the site will name the person and every other spelling attribution
- * should match. Clearing a verdict clears them too, so a re-decided row does
- * not inherit a name from an abandoned decision.
+ * `fullName`, `aliases`, `curatedRole`, `curatedSlug` and `curatedPositions`
+ * only mean anything alongside 'promote': they are exactly what the new
+ * figure is created with. If the pipeline refuses (the page address is
+ * taken), the decision is undone and the reason thrown.
  */
 export async function setCandidateVerdict(
   slug: string,
@@ -179,30 +181,43 @@ export async function setCandidateVerdict(
   curatedSlug?: string | null,
   curatedPositions?: string | null
 ): Promise<void> {
-  if (verdict === null) {
-    await query(
-      `UPDATE figure_candidates
-          SET verdict = NULL, full_name = NULL, aliases = NULL,
-              curated_role = NULL, curated_slug = NULL, curated_positions = NULL,
-              decided_at = NULL, applied_at = NULL
-        WHERE slug = $1`,
-      [slug]
+  const now = new Date().toISOString();
+  if (verdict === "promote") {
+    await lrun(
+      `UPDATE candidate_review
+          SET verdict = 'promote', full_name = ?2, aliases = ?3, curated_role = ?4,
+              curated_slug = ?5, curated_positions = ?6, decided_at = ?7, applied_at = NULL
+        WHERE slug = ?1 AND applied_at IS NULL`,
+      [slug, fullName || null, aliases || null, curatedRole || null, curatedSlug || null,
+       curatedPositions || null, now]
     );
+    try {
+      await pipelineOp("candidate", slug);
+    } catch (e) {
+      await lrun(`UPDATE candidate_review SET verdict = NULL, decided_at = NULL WHERE slug = ?`, [slug]);
+      throw e;
+    }
     return;
   }
-  await query(
-    `UPDATE figure_candidates
-        SET verdict = $2,
-            full_name = $3,
-            aliases = $4,
-            curated_role = $5,
-            curated_slug = $6,
-            curated_positions = $7,
-            decided_at = now()::text,
-            applied_at = NULL
-      WHERE slug = $1`,
-    [slug, verdict, fullName || null, aliases || null, curatedRole || null, curatedSlug || null, curatedPositions || null]
-  );
+  if (verdict === "reject") {
+    await rejectCandidates([slug]);
+    return;
+  }
+  await ltx(async () => {
+    const n = await lrun(
+      `UPDATE candidate_review
+          SET verdict = NULL, full_name = NULL, aliases = NULL, curated_role = NULL,
+              curated_slug = NULL, curated_positions = NULL, decided_at = NULL, applied_at = NULL
+        WHERE slug = ? AND verdict = 'reject'`,
+      [slug]
+    );
+    if (n) {
+      await lrun(
+        `UPDATE figure_candidates SET status = 'candidate' WHERE slug = ? AND status = 'rejected'`,
+        [slug]
+      );
+    }
+  });
 }
 
 /**
@@ -214,23 +229,32 @@ export async function setCandidateVerdict(
  * clearing a verdict leaves it alone.
  */
 export async function setCandidateNote(slug: string, notes: string | null): Promise<void> {
-  await query(`UPDATE figure_candidates SET notes = $2 WHERE slug = $1`, [
+  await lrun(`UPDATE candidate_review SET notes = ?2 WHERE slug = ?1`, [
     slug,
     notes && notes.trim() ? notes.trim() : null,
   ]);
 }
 
 /**
- * Reject several names at once — the queue's triage, where most rows are a
- * sentence-start word or half an office and need no form. Rows already
- * decided keep their verdict.
+ * Reject names, several at once from the queue's triage, where most rows are
+ * a sentence-start word or half an office and need no form. Discovery stops
+ * offering them (figure_candidates.status). Names already decided keep their
+ * verdict.
  */
 export async function rejectCandidates(slugs: string[]): Promise<void> {
   if (slugs.length === 0) return;
-  await query(
-    `UPDATE figure_candidates
-        SET verdict = 'reject', decided_at = now()::text, applied_at = NULL
-      WHERE slug = ANY($1) AND verdict IS NULL`,
-    [slugs]
-  );
+  const now = new Date().toISOString();
+  await ltx(async () => {
+    await lrun(
+      `UPDATE figure_candidates SET status = 'rejected'
+        WHERE slug IN (SELECT slug FROM candidate_review
+                        WHERE verdict IS NULL AND slug IN (SELECT value FROM json_each(?)))`,
+      [slugs]
+    );
+    await lrun(
+      `UPDATE candidate_review SET verdict = 'reject', decided_at = ?2, applied_at = ?2
+        WHERE verdict IS NULL AND slug IN (SELECT value FROM json_each(?1))`,
+      [slugs, now]
+    );
+  });
 }

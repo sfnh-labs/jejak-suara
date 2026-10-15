@@ -276,13 +276,9 @@ export async function getPeristiwa(limit = 60, ids?: number[]): Promise<Peristiw
                 ) AS figures
            FROM event_figures ef
            LEFT JOIN figures f ON f.id = ef.figure_id
+          -- A figure struck in /kurasi is gone from jejak.db's event_figures,
+          -- and the push prunes it here.
           WHERE ef.event_id = e.id
-            -- Struck by a curator. Gone from the site at once; the pipeline
-            -- drops the row itself once apply_curation.py has run.
-            AND NOT EXISTS (
-              SELECT 1 FROM event_figure_rejections x
-               WHERE x.event_id = ef.event_id AND x.figure_id = ef.figure_id
-                 AND x.struck)
        ) rel ON TRUE
       WHERE e.kind = 'peristiwa'
         AND ${LIVE("e")}
@@ -347,7 +343,7 @@ export async function storylines(
   if (eventIds.length === 0) return out;
   const edges = await query<{ earlier_id: number; later_id: number }>(
     `SELECT v.earlier_id, v.later_id
-       FROM followup_verdicts v
+       FROM followup_links v
        JOIN events a ON a.id = v.earlier_id
        JOIN events b ON b.id = v.later_id
       WHERE v.verdict = 'confirmed'
@@ -408,7 +404,7 @@ export async function getRecordPeristiwa(
 ): Promise<{ event_id: number; title: string | null; event_date: string | null }[]> {
   return query(
     `SELECT e.id AS event_id, e.title, e.event_date
-       FROM record_link_verdicts v
+       FROM record_links v
        JOIN events e ON e.id = v.peristiwa_id
       WHERE v.record_id = $1 AND v.verdict = 'confirmed'
         AND e.kind = 'peristiwa' AND ${LIVE("e")}
