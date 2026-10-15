@@ -21,6 +21,46 @@ export const TOKOH_IMAGES: Record<string, Portrait> = {
     portrait: "prabowo-subianto.webp",
     avatar: "prabowo-subianto-avatar.webp",
   },
+  "gibran-rakabuming-raka": {
+    portrait: "gibran-rakabuming-raka.webp",
+    avatar: "gibran-rakabuming-raka-avatar.webp",
+  },
+  "gus-ipul": {
+    portrait: "gus-ipul.webp",
+    avatar: "gus-ipul-avatar.webp",
+  },
+  "jumhur-hidayat": {
+    portrait: "jumhur-hidayat.webp",
+    avatar: "jumhur-hidayat-avatar.webp",
+  },
+  "megawati-soekarnoputri": {
+    portrait: "megawati-soekarnoputri.webp",
+    avatar: "megawati-soekarnoputri-avatar.webp",
+  },
+  "pramono-anung-wibowo": {
+    portrait: "pramono-anung-wibowo.webp",
+    avatar: "pramono-anung-wibowo-avatar.webp",
+  },
+  "prasetyo-hadi": {
+    portrait: "prasetyo-hadi.webp",
+    avatar: "prasetyo-hadi-avatar.webp",
+  },
+  "puan-maharani": {
+    portrait: "puan-maharani.webp",
+    avatar: "puan-maharani-avatar.webp",
+  },
+  "saan-mustopa": {
+    portrait: "saan-mustopa.webp",
+    avatar: "saan-mustopa-avatar.webp",
+  },
+  "tito-karnavian": {
+    portrait: "tito-karnavian.webp",
+    avatar: "tito-karnavian-avatar.webp",
+  },
+  "zulkifli-hasan": {
+    portrait: "zulkifli-hasan.webp",
+    avatar: "zulkifli-hasan-avatar.webp",
+  },
 };
 
 export function figureImage(
