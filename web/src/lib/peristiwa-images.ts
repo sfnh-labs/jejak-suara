@@ -6,6 +6,8 @@
  * when scripts/gen_event_images_webui.py produces new files.
  */
 export const PERISTIWA_IMAGES: Record<number, string> = {
+  22636: "22636-menkum-supratman-klaim-mediasi-sukses-di-posbankum-hemat-neg.webp",
+  22485: "22485-pemprov-jawa-barat-hentikan-sementara-pembangunan-pusat-data.webp",
   23373: "23373-53-jemaah-umroh-makassar-batal-berangkat-imbas-serangan-hout.webp",
   23246: "23246-imigrasi-tolak-visa-musisi-israel-houghton.webp",
   23179: "23179-surat-ma-nyasar-ke-pengadilan-agama-bupati-gowa-laporkan-pt-.webp",
