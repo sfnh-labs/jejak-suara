@@ -1,0 +1,47 @@
+{
+  "bio": "Ketua Umum Projo, organisasi relawan Joko Widodo. Menteri Koperasi dari Oktober 2024 sampai dicopot pada perombakan kabinet September 2025; sebelumnya Menteri Komunikasi dan Informatika dan Wakil Menteri Desa.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Budi Arie Setiadi"
+    },
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 20 April 1969"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Ketua Umum",
+      "org": "Projo",
+      "period": ""
+    },
+    {
+      "role": "Menteri Koperasi",
+      "org": "",
+      "period": "2024 – 2025"
+    },
+    {
+      "role": "Menteri Komunikasi dan Informatika",
+      "org": "",
+      "period": "2023 – 2024"
+    },
+    {
+      "role": "Wakil Menteri Desa, PDT, dan Transmigrasi",
+      "org": "",
+      "period": "2019 – 2023"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Indonesia"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Budi_Arie_Setiadi"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

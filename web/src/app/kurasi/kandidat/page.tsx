@@ -88,8 +88,8 @@ export default async function KandidatTokoh({
             orang (&ldquo;Dasar&rdquo;, &ldquo;Lalu&rdquo;, separuh jabatan)
             lalu tolak sekaligus. Yang mungkin orang, buka{" "}
             <strong>Periksa di catatan</strong> — diterima di sana, di samping
-            liputannya. Keputusan baru berlaku setelah pipeline menjalankan{" "}
-            <code style={{ fontSize: 13 }}>scripts/apply_candidate_verdicts.py</code>.
+            liputannya. Keputusan langsung berlaku di pipeline; tokoh baru
+            tampil di situs setelah push berikutnya.
           </p>
         </header>
 
@@ -211,11 +211,10 @@ function CandidateItem({ row: r }: { row: CandidateRow }) {
                 fontWeight: 700,
                 letterSpacing: "0.08em",
                 textTransform: "uppercase",
-                color: r.verdict === "promote" ? "#3d6b4a" : "var(--color-clay)",
+                color: r.verdict === "reject" ? "var(--color-clay)" : "#3d6b4a",
               }}
             >
-              {r.verdict === "promote" ? "diterima" : "ditolak"}
-              {r.applied_at ? " · sudah diterapkan" : " · menunggu pipeline"}
+              {r.verdict === "promote" ? "diterima" : r.verdict === "alias" ? `alias ${r.curated_slug ?? ""}` : "ditolak"}
             </span>
           ) : null}
         </div>
@@ -238,11 +237,14 @@ function CandidateItem({ row: r }: { row: CandidateRow }) {
                   {r.curated_role || r.role ? ` · ${r.curated_role || r.role}` : ""}
                 </span>
               ) : null}
-              <form action={decide}>
-                <input type="hidden" name="slug" value={r.slug} />
-                <input type="hidden" name="verdict" value="" />
-                <button type="submit" style={button("quiet")}>Batalkan keputusan</button>
-              </form>
+              {/* A promote made a figure; it is retired on its own page, not undone here. */}
+              {r.verdict === "reject" ? (
+                <form action={decide}>
+                  <input type="hidden" name="slug" value={r.slug} />
+                  <input type="hidden" name="verdict" value="" />
+                  <button type="submit" style={button("quiet")}>Batalkan penolakan</button>
+                </form>
+              ) : null}
             </>
           ) : (
             <>

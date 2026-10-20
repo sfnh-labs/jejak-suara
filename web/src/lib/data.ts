@@ -1,5 +1,5 @@
 import { query, queryOne } from "./db";
-import { peristiwaImage } from "./peristiwa-images";
+import { peristiwaImage, themeImage } from "./peristiwa-images";
 import type {
   EventRecord,
   FeedItem,
@@ -7,6 +7,7 @@ import type {
   Peristiwa,
   PublicComment,
   SentimentPoint,
+  StoryStep,
 } from "./types";
 
 /**
@@ -18,12 +19,19 @@ import type {
  * by /kurasi; it is a Postgres-only column the pipeline never touches, so a
  * rejection survives the next crawl's sync (scripts/sync_to_neon.py).
  *
+ * A third, weaker gate: an event the pipeline's suggester auto-hid
+ * (curation_suggestions.auto_hide, off unless enabled and proven precise)
+ * stays down only while no curator has ruled on it. Any verdict wins.
+ *
  * IS DISTINCT FROM, not `<>`: a plain inequality is NULL for the untouched
  * rows, which is every event nobody has curated yet, and would hide the site.
  */
 export const LIVE = (alias: string) =>
   `${alias}.status IN ('new', 'summarized', 'approved')
-   AND ${alias}.curated IS DISTINCT FROM 'rejected'`;
+   AND ${alias}.curated IS DISTINCT FROM 'rejected'
+   AND (${alias}.curated IS NOT NULL OR NOT EXISTS (
+     SELECT 1 FROM curation_suggestions cs
+      WHERE cs.event_id = ${alias}.id AND cs.auto_hide = 1))`;
 
 /**
  * Everything a record card needs, aggregated per event.
@@ -268,13 +276,9 @@ export async function getPeristiwa(limit = 60, ids?: number[]): Promise<Peristiw
                 ) AS figures
            FROM event_figures ef
            LEFT JOIN figures f ON f.id = ef.figure_id
-          WHERE ef.event_id = e.id
-            -- Struck by a curator. Gone from the site at once; the pipeline
-            -- drops the row itself once apply_curation.py has run.
-            AND NOT EXISTS (
-              SELECT 1 FROM event_figure_rejections x
-               WHERE x.event_id = ef.event_id AND x.figure_id = ef.figure_id
-                 AND x.struck)
+          -- A figure struck in /kurasi is gone from jejak.db's event_figures,
+          -- and the push prunes it here; a retired one is never shown.
+          WHERE ef.event_id = e.id AND COALESCE(f.active, true)
        ) rel ON TRUE
       WHERE e.kind = 'peristiwa'
         AND ${LIVE("e")}
@@ -283,7 +287,110 @@ export async function getPeristiwa(limit = 60, ids?: number[]): Promise<Peristiw
       LIMIT $1`,
     [limit, ids ?? null]
   );
-  return rows.map((r) => ({ ...r, image: peristiwaImage(r.event_id) }));
+  const stories = await storylines(rows.map((r) => r.event_id));
+  return rows.map((r) => {
+    const story = stories.get(r.event_id) ?? [];
+    return { ...r, story, image: storyImage(r.event_id, story, r.title) };
+  });
+}
+
+/**
+ * A peristiwa's own illustration, or else the one nearest it in its story:
+ * a follow-up shares its banner with the event it follows until it gets its
+ * own. Nearest by date, so a long chain takes the closest picture. Failing
+ * both, the picture for its kind of story (karhutla), if it is one.
+ */
+function storyImage(eventId: number, story: StoryStep[], title: string | null): string | null {
+  return storyImageSource(eventId, story, title)?.src ?? null;
+}
+
+/** storyImage, saying whose picture it is: `from` is the event it belongs to,
+ *  or `theme` names the kind of story it illustrates. */
+export function storyImageSource(
+  eventId: number,
+  story: StoryStep[],
+  title: string | null
+): { src: string; from: number | null; theme?: string } | null {
+  const own = peristiwaImage(eventId);
+  if (own) return { src: own, from: eventId };
+  const at = story.findIndex((s) => s.event_id === eventId);
+  const byDistance = story
+    .map((s, i) => ({ s, d: Math.abs(i - at) }))
+    .filter(({ s }) => !s.current)
+    .sort((a, b) => a.d - b.d);
+  for (const { s } of byDistance) {
+    const img = peristiwaImage(s.event_id);
+    if (img) return { src: img, from: s.event_id };
+  }
+  const themed = themeImage(title);
+  return themed ? { src: themed.src, from: null, theme: themed.theme } : null;
+}
+
+/**
+ * The "Lini cerita" for each event asked about: every live event reachable
+ * through follow-up links a curator confirmed, oldest first. Events with no
+ * confirmed link get no entry.
+ *
+ * The whole confirmed graph is read at once — it is curator-made and small —
+ * and walked here, rather than a recursive query per card.
+ */
+export async function storylines(
+  eventIds: number[],
+  /** Counted even when not live: /kurasi previews an event before it airs. */
+  { evenHidden = [] }: { evenHidden?: number[] } = {}
+): Promise<Map<number, StoryStep[]>> {
+  const out = new Map<number, StoryStep[]>();
+  if (eventIds.length === 0) return out;
+  const edges = await query<{ earlier_id: number; later_id: number }>(
+    `SELECT v.earlier_id, v.later_id
+       FROM followup_links v
+       JOIN events a ON a.id = v.earlier_id
+       JOIN events b ON b.id = v.later_id
+      WHERE v.verdict = 'confirmed'
+        AND (${LIVE("a")} OR a.id = ANY($1::int[]))
+        AND (${LIVE("b")} OR b.id = ANY($1::int[]))`,
+    [evenHidden]
+  );
+  if (edges.length === 0) return out;
+  const adj = new Map<number, number[]>();
+  for (const { earlier_id: a, later_id: b } of edges) {
+    adj.set(a, [...(adj.get(a) ?? []), b]);
+    adj.set(b, [...(adj.get(b) ?? []), a]);
+  }
+  const components = new Map<number, number[]>();
+  for (const id of eventIds) {
+    if (!adj.has(id) || components.has(id)) continue;
+    const seen = new Set([id]);
+    const queue = [id];
+    while (queue.length) {
+      for (const n of adj.get(queue.shift()!) ?? []) {
+        if (!seen.has(n)) {
+          seen.add(n);
+          queue.push(n);
+        }
+      }
+    }
+    const members = [...seen];
+    for (const m of members) components.set(m, members);
+  }
+  const memberIds = [...new Set([...components.values()].flat())];
+  const info = new Map(
+    (await query<{ event_id: number; title: string | null; event_date: string | null }>(
+      `SELECT id AS event_id, title, event_date FROM events WHERE id = ANY($1::int[])`,
+      [memberIds]
+    )).map((r) => [r.event_id, r])
+  );
+  for (const id of eventIds) {
+    const members = components.get(id);
+    if (!members) continue;
+    out.set(
+      id,
+      members
+        .map((m) => ({ event_id: m, title: info.get(m)?.title ?? null, event_date: info.get(m)?.event_date ?? null, current: m === id }))
+        .sort((a, b) => (a.event_date ?? "").localeCompare(b.event_date ?? "") || a.event_id - b.event_id)
+    );
+  }
+  return out;
 }
 
 /**
@@ -297,7 +404,7 @@ export async function getRecordPeristiwa(
 ): Promise<{ event_id: number; title: string | null; event_date: string | null }[]> {
   return query(
     `SELECT e.id AS event_id, e.title, e.event_date
-       FROM record_link_verdicts v
+       FROM record_links v
        JOIN events e ON e.id = v.peristiwa_id
       WHERE v.record_id = $1 AND v.verdict = 'confirmed'
         AND e.kind = 'peristiwa' AND ${LIVE("e")}

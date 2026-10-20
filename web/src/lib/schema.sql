@@ -70,14 +70,31 @@ CREATE TABLE IF NOT EXISTS record_links (
     peristiwa_id INTEGER NOT NULL,
     score        REAL,
     evidence     TEXT,          -- JSON array of the rare words both share
+    origin       TEXT,          -- 'pipeline' | 'curator'
+    verdict      TEXT,          -- 'confirmed' | 'rejected' | NULL; set in /kurasi (jejak.db)
     created_at   TEXT NOT NULL,
     PRIMARY KEY (record_id, peristiwa_id)
 );
 CREATE INDEX IF NOT EXISTS idx_record_links_peristiwa ON record_links(peristiwa_id);
 
--- Curator-owned tables below. Postgres is their only home — no sync writes
--- them — and scripts/apply_curation.py copies each decision into the pipeline,
--- stamping applied_at so it is carried out once.
+-- One event following up an earlier one of the same kind (jejak/link.py
+-- link_followups). Pushed from jejak.db with the curator's ruling, like
+-- record_links.
+CREATE TABLE IF NOT EXISTS followup_links (
+    earlier_id INTEGER NOT NULL,
+    later_id   INTEGER NOT NULL,
+    score      REAL,
+    evidence   TEXT,          -- JSON array of the shared terms, title terms first
+    origin     TEXT,
+    verdict    TEXT,          -- 'confirmed' | 'rejected' | NULL
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (earlier_id, later_id)
+);
+CREATE INDEX IF NOT EXISTS idx_followup_links_later ON followup_links(later_id);
+
+-- Legacy curator tables, from when /kurasi wrote to Neon. /kurasi now writes
+-- jejak.db (scripts/migrate_kurasi_local.py moved their contents down) and
+-- nothing reads or writes these any more; kept until they are dropped.
 
 -- 'confirmed' links are shown on the public site; 'rejected' ones are never
 -- proposed again. A confirmed row with no record_links counterpart is a link
@@ -90,6 +107,18 @@ CREATE TABLE IF NOT EXISTS record_link_verdicts (
     decided_at   TEXT NOT NULL,
     applied_at   TEXT,
     PRIMARY KEY (record_id, peristiwa_id)
+);
+
+-- Rulings on follow-up pairs, as record_link_verdicts are for record links:
+-- 'confirmed' ones form the "Lini cerita" on the site, 'rejected' ones are
+-- never proposed again, NULL is a withdrawn ruling still to reach the pipeline.
+CREATE TABLE IF NOT EXISTS followup_verdicts (
+    earlier_id INTEGER NOT NULL,
+    later_id   INTEGER NOT NULL,
+    verdict    TEXT,           -- 'confirmed' | 'rejected' | NULL (withdrawn)
+    decided_at TEXT NOT NULL,
+    applied_at TEXT,
+    PRIMARY KEY (earlier_id, later_id)
 );
 
 -- A curator's correction to a tracked figure's name, office or aliases. Shown
@@ -137,6 +166,47 @@ CREATE TABLE IF NOT EXISTS event_figure_rejections (
     applied_at TEXT,
     PRIMARY KEY (event_id, figure_id)
 );
+
+-- Why the curator ruled on an event as they did: the training labels behind
+-- the suggestions in /kurasi. One row per event with a verdict, written beside
+-- events.curated and deleted when the verdict is cleared. The snapshot columns
+-- keep a label readable after the pipeline re-clusters or drops the event.
+-- apply_curation.py mirrors the whole table into SQLite's curation_labels
+-- every run (not just unapplied rows: jejak.db is disposable, the labels are
+-- not), so there is no applied_at. No foreign key: --reset truncates events
+-- with CASCADE, and these must survive it.
+CREATE TABLE IF NOT EXISTS curation_reasons (
+    event_id   INTEGER PRIMARY KEY,
+    verdict    TEXT NOT NULL,     -- 'rejected' | 'kept'
+    reasons    TEXT NOT NULL,     -- JSON array of codes (REASONS in curation.ts)
+    note       TEXT,
+    kind       TEXT,
+    figure_id  TEXT,
+    title      TEXT,
+    summary    TEXT,
+    outlets    INTEGER,
+    -- The reason /kurasi suggested when the decision was made, if any:
+    -- how often the curator agreed is the suggester's real accuracy.
+    suggested  TEXT,
+    decided_at TEXT NOT NULL
+);
+
+-- Pipeline-owned: jejak/curation_suggest.py's guess at what the curator would
+-- do with an event nobody has ruled on yet, pushed like any other table.
+-- auto_hide = 1 takes the event off the site (data.ts LIVE) until a curator
+-- rules on it; it is only ever set for a reason whose measured precision
+-- cleared the bar, and only when the pipeline runs with auto-hide enabled.
+CREATE TABLE IF NOT EXISTS curation_suggestions (
+    event_id   INTEGER PRIMARY KEY,
+    reason     TEXT,              -- NULL: nothing suggested (looks like a keep)
+    confidence REAL,
+    support    INTEGER,           -- similar labelled events that share the reason
+    examples   TEXT,              -- JSON array of those events' ids
+    auto_hide  INTEGER NOT NULL DEFAULT 0,
+    model      TEXT,
+    scored_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_curation_suggestions_auto ON curation_suggestions(auto_hide);
 
 CREATE TABLE IF NOT EXISTS articles (
     id           TEXT PRIMARY KEY,

@@ -1,0 +1,46 @@
+{
+  "bio": "Sekretaris Kabinet sejak Oktober 2024. Perwira TNI Angkatan Darat yang sebelumnya ajudan Menteri Pertahanan Prabowo Subianto dan asisten ajudan Presiden Joko Widodo.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Manado, 14 April 1989"
+    },
+    {
+      "label": "Pangkat",
+      "value": "Letnan Kolonel"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Sekretaris Kabinet",
+      "org": "",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Ajudan Menteri Pertahanan",
+      "org": "",
+      "period": "– 2024"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Indonesia"
+    },
+    {
+      "detail": "Universitas Jenderal Achmad Yani"
+    },
+    {
+      "detail": "Ranger School"
+    },
+    {
+      "detail": "Akademi Militer"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Teddy_Indra_Wijaya"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -1,0 +1,36 @@
+{
+  "bio": "Kepala Badan Riset dan Inovasi Nasional (BRIN) sejak November 2025. Akademisi yang sebelumnya Rektor Institut Pertanian Bogor 2017–2025.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Pekalongan, 17 September 1971"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Kepala Badan Riset dan Inovasi Nasional",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Rektor",
+      "org": "Institut Pertanian Bogor",
+      "period": "2017 – 2025"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Kagoshima"
+    },
+    {
+      "detail": "Institut Pertanian Bogor"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Arif_Satria_(akademisi)"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -282,6 +282,9 @@ def _plausible_name(name: str) -> bool:
 
 _TITLE_PRESENT_RE = re.compile(rf"\b(?:{_TITLE_ALT})\b")
 
+# The name after an office's comma: "Bupati Kebumen, Arif Sugiyanto".
+_APPOSITIVE_RE = re.compile(rf"\s*,\s*(?P<name>{_NAME})(?![A-Za-z])")
+
 
 # People are often named with no office at all — "Cak Imin: ...", "kata Jusuf
 # Kalla". They are still actors, so they become candidates with an empty role;
@@ -361,11 +364,11 @@ def extract(text: str) -> list[Mention]:
     found: dict[tuple[str, str], Mention] = {}
     sentences = [s for s in _SENTENCE_RE.split(text) if not _is_title_case(s)]
     matches = (
-        m
+        (sentence, m)
         for sentence in sentences
         for m in _MENTION_RE.finditer(sentence)
     )
-    for m in matches:
+    for sentence, m in matches:
         if m.group("title") in _COLLECTIVE_TITLES:
             continue
         words = m.group("run").split()
@@ -389,6 +392,17 @@ def extract(text: str) -> list[Mention]:
             elif lowered in _PLACES or lowered in _ROLE_WORDS:
                 cut = i + 1
         role_words, name_words = rest[:cut], rest[cut:][:3]
+
+        # The office set off from the name by a comma: "mantan Bupati Kebumen,
+        # Arif Sugiyanto". Only when what follows the title cannot itself be
+        # the person — a lone jurisdiction after a place-scoped title, or
+        # nothing left once places are cut — so a list of people ("Presiden
+        # Prabowo, Gibran") is not read as one office.
+        lone_place = m.group("title") in _PLACE_SCOPED_TITLES and len(rest) == 1
+        if lone_place or not name_words:
+            apposed = _APPOSITIVE_RE.match(sentence, m.end())
+            if apposed and not _TITLE_PRESENT_RE.match(apposed.group("name")):
+                role_words, name_words = rest, apposed.group("name").split()
         if not name_words:
             continue
 

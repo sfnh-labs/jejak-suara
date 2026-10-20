@@ -1,0 +1,55 @@
+{
+  "bio": "Menteri Luar Negeri Tiongkok, jabatan yang dipegangnya sejak 2013 dengan jeda pada 2023. Diplomat karier dan anggota Politbiro Partai Komunis Tiongkok; sebelumnya Duta Besar untuk Jepang dan Direktur Kantor Urusan Taiwan.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Beijing, 19 Oktober 1953"
+    },
+    {
+      "label": "Partai",
+      "value": "Partai Komunis Tiongkok"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Luar Negeri Tiongkok",
+      "org": "",
+      "period": "2023 – kini"
+    },
+    {
+      "role": "Menteri Luar Negeri Tiongkok",
+      "org": "",
+      "period": "2013 – 2022"
+    },
+    {
+      "role": "Anggota Dewan Negara",
+      "org": "",
+      "period": "2018 – 2023"
+    },
+    {
+      "role": "Direktur Kantor Urusan Taiwan",
+      "org": "",
+      "period": "2008 – 2013"
+    },
+    {
+      "role": "Duta Besar untuk Jepang",
+      "org": "",
+      "period": "2004 – 2007"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Urusan Luar Negeri Tiongkok"
+    },
+    {
+      "detail": "Universitas Kajian Internasional Beijing"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Wang_Yi_(politikus)"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

@@ -1,0 +1,48 @@
+{
+  "bio": "Presiden Korea Selatan sejak Juni 2025. Politikus Partai Demokrat yang sebelumnya memimpin partai itu, menjadi anggota Majelis Nasional, Gubernur Provinsi Gyeonggi, dan Wali Kota Seongnam.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Andong, Gyeongsang Utara, 8 Desember 1963"
+    },
+    {
+      "label": "Partai",
+      "value": "Demokrat (sejak 2014)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Presiden Korea Selatan",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Ketua",
+      "org": "Partai Demokrat Korea",
+      "period": "2022 – 2025"
+    },
+    {
+      "role": "Anggota Majelis Nasional",
+      "org": "",
+      "period": "2022 – 2025"
+    },
+    {
+      "role": "Gubernur Provinsi Gyeonggi",
+      "org": "",
+      "period": "2018 – 2021"
+    },
+    {
+      "role": "Wali Kota Seongnam",
+      "org": "",
+      "period": "2010 – 2018"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Lee_Jae_Myung"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

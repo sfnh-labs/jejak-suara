@@ -4,15 +4,28 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   isLinkVerdict,
+  isReasonCode,
   isVerdict,
   mergeFigure,
   positionTitle,
   saveFigureEdit,
   type Position,
   type Profile,
+  confirmFollowupBetween,
   setCuration,
+  setFollowupVerdict,
   setLinkVerdict,
   setRelatedFigure,
+  requestRework,
+  removeNotAPerson,
+  setLessonActive,
+  saveOrganization,
+  deleteOrganization,
+  acceptRework,
+  discardRework,
+  assignQuote,
+  addQuote,
+  showQuote,
 } from "@/lib/curation";
 
 /*
@@ -50,14 +63,36 @@ function done(id: number) {
   revalidatePath(`/kurasi/${id}`);
 }
 
-/** Take an event down, mark it checked, or clear the verdict. */
+/**
+ * Take an event down, mark it checked, or clear the verdict.
+ *
+ * A takedown has to say why: the reasons are what the suggester learns from.
+ * A plain form cannot require "at least one of these checkboxes", so a
+ * takedown without one comes back to the page with a message rather than an
+ * error page.
+ */
 export async function curate(formData: FormData): Promise<void> {
   const id = eventId(formData);
   const verdict = optional(formData, "verdict");
   if (verdict !== null && !isVerdict(verdict)) {
     throw new Error(`invalid verdict: ${verdict}`);
   }
-  await setCuration(id, verdict);
+  const reasons = [...new Set(formData.getAll("reason").map(String))].filter(isReasonCode);
+  const note = text(formData, "note", 1000) || null;
+  if (verdict === "rejected" && reasons.length === 0) {
+    redirect(`/kurasi/${id}?perlu=alasan#keputusan`);
+  }
+  if (reasons.includes("other") && !note) {
+    redirect(`/kurasi/${id}?perlu=catatan#keputusan`);
+  }
+  const suggested = optional(formData, "suggested");
+  await setCuration(
+    id,
+    verdict,
+    verdict === "rejected" ? reasons : [],
+    note,
+    suggested !== null && isReasonCode(suggested) ? suggested : null
+  );
   done(id);
 
   // "Simpan & lanjut": the per-item flow, straight on to the next unreviewed.
@@ -79,6 +114,28 @@ export async function ruleLink(formData: FormData): Promise<void> {
   await setLinkVerdict(recordId, peristiwaId, verdict);
   done(recordId);
   done(peristiwaId);
+}
+
+/** Confirm, reject or withdraw a follow-up pair already listed. */
+export async function ruleFollowup(formData: FormData): Promise<void> {
+  const earlier = eventId(formData, "earlier_id");
+  const later = eventId(formData, "later_id");
+  const verdict = optional(formData, "verdict");
+  if (verdict !== null && !isLinkVerdict(verdict)) {
+    throw new Error(`invalid follow-up verdict: ${verdict}`);
+  }
+  await setFollowupVerdict(earlier, later, verdict);
+  done(earlier);
+  done(later);
+}
+
+/** Chain a suggested or searched-for event to this one; the dates decide which came first. */
+export async function addFollowup(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const other = eventId(formData, "other_id");
+  await confirmFollowupBetween(id, other);
+  done(id);
+  done(other);
 }
 
 /** Correct a figure's display name, office and alias list. */
@@ -129,9 +186,10 @@ export async function editFigure(formData: FormData): Promise<void> {
     const eduDetails = column("edu_detail");
     const srcLabels = column("src_label");
     const srcUrls = column("src_url", 1000);
-    const bio = text(formData, "bio", 2000);
     profile = {
-      bio,
+      // Not curated: a figure is read from their records and current office,
+      // so the stored bio is left as it is.
+      bio: null,
       facts: factLabels
         .map((label, i) => ({ label, value: factValues[i] ?? "" }))
         .filter((f) => f.label && f.value),
@@ -164,6 +222,94 @@ export async function mergeFigures(formData: FormData): Promise<void> {
   if (!fromId || !intoId) throw new Error("figure_id and into_id are required");
   // The checkbox is the confirmation: a plain form has no dialog to ask with.
   if (formData.get("confirm") !== "1") throw new Error("merge not confirmed");
-  await mergeFigure(fromId, intoId);
+  // The buttons say which way: "into" folds this figure into the other,
+  // "here" folds the other into this one.
+  if (formData.get("direction") === "here") await mergeFigure(intoId, fromId);
+  else await mergeFigure(fromId, intoId);
   done(eventId(formData));
+}
+
+/**
+ * Ask for the event to be written again. Records only: another figure, the
+ * "about" framing and making it a peristiwa. Any event: a note.
+ */
+export async function rework(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const note = text(formData, "note", 2000) || null;
+  const rawFraming = optional(formData, "framing");
+  const framing = rawFraming === "own" || rawFraming === "about" ? rawFraming : null;
+  const figure = text(formData, "new_figure_id", 120).toLowerCase() || null;
+  if (figure && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figure)) throw new Error("invalid figure");
+  await requestRework(id, { note, framing, newFigureId: figure, toPeristiwa: formData.get("to_peristiwa") === "1" });
+  done(id);
+}
+
+export async function decideRework(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const requestId = eventId(formData, "request_id");
+  if (formData.get("decision") === "accept") await acceptRework(requestId);
+  else await discardRework(requestId);
+  done(id);
+}
+
+/** "Bukan orang": retire a figure that is a place, an office or a fragment. */
+export async function notAPerson(formData: FormData): Promise<void> {
+  const figureId = text(formData, "figure_id", 120);
+  if (!figureId) throw new Error("figure_id is required");
+  if (formData.get("confirm") !== "1") throw new Error("not confirmed");
+  await removeNotAPerson(figureId);
+  done(eventId(formData));
+}
+
+export async function toggleLesson(formData: FormData): Promise<void> {
+  const id = eventId(formData, "lesson_id");
+  await setLessonActive(id, formData.get("active") === "1");
+  revalidatePath("/kurasi/pelajaran");
+}
+
+/** Adds or renames an organisation; "delete" removes it. */
+export async function editOrganization(formData: FormData): Promise<void> {
+  const raw = formData.get("org_id");
+  const id = raw ? eventId(formData, "org_id") : null;
+  if (formData.get("op") === "delete") {
+    if (id === null) throw new Error("org_id is required");
+    await deleteOrganization(id);
+  } else {
+    await saveOrganization(id, text(formData, "name", 200), text(formData, "short_name", 60) || null);
+  }
+  revalidatePath("/kurasi", "layout");
+}
+
+/** Whose words a quote is ("clear": no tracked figure). */
+export async function setQuoteSpeaker(formData: FormData): Promise<void> {
+  const quoteId = eventId(formData, "quote_id");
+  let figureId: string | null = null;
+  if (formData.get("op") !== "clear") {
+    figureId = text(formData, "figure_id", 120).toLowerCase();
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
+  }
+  done(await assignQuote(quoteId, figureId));
+}
+
+/** A quote the curator adds by hand; the figure is optional (unplaced). */
+export async function newQuote(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const figureId = text(formData, "figure_id", 120).toLowerCase() || null;
+  if (figureId && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
+  await addQuote(id, {
+    quote: text(formData, "quote", 2000),
+    speaker: text(formData, "speaker", 200) || null,
+    figureId,
+    url: optional(formData, "url"),
+    show: formData.get("show") === "1",
+  });
+  done(id);
+}
+
+/** The quote a record shows: a quote id, "none", or "auto". */
+export async function pickQuote(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const choice = String(formData.get("quote_id") ?? "");
+  await showQuote(id, choice === "none" ? null : choice === "auto" ? "auto" : eventId(formData, "quote_id"));
+  done(id);
 }

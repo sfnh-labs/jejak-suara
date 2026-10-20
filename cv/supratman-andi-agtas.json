@@ -1,0 +1,50 @@
+{
+  "bio": "Menteri Hukum sejak Oktober 2024, setelah dua bulan menjabat Menteri Hukum dan HAM. Politikus Gerindra yang sebelumnya dua periode anggota DPR dari Sulawesi Tengah dan Ketua Badan Legislasi.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Soppeng, 28 September 1969"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Hukum",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Menteri Hukum dan HAM",
+      "org": "",
+      "period": "2024"
+    },
+    {
+      "role": "Ketua Badan Legislasi",
+      "org": "DPR",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Sulawesi Tengah",
+      "period": "2014 – 2024"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Hasanuddin"
+    },
+    {
+      "detail": "Universitas Muslim Indonesia"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Supratman_Andi_Agtas"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

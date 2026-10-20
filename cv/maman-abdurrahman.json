@@ -1,0 +1,37 @@
+{
+  "bio": "Menteri Usaha Mikro, Kecil, dan Menengah sejak Oktober 2024. Politikus Golkar yang sebelumnya anggota DPR dari Kalimantan Barat I.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Pontianak, 10 September 1980"
+    },
+    {
+      "label": "Partai",
+      "value": "Golkar"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Usaha Mikro, Kecil, dan Menengah",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Dapil Kalimantan Barat I",
+      "period": "2018 – 2024"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Trisakti"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Maman_Abdurrahman_(politikus)"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

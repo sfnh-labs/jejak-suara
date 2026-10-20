@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from datetime import datetime, timezone
 
 _OPEN, _CLOSE = "\"“", "\"”"
 _QUOTE = rf"[{_OPEN}](?P<q>[^{_OPEN}{_CLOSE}\n]{{40,320}})[{_CLOSE}]"
@@ -62,8 +63,9 @@ def _names(who: str, terms: list[str]) -> bool:
     return any(re.search(rf"\b{re.escape(t)}\b", who) for t in terms)
 
 
-def find_quote(body: str, name: str, aliases: list[str]) -> str | None:
-    """The longest quote in `body` explicitly attributed to this figure."""
+def find_quote(body: str, name: str, aliases: list[str],
+               exclude: set[str] | frozenset[str] = frozenset()) -> str | None:
+    """The longest quote in `body` explicitly attributed to this figure, other than `exclude`."""
     if not body:
         return None
     terms = _terms(name, aliases)
@@ -77,6 +79,7 @@ def find_quote(body: str, name: str, aliases: list[str]) -> str | None:
         # Read backwards from the verb: the run ending right before it.
         if _names(" ".join(_speaker(m.group("who").split()[::-1]).split()[::-1]), terms)
     ]
+    found = [q for q in found if q not in exclude]
     return max(found, key=len) if found else None
 
 
@@ -101,18 +104,110 @@ def quote_pending(conn: sqlite3.Connection) -> dict[str, int]:
             aliases = json.loads(ev["aliases"]) if ev["aliases"] else []
         except (TypeError, ValueError):
             aliases = []
+        # Quotes the curator said are someone else's words are never picked.
+        disowned = {r[0] for r in conn.execute(
+            "SELECT quote FROM event_quotes WHERE event_id = ? AND assigned_by = 'curator' "
+            "AND figure_id IS NOT (SELECT figure_id FROM events WHERE id = ?)",
+            (ev["id"], ev["id"]))}
         best: tuple[str, str] | None = None
         for art in conn.execute(
             "SELECT url, body FROM articles WHERE event_id = ? AND fetch_status = 'ok' "
             "ORDER BY published_at",
             (ev["id"],),
         ):
-            q = find_quote(art["body"], ev["name"], aliases)
+            q = find_quote(art["body"], ev["name"], aliases, disowned)
             if q and (best is None or len(q) > len(best[0])):
                 best = (q, art["url"])
         if best:
             conn.execute("UPDATE events SET quote = ?, quote_url = ? WHERE id = ?",
                          (*best, ev["id"]))
             stats["quoted"] += 1
+    stats.update(collect_quotes(conn))
     conn.commit()
+    return stats
+
+
+def all_quotes(body: str) -> list[tuple[str, str]]:
+    """Every explicitly attributed quote in `body`, with the speaker as written.
+
+    The same two patterns as find_quote, for anyone: (quote, speaker), where
+    the speaker is the run of capitalised words at the attribution ("Said",
+    "Kapolri Jenderal Suyudi"). Follow-ups ("…," ujarnya) are still skipped:
+    by then another speaker may have been introduced.
+    """
+    if not body:
+        return []
+    out: dict[str, str] = {}
+    for m in _QUOTE_THEN_NAME.finditer(body):
+        who = _speaker(m.group("who").split())
+        if who:
+            out.setdefault(m.group("q").strip().rstrip(","), who)
+    for m in _NAME_THEN_QUOTE.finditer(body):
+        who = " ".join(_speaker(m.group("who").split()[::-1]).split()[::-1])
+        if who:
+            out.setdefault(m.group("q").strip().rstrip(","), who)
+    return list(out.items())
+
+
+def match_speaker(speaker: str, figures: list[tuple[str, list[str]]],
+                  prefer: str | None = None) -> str | None:
+    """The tracked figure a written speaker names, if exactly one fits.
+
+    `figures` is [(id, terms)]. The longest matching term wins, so "Said
+    Abdullah" beats a bare "Said"; `prefer` (the record's own figure) wins a
+    tie, since a record's quotes are mostly its owner's.
+    """
+    best: tuple[int, str] | None = None
+    tied = False
+    for fid, terms in figures:
+        hit = max((len(t) for t in terms if _names(speaker, [t])), default=0)
+        if not hit:
+            continue
+        if best is None or hit > best[0] or (hit == best[0] and fid == prefer):
+            tied = best is not None and hit == best[0] and fid != prefer and best[1] != prefer
+            best = (hit, fid)
+        elif hit == best[0] and best[1] != prefer:
+            tied = True
+    return None if best is None or tied else best[1]
+
+
+def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None) -> dict[str, int]:
+    """List every attributed quote of each event in event_quotes. Commits in batches.
+
+    New quotes are matched to a tracked figure; a quote already listed keeps
+    its assignment, a curator's above all.
+    """
+    figures = []
+    for r in conn.execute("SELECT id, name, aliases FROM figures WHERE active = 1"):
+        try:
+            aliases = json.loads(r["aliases"]) if r["aliases"] else []
+        except (TypeError, ValueError):
+            aliases = []
+        figures.append((r["id"], _terms(r["name"], aliases)))
+    where = "a.fetch_status = 'ok' AND a.event_id IS NOT NULL"
+    params: list = []
+    if event_ids is not None:
+        where += f" AND a.event_id IN ({','.join('?' * len(event_ids)) or 'NULL'})"
+        params = list(event_ids)
+    stats = {"articles": 0, "quotes": 0}
+    now = datetime.now(timezone.utc).isoformat()
+    for art in conn.execute(
+        f"""SELECT a.id, a.url, a.body, a.event_id, e.figure_id AS owner
+              FROM articles a JOIN events e ON e.id = a.event_id WHERE {where}""",
+        params,
+    ).fetchall():
+        stats["articles"] += 1
+        # In batches: a full pass reads every article, and one transaction
+        # held the write lock long enough to fail the fetch backfill.
+        if stats["articles"] % 500 == 0:
+            conn.commit()
+        for quote, speaker in all_quotes(art["body"]):
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO event_quotes
+                       (event_id, article_id, url, quote, speaker, figure_id, assigned_by, found_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'auto', ?)""",
+                (art["event_id"], art["id"], art["url"], quote, speaker,
+                 match_speaker(speaker, figures, art["owner"]), now),
+            )
+            stats["quotes"] += cur.rowcount
     return stats

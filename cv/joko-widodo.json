@@ -1,0 +1,47 @@
+{
+  "bio": "Presiden Indonesia ketujuh, 2014–2024. Sebelumnya Gubernur DKI Jakarta dan Wali Kota Surakarta; keluar dari PDI Perjuangan dan sejak 2025 bergabung dengan PSI.",
+  "facts": [
+    {
+      "label": "Nama lahir",
+      "value": "Mulyono"
+    },
+    {
+      "label": "Lahir",
+      "value": "Surakarta, 21 Juni 1961"
+    },
+    {
+      "label": "Partai",
+      "value": "PSI (sejak 2025)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Presiden Republik Indonesia",
+      "org": "",
+      "period": "2014 – 2024"
+    },
+    {
+      "role": "Gubernur DKI Jakarta",
+      "org": "",
+      "period": "2012 – 2014"
+    },
+    {
+      "role": "Wali Kota Surakarta",
+      "org": "",
+      "period": "2005 – 2012"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Fakultas Kehutanan, Universitas Gadjah Mada",
+      "year": "1985"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Joko_Widodo"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

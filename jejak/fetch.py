@@ -108,9 +108,12 @@ def fetch_bodies(conn: sqlite3.Connection, limit: int = 50,
     # Figure articles and anything already clustered come first: general news is
     # ingested in bulk as peristiwa candidates, and most of it never corroborates
     # into an event, so it must not crowd out the articles we actually publish.
+    # Within that, newest first: recent records are the ones being curated and
+    # read, and a backlog should not keep them waiting behind last year's.
     rows = conn.execute(
         f"""SELECT id, url FROM articles WHERE {where}
-            ORDER BY (figure_id IS NULL AND event_id IS NULL), fetched_at
+            ORDER BY (figure_id IS NULL AND event_id IS NULL),
+                     COALESCE(published_at, fetched_at) DESC
             LIMIT ?""",
         (limit,),
     ).fetchall()
@@ -126,5 +129,9 @@ def fetch_bodies(conn: sqlite3.Connection, limit: int = 50,
             (body, status, art["id"]),
         )
         stats["ok" if status == "ok" else "failed"] += 1
-    conn.commit()
+        # Saved one by one: an uncommitted UPDATE holds SQLite's write lock
+        # through every download after it, and a backfill runs for hours —
+        # the rest of the pipeline would find the database locked throughout.
+        # This also keeps what was fetched if the run is stopped.
+        conn.commit()
     return stats

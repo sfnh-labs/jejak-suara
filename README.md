@@ -234,18 +234,21 @@ Curation is a **kill switch over an already-live feed**, not a gate a record has
 pass before it appears. Everything the pipeline produces is published from the moment
 it clusters; `/kurasi` is where a human takes something back down.
 
+**`/kurasi` runs on the curator's machine, against `jejak.db`** — the pipeline's own
+database. Neon is only the public site's end point: it receives what the push sends,
+already curated. So a decision is in force for the next crawl the moment it is made,
+every article's full text is at hand without filling Neon, and the public site
+follows on the next push.
+
+Set it up once, in `web/.env.local`:
+
+```bash
+JEJAK_DB=../jejak.db      # without it /kurasi returns 404 (the deployed site)
+```
+
 The verdict lives in `events.curated` (`NULL` = untouched and live, `'rejected'` =
-pulled, `'kept'` = checked and left up), and the site filters on it via the `LIVE`
-predicate in `web/src/lib/data.ts`.
-
-That column is **Postgres-only and absent from `scripts/sync_to_neon.py`'s column
-list**, which is the whole point. `events.status` is owned by the pipeline and
-overwritten wholesale by every push, so a verdict stored there would be undone by
-the next crawl. Push and pull both skip `curated`, and `--reset` saves it across the
-truncate and reapplies it afterwards.
-
-Rejecting takes effect on the public site immediately — the pages are
-`force-dynamic` and read Neon directly, so no sync step is involved.
+pulled, `'kept'` = checked and left up). It is pushed with the event, and the site
+filters on it via the `LIVE` predicate in `web/src/lib/data.ts`.
 
 `/kurasi` is a queue of records and peristiwa; each opens one page, `/kurasi/<id>`,
 where everything hanging off that event is decided in one place:
@@ -267,12 +270,17 @@ where everything hanging off that event is decided in one place:
   the `link` stage (`jejak/link.py`) proposes pairs by shared rare words, and the
   curator confirms, rejects, or adds one. Only confirmed links appear on the site.
 
-Each of these is a Postgres-only table no sync writes (`record_link_verdicts`,
-`figure_edits`, `figure_merges`, `event_figure_rejections`), and takes effect on the site at once.
-`scripts/apply_curation.py --apply` then carries them into SQLite — corrected aliases
-drive the next run's attribution, rejected links are never proposed again, struck
-figures stay struck — and stamps each `applied_at`. `publish_local` runs it ahead of
-the stages on the runs that push.
+Each is written straight into `jejak.db`: a figure's row, `events.curated` with its
+reasons in `curation_labels` (what `jejak/curation_suggest.py` learns from), the
+verdict on a `record_links` / `followup_links` row (rejected pairs are never proposed
+again), `event_figure_rejections` for a struck figure. Promoting a name and merging
+two figures run the pipeline's own code through `scripts/kurasi_ops.py`. The names
+queue (`candidate_review`) is rebuilt from the mined mentions by the `names queue`
+stage of `publish_local`.
+
+`scripts/migrate_kurasi_local.py --apply` made the move from the earlier setup, where
+`/kurasi` wrote to Neon; `sync_to_neon.py --push` refuses to run until it has, since
+the verdicts used to exist only in Neon.
 
 **Adding new curation columns and tables to an existing Neon database must happen before deploying a web
 build that reads it**, or every page query fails on the missing column:
@@ -281,10 +289,9 @@ build that reads it**, or every page query fails on the missing column:
 python scripts/sync_to_neon.py --schema    # DDL only, touches no rows
 ```
 
-Access control is Cloudflare Access (see below). Without it configured, `/kurasi`
-returns 503 in production and is open in `next dev` — so local curation needs no
-Cloudflare account, and a deploy that forgets the config fails closed rather than
-publishing an unauthenticated write endpoint.
+The deployed site has no `JEJAK_DB`, so it has no curation pages. The Cloudflare
+Access setup below dates from when it did, and is only needed if `/kurasi` is ever
+served remotely again.
 
 ### Deploying to Cloudflare
 

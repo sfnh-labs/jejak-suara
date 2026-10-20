@@ -74,7 +74,12 @@ export function AcceptCandidateForm({ slug, name, role, withReject = true }: {
         Alias, dipisah dengan |. Ejaan dari liputan sudah diisikan; hapus jika terlalu umum.
         <input name="aliases" defaultValue={name} style={input} />
       </label>
-      <div style={{ display: "flex", gap: 8, gridColumn: "1 / -1", justifyContent: "flex-end", flexWrap: "wrap" }}>
+      {/* Enter in any field submits with the form's FIRST button, so
+          "Jadikan tokoh" comes first in the markup and row-reverse puts it
+          back on the right. With reject first, Enter rejected the name the
+          curator had just filled in. */}
+      <div style={{ display: "flex", flexDirection: "row-reverse", gap: 8, gridColumn: "1 / -1", justifyContent: "flex-start", flexWrap: "wrap" }}>
+        <button type="submit" name="verdict" value="promote" style={button("accept")}>Jadikan tokoh</button>
         {withReject ? (
           // Skips the required fields: rejecting needs none of them, and the
           // action drops whatever was typed.
@@ -82,7 +87,6 @@ export function AcceptCandidateForm({ slug, name, role, withReject = true }: {
             Bukan tokoh, tolak
           </button>
         ) : null}
-        <button type="submit" name="verdict" value="promote" style={button("accept")}>Jadikan tokoh</button>
       </div>
     </form>
   );

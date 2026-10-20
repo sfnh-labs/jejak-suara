@@ -85,23 +85,25 @@ TABLES: tuple[Table, ...] = (
     # working copy is disposable: without it the backfill cursor would reset to
     # today every time jejak.db is rebuilt, and the walk would never progress.
     Table("pipeline_state", "key", ("key", "value", "updated_at")),
-    # `curated` is deliberately NOT listed. Push overwrites every column named
-    # here from the disposable SQLite copy, so listing the curator's verdict
-    # would undo it on the next crawl; leaving it out means push and pull both
-    # skip it and Postgres stays its only home. The web app writes it directly.
+    # `curated` is the curator's verdict. /kurasi writes it in jejak.db, so it
+    # goes up with the rest of the row; the site hides 'rejected'.
     Table("events", "id", (
         "id", "figure_id", "kind", "title", "event_date", "last_seen",
-        "event_type", "scope", "impact", "status", "created_at",
+        "event_type", "scope", "impact", "status", "created_at", "curated",
         "quote", "quote_url",
     ), serial=True),
     Table("event_figures", "event_id", ("event_id", "figure_id"),
           conflict=("event_id", "figure_id")),
-    # Proposals only. `origin` and `verdict` are left out for the same reason
-    # as events.curated: the curator's ruling is in record_link_verdicts, and
-    # apply_curation.py is what copies it down into SQLite.
+    # Proposals and the curator's ruling on them, both from jejak.db. The
+    # site shows only verdict = 'confirmed'.
     Table("record_links", "record_id",
-          ("record_id", "peristiwa_id", "score", "evidence", "created_at"),
+          ("record_id", "peristiwa_id", "score", "evidence", "origin", "verdict",
+           "created_at"),
           conflict=("record_id", "peristiwa_id")),
+    Table("followup_links", "earlier_id",
+          ("earlier_id", "later_id", "score", "evidence", "origin", "verdict",
+           "created_at"),
+          conflict=("earlier_id", "later_id")),
     Table("articles", "id", (
         "id", "figure_id", "source", "url", "title", "summary", "body",
         "body_original", "body_lang", "fetch_status", "published_at",
@@ -129,6 +131,12 @@ TABLES: tuple[Table, ...] = (
     Table("corrections", "id", (
         "id", "event_id", "submitted_by", "body", "status", "created_at",
     ), serial=True),
+    # The suggester's output (jejak/curation_suggest.py). Its labels go the
+    # other way: curation_reasons is curator-owned and never pushed.
+    Table("curation_suggestions", "event_id", (
+        "event_id", "reason", "confidence", "support", "examples",
+        "auto_hide", "model", "scored_at",
+    )),
 )
 
 
@@ -174,6 +182,11 @@ MIGRATIONS = (
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS curated_role TEXT",
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS curated_slug TEXT",
     "ALTER TABLE figure_candidates ADD COLUMN IF NOT EXISTS curated_positions TEXT",
+    # The rulings now travel on the link rows themselves, from jejak.db.
+    "ALTER TABLE record_links ADD COLUMN IF NOT EXISTS origin TEXT",
+    "ALTER TABLE record_links ADD COLUMN IF NOT EXISTS verdict TEXT",
+    "ALTER TABLE followup_links ADD COLUMN IF NOT EXISTS origin TEXT",
+    "ALTER TABLE followup_links ADD COLUMN IF NOT EXISTS verdict TEXT",
     "ALTER TABLE figures ADD COLUMN IF NOT EXISTS positions TEXT",
     "ALTER TABLE figure_edits ADD COLUMN IF NOT EXISTS positions TEXT",
     "ALTER TABLE figures ADD COLUMN IF NOT EXISTS bio TEXT",
@@ -221,42 +234,46 @@ def apply_schema(pg) -> None:
     pg.commit()
 
 
-def reset(pg) -> list[tuple[int, str]]:
+def reset(pg) -> None:
     """Drop all synced rows so a clean push can rebuild them.
 
-    Destructive, and only correct because SQLite is the authoritative copy:
-    the pipeline writes there and Neon is a read replica for the web app.
-
-    The one exception is `events.curated`, which has no SQLite counterpart to
-    rebuild from — a truncate would erase the curator's decisions for good. It
-    is read out here and handed back so `restore_curation` can reapply it once
-    the push has recreated the rows.
+    Destructive, and correct because jejak.db is the authoritative copy of
+    everything here, the curator's verdicts included.
     """
-    with pg.cursor() as cur:
-        cur.execute("SELECT id, curated FROM events WHERE curated IS NOT NULL")
-        saved = [(r[0], r[1]) for r in cur.fetchall()]
     names = ", ".join(t.name for t in TABLES)
     with pg.cursor() as cur:
         cur.execute(f"TRUNCATE {names} RESTART IDENTITY CASCADE")
     pg.commit()
-    return saved
 
 
-def restore_curation(pg, saved: list[tuple[int, str]]) -> int:
-    """Reapply curator verdicts saved across a --reset.
+# Small tables whose rows the curator removes locally (a struck figure, a
+# withdrawn link). Push only upserts, so these are also pruned to the local
+# set after it. (table, key columns, Postgres types of the key)
+PRUNED = (
+    ("event_figures", ("event_id", "figure_id"), ("int", "text")),
+    ("record_links", ("record_id", "peristiwa_id"), ("int", "int")),
+    ("followup_links", ("earlier_id", "later_id"), ("int", "int")),
+)
 
-    Row identity survives the rebuild because push carries `events.id`
-    explicitly, so the pre-truncate ids still address the same events.
-    """
-    if not saved:
-        return 0
+
+def prune(pg, sqlite: sqlite3.Connection) -> dict[str, int]:
+    """Delete rows from Neon that jejak.db no longer has. Returns per-table counts."""
+    counts = {}
     with pg.cursor() as cur:
-        cur.executemany(
-            "UPDATE events SET curated = %s WHERE id = %s",
-            [(verdict, event_id) for event_id, verdict in saved],
-        )
+        for table, keys, types in PRUNED:
+            local = sqlite.execute(f"SELECT {', '.join(keys)} FROM {table}").fetchall()
+            columns = [list(col) for col in zip(*local)] if local else [[] for _ in keys]
+            unnest = ", ".join(f"%s::{t}[]" for t in types)
+            match = " AND ".join(f"k.{c} = {table}.{c}" for c in keys)
+            cur.execute(
+                f"""DELETE FROM {table} WHERE NOT EXISTS (
+                      SELECT 1 FROM unnest({unnest}) AS k({', '.join(keys)})
+                       WHERE {match})""",
+                columns,
+            )
+            counts[table] = cur.rowcount
     pg.commit()
-    return len(saved)
+    return counts
 
 
 def sync_figures(pg, sqlite: sqlite3.Connection) -> int:
@@ -297,185 +314,8 @@ def sync_figures(pg, sqlite: sqlite3.Connection) -> int:
                  cv_checked_at = EXCLUDED.cv_checked_at""",
             rows,
         )
-        # An edit the pipeline has not applied yet would be undone by the row
-        # just pushed, so it is laid back over it. Once applied, SQLite holds
-        # the same values and this matches nothing.
-        cur.execute(
-            """UPDATE figures f
-                  SET name = e.name, role = e.role, aliases = e.aliases,
-                      active = e.active, positions = COALESCE(e.positions, f.positions),
-                      bio = COALESCE(e.bio, f.bio), facts = COALESCE(e.facts, f.facts),
-                      education = COALESCE(e.education, f.education),
-                      sources = COALESCE(e.sources, f.sources)
-                 FROM figure_edits e
-                WHERE e.figure_id = f.id AND e.applied_at IS NULL"""
-        )
     pg.commit()
     return len(rows)
-
-
-def overlay_merges(pg) -> int:
-    """Lay merges the pipeline has not applied yet back over pushed rows.
-
-    A record whose SQLite row changed since the merge is pushed with the
-    duplicate's id again; this moves it back. Once apply_curation.py has run,
-    SQLite agrees and this matches nothing.
-    """
-    with pg.cursor() as cur:
-        cur.execute("SELECT from_id, into_id FROM figure_merges WHERE applied_at IS NULL")
-        pending = cur.fetchall()
-        for from_id, into_id in pending:
-            cur.execute("UPDATE events SET figure_id = %s WHERE figure_id = %s", (into_id, from_id))
-            cur.execute("UPDATE articles SET figure_id = %s WHERE figure_id = %s", (into_id, from_id))
-            cur.execute(
-                """INSERT INTO event_figures (event_id, figure_id)
-                   SELECT event_id, %s FROM event_figures WHERE figure_id = %s
-                   ON CONFLICT DO NOTHING""",
-                (into_id, from_id),
-            )
-            cur.execute("DELETE FROM event_figures WHERE figure_id = %s", (from_id,))
-    pg.commit()
-    return len(pending)
-
-
-# Candidates corroborated by this many outlets are worth a human's time. Kept
-# in step with mentions.PROMOTE_MIN_OUTLETS, which is the same bar the
-# automatic promoter uses before its own name-shape checks.
-CANDIDATE_EVIDENCE_SQL = """
-    SELECT c.slug,
-           c.name,
-           count(DISTINCT m.source) AS outlets,
-           count(*)                 AS mentions
-      FROM figure_candidates c
-      JOIN figure_mentions m ON m.slug = c.slug
-     WHERE c.slug NOT IN (SELECT id FROM figures)
-       AND c.status != 'tracked'
-     GROUP BY c.slug
-    HAVING outlets >= ?
-"""
-
-
-def sync_candidates(pg, sqlite: sqlite3.Connection, min_outlets: int = 3) -> int:
-    """Publish the review queue, evidence only.
-
-    The curator's verdict columns are absent from the INSERT and from the
-    ON CONFLICT update, so a re-sync refreshes the counts behind a decision
-    without touching the decision itself.
-    """
-    rows = []
-    for c in sqlite.execute(CANDIDATE_EVIDENCE_SQL, (min_outlets,)).fetchall():
-        role_row = sqlite.execute(
-            """SELECT role FROM figure_mentions
-                WHERE slug = ? AND role IS NOT NULL AND role != ''
-                GROUP BY role ORDER BY count(*) DESC LIMIT 1""",
-            (c["slug"],),
-        ).fetchone()
-        # The article, and the sentence inside it that produced the name.
-        # A name is mined from the body, never the headline, so the title on
-        # its own explains nothing: "Agung" is evidenced by a piece about
-        # copyright registration, and only the sentence says whether the
-        # extractor found a person or cut "Jaksa Agung" in half.
-        titles = []
-        for r in sqlite.execute(
-            """SELECT a.title, a.url, a.source, a.summary, a.body,
-                      max(a.published_at) AS pub
-                 FROM figure_mentions m JOIN articles a ON a.id = m.article_id
-                WHERE m.slug = ? AND a.title IS NOT NULL
-                GROUP BY a.title
-                ORDER BY pub DESC LIMIT 4""",
-            (c["slug"],),
-        ):
-            titles.append({
-                "title": r["title"],
-                "url": r["url"],
-                "source": r["source"],
-                "context": _mention_context(c["name"], r["summary"], r["body"]),
-            })
-        # The events those articles ended up in. A candidate is only worth
-        # promoting if the coverage naming them is coverage of something, and
-        # the event title is that something in the site's own words.
-        records = [
-            {"id": r["id"], "title": r["title"], "figure_id": r["figure_id"]}
-            for r in sqlite.execute(
-                """SELECT e.id, e.title, e.figure_id, max(a.published_at) AS pub
-                     FROM figure_mentions m
-                     JOIN articles a ON a.id = m.article_id
-                     JOIN events e ON e.id = a.event_id
-                    WHERE m.slug = ? AND e.title IS NOT NULL
-                    GROUP BY e.id
-                    ORDER BY pub DESC LIMIT 4""",
-                (c["slug"],),
-            )
-        ]
-        rows.append((
-            c["slug"], c["name"], c["outlets"], c["mentions"],
-            role_row["role"] if role_row else None,
-            json.dumps(titles, ensure_ascii=False),
-            json.dumps(records, ensure_ascii=False),
-            _now_iso(),
-        ))
-    if not rows:
-        return 0
-    with pg.cursor() as cur:
-        cur.executemany(
-            """INSERT INTO figure_candidates
-                   (slug, name, outlets, mentions, role, headlines, records,
-                    synced_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT (slug) DO UPDATE SET
-                 name = EXCLUDED.name,
-                 outlets = EXCLUDED.outlets,
-                 mentions = EXCLUDED.mentions,
-                 role = EXCLUDED.role,
-                 headlines = EXCLUDED.headlines,
-                 records = EXCLUDED.records,
-                 synced_at = EXCLUDED.synced_at""",
-            rows,
-        )
-    # A candidate that has since been promoted or folded stops being a
-    # question. Rows nobody has touched are dropped; a verdict or a note is
-    # someone's work, so those stay until the pipeline has applied them.
-    with pg.cursor() as cur:
-        cur.execute(
-            "DELETE FROM figure_candidates "
-            " WHERE verdict IS NULL AND notes IS NULL AND slug <> ALL(%s)",
-            ([r[0] for r in rows],),
-        )
-    pg.commit()
-    return len(rows)
-
-
-def _mention_context(name: str, *texts: str | None, window: int = 130) -> str | None:
-    """The sentence fragment a candidate's name was found in.
-
-    Trimmed to whole words so the reviewer reads a phrase rather than a slice,
-    and taken from the first text that contains the name — summary before body,
-    since the lead is usually the cleanest statement of who did what.
-    """
-    for text in texts:
-        if not text:
-            continue
-        pos = text.lower().find(name.lower())
-        if pos < 0:
-            continue
-        start = max(0, pos - window)
-        end = min(len(text), pos + len(name) + window)
-        snippet = text[start:end].replace("\n", " ").strip()
-        # Drop the half-words the window cut at either end.
-        if start > 0:
-            snippet = snippet.partition(" ")[2]
-        if end < len(text):
-            snippet = snippet.rpartition(" ")[0]
-        snippet = " ".join(snippet.split())
-        if not snippet:
-            continue
-        return ("…" if start > 0 else "") + snippet + ("…" if end < len(text) else "")
-    return None
-
-
-def _now_iso() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
 
 
 def pull(pg, sqlite: sqlite3.Connection) -> dict[str, int]:
@@ -576,10 +416,6 @@ def main(argv: list[str] | None = None) -> int:
                         help="hydrate SQLite from Neon and stop")
     parser.add_argument("--push", action="store_true",
                         help="publish SQLite to Neon and stop")
-    parser.add_argument("--candidates", action="store_true",
-                        help="refresh only the figure-discovery review queue "
-                             "(/kurasi/kandidat) and stop — cheap enough to "
-                             "run whenever new names have been mined")
     parser.add_argument("--schema", action="store_true",
                         help="apply the schema + migrations to Neon and stop "
                              "(run this before deploying a web change that "
@@ -594,9 +430,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--reset rebuilds Neon from SQLite; --pull is meaningless with it")
     if args.schema and (args.pull or args.push or args.reset):
         parser.error("--schema applies DDL only; combine it with nothing")
-    if args.candidates and (args.pull or args.push or args.reset or args.schema):
-        parser.error("--candidates refreshes the review queue only; "
-                     "combine it with nothing")
 
     do_pull = not args.reset and (args.pull or not args.push)
     do_push = args.reset or args.push or not args.pull
@@ -617,27 +450,26 @@ def main(argv: list[str] | None = None) -> int:
     jejak_db.init_db()
     sqlite = jejak_db.connect()
 
-    if args.candidates:
-        try:
-            n = sync_candidates(pg, sqlite)
-            print(f"figure_candidates: {n} rows awaiting review")
-        finally:
-            sqlite.close()
-            pg.close()
-        return 0
+    # The verdicts used to live only in Neon. Until migrate_kurasi_local.py
+    # has brought them down, a push would send jejak.db's empty ones up over
+    # them.
+    if do_push and not sqlite.execute(
+            "SELECT 1 FROM pipeline_state WHERE key = 'kurasi_home' AND value = 'local'"
+    ).fetchone():
+        sqlite.close()
+        pg.close()
+        print("refusing to push: run scripts/migrate_kurasi_local.py --apply first "
+              "(the curator's verdicts are still only in Neon)", file=sys.stderr)
+        return 1
 
     try:
         n = sync_figures(pg, sqlite)
         print(f"figures: {n} rows")
-        n = sync_candidates(pg, sqlite)
-        print(f"figure_candidates: {n} rows awaiting review")
 
-        saved_curation: list[tuple[int, str]] = []
         if args.reset:
             print("reset: truncating all synced tables in Neon")
-            saved_curation = reset(pg)
+            reset(pg)
             sqlite.execute("DROP TABLE IF EXISTS _pushed")
-            print(f"  held {len(saved_curation)} curator verdicts for restore")
 
         if do_pull:
             print("pull (Neon -> SQLite)")
@@ -650,13 +482,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {table}: {count} rows")
 
         if do_push:
-            n = overlay_merges(pg)
-            if n:
-                print(f"  re-applied {n} pending figure merge(s)")
-
-        if saved_curation:
-            n = restore_curation(pg, saved_curation)
-            print(f"restored {n} curator verdicts")
+            for table, count in prune(pg, sqlite).items():
+                if count:
+                    print(f"  pruned {table}: {count} rows no longer in jejak.db")
     except Exception:
         pg.rollback()
         raise

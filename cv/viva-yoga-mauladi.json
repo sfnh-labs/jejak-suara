@@ -1,0 +1,33 @@
+{
+  "bio": "Wakil Menteri Transmigrasi sejak Oktober 2024. Politikus PAN asal Lamongan yang sebelumnya anggota Komisi IV DPR; aktivis HMI.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Kembangbahu, Lamongan, 30 Mei 1968"
+    },
+    {
+      "label": "Partai",
+      "value": "PAN"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Menteri Transmigrasi",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "Komisi IV",
+      "period": ""
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Viva_Yoga_Mauladi"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

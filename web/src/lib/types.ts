@@ -150,6 +150,17 @@ export interface Peristiwa {
   sources: EventSource[];
   related_figures: { id: string; name: string }[];
   image: string | null;
+  /** The confirmed follow-up chain this peristiwa is part of, oldest first; empty if none. */
+  story: StoryStep[];
+}
+
+/** One event in a "Lini cerita": a chain of confirmed follow-ups. */
+export interface StoryStep {
+  event_id: number;
+  title: string | null;
+  event_date: string | null;
+  /** The event whose page or card is showing the chain. */
+  current: boolean;
 }
 
 /** One row of the home rail: a peristiwa (left column) or a record (right). */

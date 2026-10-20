@@ -1,0 +1,38 @@
+{
+  "bio": "Menteri Ekonomi Kreatif/Kepala Badan Ekonomi Kreatif sejak Oktober 2024. Politikus Demokrat yang sebelumnya Sekretaris Jenderal Partai Demokrat dan anggota DPR sejak 2005.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Jakarta, 28 Juni 1972"
+    },
+    {
+      "label": "Partai",
+      "value": "Demokrat"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri Ekonomi Kreatif/Kepala Badan Ekonomi Kreatif",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "Partai Demokrat",
+      "period": "2020 – 2025"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "2005 – 2024"
+    }
+  ],
+  "education": [],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Teuku_Riefky_Harsya"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

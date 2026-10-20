@@ -1,0 +1,47 @@
+{
+  "bio": "Wakil Menteri Pertahanan sejak Oktober 2024. Purnawirawan TNI Angkatan Udara yang sebelumnya Sekretaris Jenderal Kementerian Pertahanan.",
+  "facts": [
+    {
+      "label": "Nama lengkap",
+      "value": "Donny Ermawan Taufanto"
+    },
+    {
+      "label": "Lahir",
+      "value": "Surakarta, 12 Desember 1965"
+    },
+    {
+      "label": "Pangkat",
+      "value": "Marsekal TNI (Kehormatan)"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Menteri Pertahanan",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Sekretaris Jenderal",
+      "org": "Kementerian Pertahanan",
+      "period": "2020 – 2024"
+    },
+    {
+      "role": "Panglima Koopsau II",
+      "org": "",
+      "period": "2019 – 2020"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Akademi Angkatan Udara",
+      "year": "1988"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Donny_Ermawan"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

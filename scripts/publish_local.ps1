@@ -89,10 +89,10 @@ try {
         Log "Ollama is up."
     }
 
-    # Curator decisions from /kurasi go in first, so this cycle's attribution,
-    # clustering and linking already follow them.
-    Invoke-Stage "apply curation" @("scripts\apply_curation.py", "--apply")
-    # Generated CVs into the roster; after curation, so curated figures are skipped.
+    # /kurasi writes its decisions straight into jejak.db; nothing to bring down.
+    # That makes it the only copy of the curator's work: back it up first.
+    Invoke-Stage "backup" @("scripts\backup_db.py")
+    # Generated CVs into the roster; figures a curator edited are skipped.
     Invoke-Stage "import cv" @("scripts\import_cv.py", "--apply")
 
     Invoke-Stage "ingest" @("-m", "jejak.cli", "ingest")
@@ -107,9 +107,11 @@ try {
     # An article with no body is summarized from its headline alone (backfilled
     # rows carry no RSS lead either), and nothing re-summarizes an event when a
     # body arrives later - so a fetch queue that cannot keep up turns into
-    # history made of headlines. Six days a cycle yields ~150 figure articles;
-    # 200 drains that plus the RSS intake, at ~1s each.
-    Invoke-Stage "fetch" @("-m", "jejak.cli", "fetch", "--limit", "200")
+    # history made of headlines. Six days a cycle yields ~150 figure articles,
+    # but the RSS intake is larger than that: at 200 a third of September and
+    # October went unfetched, leaving /kurasi nothing to read. 1000 (~17 min at
+    # ~1s each) keeps up with room to drain a backlog.
+    Invoke-Stage "fetch" @("-m", "jejak.cli", "fetch", "--limit", "1000")
 
     # Figure discovery. Mines the articles fetched above for people named in
     # them; anyone named by enough distinct outlets goes to the curator's
@@ -117,9 +119,11 @@ try {
     # roster. Runs before clustering so a figure accepted since the last run
     # owns the articles clustered this cycle.
     Invoke-Stage "mentions" @("-m", "jejak.cli", "mentions", "--limit", "1000")
+    # Curation upkeep: undone drafts, learning from the curator, names queue.
+    Invoke-Stage "kurasi" @("-m", "jejak.cli", "kurasi")
 
     foreach ($stage in @("cluster", "link", "quotes", "translate", "summarize",
-                         "sentiment", "buzzer")) {
+                         "sentiment", "buzzer", "suggest")) {
         Invoke-Stage $stage @("-m", "jejak.cli", $stage)
     }
 

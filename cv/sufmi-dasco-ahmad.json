@@ -1,0 +1,56 @@
+{
+  "bio": "Wakil Ketua DPR periode 2024–2029, setelah menjabat Wakil Ketua DPR 2019–2024. Politikus Gerindra, anggota DPR sejak 2014; pernah menjadi rektor Universitas Kebangsaan Republik Indonesia.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Bandung, 7 Oktober 1967"
+    },
+    {
+      "label": "Partai",
+      "value": "Gerindra"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Wakil Ketua DPR",
+      "org": "Bidang Politik dan Keamanan",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Wakil Ketua DPR",
+      "org": "Bidang Ekonomi dan Keuangan",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "2014 – kini"
+    },
+    {
+      "role": "Rektor",
+      "org": "Universitas Kebangsaan Republik Indonesia",
+      "period": "2020 – 2025"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Islam Bandung"
+    },
+    {
+      "detail": "Universitas Islam Jakarta"
+    },
+    {
+      "detail": "Universitas Jakarta"
+    },
+    {
+      "detail": "Universitas Pancasila"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Sufmi_Dasco_Ahmad"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

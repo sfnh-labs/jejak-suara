@@ -1,0 +1,36 @@
+{
+  "bio": "Menteri Pendayagunaan Aparatur Negara dan Reformasi Birokrasi sejak Oktober 2024. Birokrat karier di kementerian itu sejak 1997, terakhir sebagai Sekretaris Kementerian.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Bandung, 29 Mei 1965"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Menteri PAN-RB",
+      "org": "Kabinet Merah Putih",
+      "period": "2024 – kini"
+    },
+    {
+      "role": "Sekretaris Kementerian",
+      "org": "Kementerian PAN-RB",
+      "period": "2022 – 2024"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Magister Public Management, Universitas Flinders"
+    },
+    {
+      "detail": "Sarjana Hukum, Universitas Padjadjaran"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Rini_Widyantini"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

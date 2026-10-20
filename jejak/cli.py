@@ -4,13 +4,16 @@
     python -m jejak.cli ingest               # pull RSS -> articles
     python -m jejak.cli backfill             # walk outlet archives backwards
     python -m jejak.cli fetch                # backfill full article bodies
-    python -m jejak.cli mentions             # discover figures from coverage
+    python -m jejak.cli mentions             # discover figures from coverage; other figures'
+                                             # statements become articles of theirs (actors.py)
     python -m jejak.cli cluster              # articles -> events
     python -m jejak.cli link                 # propose record -> peristiwa links
     python -m jejak.cli summarize            # grounded drafts for new events
     python -m jejak.cli sentiment            # public-reaction scores for approved events
     python -m jejak.cli figure-stance        # stance toward the figure, from comments naming them
     python -m jejak.cli buzzer               # coordinated-engagement detection
+    python -m jejak.cli suggest [--auto-hide] # guess curator verdicts from /kurasi labels
+    python -m jejak.cli curation-report      # what the /kurasi labels say, for rule-writing
     python -m jejak.cli timeline <figure_id> # approved, publishable events
 
 Taking an event off the public site is not done here — that is `/kurasi` in the
@@ -32,8 +35,9 @@ from datetime import date
 from . import backfill as backfill_mod
 from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
-from . import db, fetch, figure_stance, ingest, link, mentions, quotes, sentiment, summarize, timeline as timeline_mod
+from . import actors, db, fetch, figure_stance, ingest, link, mentions, quotes, sentiment, summarize, timeline as timeline_mod
 from . import translate
+from . import curation_suggest
 from . import youtube_ingest
 
 _BULAN = [
@@ -97,6 +101,13 @@ def main(argv: list[str] | None = None) -> int:
     p_fs.add_argument("--audit", action="store_true",
                       help="print which words matched each figure, then stop")
     sub.add_parser("buzzer")
+    p_sg = sub.add_parser("suggest")
+    p_sg.add_argument("--auto-hide", action="store_true",
+                      help="let proven suggestions take events off the site "
+                           "(same as JEJAK_AUTO_HIDE=1)")
+    sub.add_parser("curation-report")
+    # Curation upkeep: draft what /kurasi left undone, learn from the curator.
+    sub.add_parser("kurasi")
     sub.add_parser("translate")
     sub.add_parser("run")
     p_bf = sub.add_parser("backfill")
@@ -156,10 +167,14 @@ def main(argv: list[str] | None = None) -> int:
                 only_unclustered=not getattr(args, "reattribute", False),
                 gains_only=getattr(args, "gains_only", False),
             ))
+            # After reattribution: a statement by a figure promoted just now
+            # is copied out too, before clustering makes records of it.
+            print("actors:", actors.derive(conn, limit=getattr(args, "limit", 500)))
         if args.cmd in ("cluster", "run"):
             print("cluster:", cluster_mod.cluster(conn))
         if args.cmd in ("link", "run"):
             print("link:", link.link_records(conn))
+            print("follow-ups:", link.link_followups(conn))
         if args.cmd in ("quotes", "run"):
             print("quotes:", quotes.quote_pending(conn))
         if args.cmd in ("summarize", "run"):
@@ -199,6 +214,14 @@ def main(argv: list[str] | None = None) -> int:
                       f"score={r['anomaly_score']:.3f} "
                       f"anomaly={r['anomaly_pct']:.1f}% "
                       f"signals=[{sig_str}]")
+        if args.cmd == "suggest":
+            res = curation_suggest.run(conn, auto_hide=True if args.auto_hide else None)
+            print("suggest:", res)
+        if args.cmd == "kurasi":
+            from . import kurasi
+            print("kurasi:", kurasi.run_stage(conn))
+        if args.cmd == "curation-report":
+            print(curation_suggest.report(conn))
         if args.cmd == "timeline":
             for ev in timeline_mod.for_figure(conn, args.figure_id):
                 print(f"\n● {_fmt_date(ev['date'])}  (corroborated by {ev['corroboration']} outlet/s)")

@@ -103,6 +103,25 @@ CREATE TABLE IF NOT EXISTS record_links (
 );
 CREATE INDEX IF NOT EXISTS idx_record_links_peristiwa ON record_links(peristiwa_id);
 
+-- One event following up an earlier one: a bill proposed, then passed; a
+-- search launched, then called off. Same kind on both sides — peristiwa to
+-- peristiwa, or a figure's record to an earlier record of the same figure.
+-- Proposed by jejak/link.py (link_followups), ruled on in /kurasi; the
+-- columns mean what they do in record_links.
+CREATE TABLE IF NOT EXISTS followup_links (
+    earlier_id   INTEGER NOT NULL,
+    later_id     INTEGER NOT NULL,
+    score        REAL,
+    evidence     TEXT,                      -- JSON array of the shared terms
+    origin       TEXT NOT NULL DEFAULT 'pipeline',
+    verdict      TEXT,
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (earlier_id, later_id),
+    FOREIGN KEY (earlier_id) REFERENCES events(id),
+    FOREIGN KEY (later_id) REFERENCES events(id)
+);
+CREATE INDEX IF NOT EXISTS idx_followup_links_later ON followup_links(later_id);
+
 -- Related figures a curator struck from a peristiwa. promote_peristiwa
 -- re-derives event_figures from the coverage every run, and an alias that
 -- also names someone else would put the wrong person straight back; this is
@@ -245,6 +264,162 @@ CREATE TABLE IF NOT EXISTS article_embeddings (
     vec        BLOB NOT NULL
 );
 
+-- Why the curator kept or took down each event, written by /kurasi along with
+-- events.curated. What jejak/curation_suggest.py learns from. Local only: the
+-- site needs the verdict, which travels on events, not the reasoning.
+CREATE TABLE IF NOT EXISTS curation_labels (
+    event_id   INTEGER PRIMARY KEY,
+    verdict    TEXT NOT NULL,      -- 'rejected' | 'kept'
+    reasons    TEXT NOT NULL,      -- JSON array of reason codes
+    note       TEXT,
+    kind       TEXT,
+    figure_id  TEXT,
+    title      TEXT,
+    summary    TEXT,
+    outlets    INTEGER,
+    suggested  TEXT,
+    decided_at TEXT NOT NULL
+);
+
+-- The names awaiting a curator in /kurasi/kandidat: evidence refreshed by
+-- jejak/candidate_queue.py from figure_mentions, decisions written by the
+-- curator. A promote or reject is applied the moment it is made
+-- (scripts/kurasi_ops.py); `applied_at` records that it was.
+CREATE TABLE IF NOT EXISTS candidate_review (
+    slug              TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    outlets           INTEGER NOT NULL DEFAULT 0,
+    mentions          INTEGER NOT NULL DEFAULT 0,
+    role              TEXT,            -- what the coverage called them most
+    headlines         TEXT,            -- JSON [{title, url, source, context}]
+    records           TEXT,            -- JSON [{id, title, figure_id}]
+    refreshed_at      TEXT,
+    verdict           TEXT,            -- 'promote' | 'reject' | NULL
+    full_name         TEXT,
+    aliases           TEXT,            -- pipe-separated
+    curated_role      TEXT,
+    curated_slug      TEXT,            -- the page address chosen, figures.id
+    curated_positions TEXT,            -- JSON [{role, org, period}]
+    notes             TEXT,
+    decided_at        TEXT,
+    applied_at        TEXT
+);
+
+-- Every attributed quote in an event's articles, verbatim, and whose words
+-- they are (jejak/quotes.py). `figure_id` is matched from the attribution
+-- ("…," ujar Said) when the stage finds it, or set by a curator in /kurasi
+-- (`assigned_by`), whose choice the stage never overwrites. The one shown
+-- on a record is copied to events.quote.
+CREATE TABLE IF NOT EXISTS event_quotes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id    INTEGER NOT NULL,
+    article_id  TEXT,
+    url         TEXT,
+    quote       TEXT NOT NULL,
+    speaker     TEXT,              -- as the article names them: "Said", "Ketua Banggar DPR Said Abdullah"
+    figure_id   TEXT,              -- whose words, or NULL when unclear
+    assigned_by TEXT,              -- 'auto' | 'curator'
+    found_at    TEXT NOT NULL,
+    UNIQUE (event_id, quote)
+);
+CREATE INDEX IF NOT EXISTS idx_event_quotes_event ON event_quotes(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_quotes_figure ON event_quotes(figure_id);
+
+-- Organisations by their long and short names ("Komisi Pemberantasan
+-- Korupsi" / "KPK"), kept by the curator in /kurasi/organisasi. The figure
+-- editor offers both when filling in an office's organisation.
+CREATE TABLE IF NOT EXISTS organizations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,  -- "Komisi Pemberantasan Korupsi"
+    short_name  TEXT UNIQUE COLLATE NOCASE,           -- "KPK", or NULL when it has none
+    updated_at  TEXT NOT NULL
+);
+
+-- "Jadikan info CV" in /kurasi: what an article says about someone's
+-- offices, background and education, drafted by the local model
+-- (jejak/cv_extract.py) for the curator to check, edit and accept onto that
+-- figure's CV — the record itself then comes down as cv_material.
+CREATE TABLE IF NOT EXISTS cv_proposals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id    INTEGER NOT NULL,
+    figure_id   TEXT NOT NULL,     -- whose CV
+    note        TEXT,              -- what the curator wants taken from it
+    status      TEXT NOT NULL DEFAULT 'queued',
+                -- queued | running | ready | accepted | discarded | failed
+    proposal    TEXT,              -- JSON {positions, facts, education}
+    error       TEXT,
+    created_at  TEXT NOT NULL,
+    finished_at TEXT,
+    decided_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cv_proposals_event ON cv_proposals(event_id);
+
+-- What the local model learns from the curator (jejak/kurasi.py): each
+-- accepted rework or CV draft becomes a worked example — the draft that was
+-- wrong, the curator's note, the version they accepted — shown to the model
+-- the next time it writes something similar. `active` = 0 when the curator
+-- switches a lesson off in /kurasi/pelajaran.
+CREATE TABLE IF NOT EXISTS curation_lessons (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,     -- 'summary' | 'cv'
+    source      TEXT NOT NULL,     -- 'rework:<id>' | 'cv:<id>'
+    event_id    INTEGER,
+    figure_id   TEXT,
+    words       TEXT,              -- distinctive words of the event, for finding similar ones
+    wrong       TEXT,              -- what the model produced
+    note        TEXT,              -- what the curator said
+    right       TEXT,              -- what the curator accepted
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    UNIQUE (source)
+);
+
+-- One row per run of the `kurasi` stage: what it caught up on and learned.
+CREATE TABLE IF NOT EXISTS kurasi_reports (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_at  TEXT NOT NULL,
+    stats   TEXT NOT NULL          -- JSON
+);
+
+-- A curator asking for an event to be redone (/kurasi → scripts/kurasi_ops.py
+-- rework): written again with their note, framed as about the figure rather
+-- than by them, given to another figure, or made a peristiwa. The result is a
+-- draft kept here until the curator accepts it; nothing reaches the event
+-- before that. `before` and `after` are JSON snapshots {kind, figure_id,
+-- framing, title, event_type, summary_text}, kept for the record.
+CREATE TABLE IF NOT EXISTS rework_requests (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id      INTEGER NOT NULL,
+    note          TEXT,
+    framing       TEXT,             -- 'own' | 'about' | NULL = unchanged
+    new_figure_id TEXT,             -- give the record to this figure
+    to_peristiwa  INTEGER NOT NULL DEFAULT 0,
+    status        TEXT NOT NULL DEFAULT 'queued',
+                  -- queued | running | ready | accepted | discarded | failed
+    error         TEXT,
+    before        TEXT,
+    after         TEXT,
+    draft         TEXT,             -- the generated entry, JSON, until accepted
+    created_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    decided_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_rework_event ON rework_requests(event_id);
+
+-- What the suggester expects the curator to do with each unruled event.
+-- Pushed to Neon, where /kurasi shows it and, for auto_hide = 1, the public
+-- site leaves the event out until a curator rules on it.
+CREATE TABLE IF NOT EXISTS curation_suggestions (
+    event_id   INTEGER PRIMARY KEY,
+    reason     TEXT,
+    confidence REAL,
+    support    INTEGER,
+    examples   TEXT,               -- JSON array of labelled event ids
+    auto_hide  INTEGER NOT NULL DEFAULT 0,
+    model      TEXT,
+    scored_at  TEXT NOT NULL
+);
+
 -- Correction / right-of-reply requests (legal safety valve).
 CREATE TABLE IF NOT EXISTS corrections (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -259,9 +434,17 @@ CREATE TABLE IF NOT EXISTS corrections (
 
 
 def connect(path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+    # Several stages can share the file at once (a long fetch backfill beside
+    # a publish run), so wait for a lock rather than fail after sqlite's 5s.
+    conn = sqlite3.connect(path, timeout=60)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL lets readers and one writer work side by side. Switching needs a
+    # moment with no other connection open; until then it simply stays as is.
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 
@@ -280,6 +463,13 @@ _MIGRATIONS = {
         ("fetch_status", "TEXT"),
         ("body_original", "TEXT"),
         ("body_lang", "TEXT"),
+        # jejak/actors.py: another tracked figure's own statement inside an
+        # article is copied out as an article of theirs. derived_from is the
+        # article it was read from; derived_mode 'join' (the passage recalls
+        # something earlier) may only join a record they already have.
+        ("derived_from", "TEXT"),
+        ("derived_mode", "TEXT"),
+        ("actors_scanned_at", "TEXT"),
     ],
     "events": [
         ("event_type", "TEXT DEFAULT 'other'"),
@@ -289,9 +479,30 @@ _MIGRATIONS = {
         ("last_seen", "TEXT"),
         ("quote", "TEXT"),
         ("quote_url", "TEXT"),
+        # The curator's verdict ('rejected' | 'kept' | NULL), set in /kurasi.
+        # Pushed with the event; the site hides 'rejected'.
+        ("curated", "TEXT"),
+        # How a record is written (jejak/summarize.py): NULL = the figure's
+        # own act, 'about' = coverage concerning them that they did not do.
+        # Set by a curator's rework in /kurasi.
+        ("framing", "TEXT"),
     ],
     "sentiment": [
         ("samples_json", "TEXT"),
+    ],
+    # The nightly `kurasi` stage retries a failed draft at most twice, and
+    # learns from each decision once (jejak/kurasi.py).
+    "rework_requests": [
+        ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("learned_at", "TEXT"),
+    ],
+    "cv_proposals": [
+        ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("learned_at", "TEXT"),
+        ("accepted", "TEXT"),          # JSON: what the curator kept
+        # 'auto' = found, drafted and applied by the kurasi stage on its own
+        # (kurasi.auto_cv); 'curator' = asked for in /kurasi.
+        ("origin", "TEXT NOT NULL DEFAULT 'curator'"),
     ],
     "comments": [
         ("comment_id", "TEXT"),

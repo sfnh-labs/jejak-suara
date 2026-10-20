@@ -1,0 +1,36 @@
+{
+  "bio": "Direktur Utama PT Kereta Api Indonesia sejak Agustus 2025. Sebelumnya Direktur Utama PT Len Industri 2020–2025.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Padang, 31 Oktober 1974"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Direktur Utama",
+      "org": "PT Kereta Api Indonesia",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Direktur Utama",
+      "org": "PT Len Industri",
+      "period": "2020 – 2025"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas New South Wales"
+    },
+    {
+      "detail": "Institut Teknologi Bandung"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Bobby_Rasyidin"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

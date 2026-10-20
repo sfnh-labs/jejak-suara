@@ -178,3 +178,26 @@ export function peristiwaImage(eventId: number): string | null {
   const file = PERISTIWA_IMAGES[eventId];
   return file ? `/images/peristiwa/${file}` : null;
 }
+
+/**
+ * Illustrations shared by a whole kind of story: a peristiwa with no picture
+ * of its own (or from its story) takes the one whose pattern its title
+ * matches. Forest and land fires run for weeks as dozens of separate events,
+ * and one image says "karhutla" better than a blank tile.
+ */
+const THEME_IMAGES: { theme: string; pattern: RegExp; eventId: number }[] = [
+  {
+    theme: "Karhutla",
+    pattern: /\bkarhutla\b|kebakaran hutan|hutan dan lahan|kebakaran lahan|titik panas|\bhotspot|(kebakaran|terbakar)\b.*\b(gunung|cagar alam|taman nasional|savana)\b|\b(gunung|cagar alam|taman nasional)\b.*\b(kebakaran|terbakar|berkobar)\b/i,
+    eventId: 23605,
+  },
+];
+
+export function themeImage(title: string | null | undefined): { src: string; theme: string } | null {
+  if (!title) return null;
+  for (const t of THEME_IMAGES) {
+    const src = peristiwaImage(t.eventId);
+    if (src && t.pattern.test(title)) return { src, theme: t.theme };
+  }
+  return null;
+}

@@ -1,0 +1,60 @@
+{
+  "bio": "Gubernur Jawa Timur untuk periode kedua sejak Februari 2025, perempuan pertama di jabatan itu. Politikus PKB dan tokoh NU; sebelumnya Menteri Sosial, Menteri Negara Pemberdayaan Perempuan, dan Ketua Umum Muslimat NU 2000–2025.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Surabaya, 19 Mei 1965"
+    },
+    {
+      "label": "Partai",
+      "value": "PKB"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Gubernur Jawa Timur",
+      "org": "",
+      "period": "2025 – kini"
+    },
+    {
+      "role": "Gubernur Jawa Timur",
+      "org": "",
+      "period": "2019 – 2024"
+    },
+    {
+      "role": "Menteri Sosial",
+      "org": "",
+      "period": "2014 – 2018"
+    },
+    {
+      "role": "Ketua Umum",
+      "org": "Muslimat NU",
+      "period": "2000 – 2025"
+    },
+    {
+      "role": "Menteri Negara Pemberdayaan Perempuan",
+      "org": "",
+      "period": "1999 – 2001"
+    },
+    {
+      "role": "Anggota DPR",
+      "org": "",
+      "period": "1992 – 1999; 2004 – 2009"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Universitas Indonesia"
+    },
+    {
+      "detail": "Universitas Airlangga"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Khofifah_Indar_Parawansa"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

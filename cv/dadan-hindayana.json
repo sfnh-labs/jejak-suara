@@ -1,0 +1,34 @@
+{
+  "bio": "Akademisi IPB dan ahli entomologi yang menjadi Kepala Badan Gizi Nasional pertama, pelaksana program Makan Bergizi Gratis, dari 2024 hingga Juni 2026. Pada 3 Juni 2026 Kejaksaan Agung menetapkannya sebagai tersangka dugaan korupsi tata kelola program MBG.",
+  "facts": [
+    {
+      "label": "Lahir",
+      "value": "Garut, 10 Juli 1967"
+    }
+  ],
+  "positions": [
+    {
+      "role": "Kepala Badan Gizi Nasional",
+      "org": "",
+      "period": "2024 – 2026"
+    }
+  ],
+  "education": [
+    {
+      "detail": "Leibniz Universität Hannover"
+    },
+    {
+      "detail": "Universitas Bonn"
+    },
+    {
+      "detail": "Institut Pertanian Bogor"
+    }
+  ],
+  "sources": [
+    {
+      "label": "Wikipedia bahasa Indonesia",
+      "url": "https://id.wikipedia.org/wiki/Dadan_Hindayana"
+    }
+  ],
+  "checkedAt": "2026-10-14"
+}

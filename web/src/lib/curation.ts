@@ -1,4 +1,4 @@
-import { query, queryOne } from "./db";
+import { lquery as query, lqueryOne as queryOne, lrun, ltx, pipelineOp, pipelineOpInBackground } from "./localDb";
 
 /**
  * Curation, one event at a time.
@@ -8,11 +8,9 @@ import { query, queryOne } from "./db";
  * who acts in a record, the people its coverage names, and which peristiwa the
  * record is part of.
  *
- * Every decision here is written to a Postgres-only column or table that no
- * sync touches, and takes effect on the site at once. The pipeline catches up
- * through scripts/apply_curation.py, which copies each decision into SQLite so
- * the next crawl attributes, links and relates figures the way the curator
- * said.
+ * Reads and writes jejak.db, the pipeline's own database (localDb.ts): a
+ * decision is in force for the next crawl the moment it is made, and reaches
+ * the public site with the next push to Neon.
  */
 
 /**
@@ -32,6 +30,50 @@ export function isVerdict(value: unknown): value is Verdict {
   return typeof value === "string" && (VERDICTS as readonly string[]).includes(value);
 }
 
+/**
+ * Why an event came down. Every takedown names one (or more); the codes are
+ * the labels jejak/curation_suggest.py learns from, so they are kept in step
+ * with REASONS there. Order is the order /kurasi lists them in.
+ */
+export const REASONS = [
+  { code: "wrong_person", label: "Salah orang", hint: "Liputan tentang orang lain, misalnya nama sama." },
+  { code: "not_their_action", label: "Bukan tindakan tokoh", hint: "Tokoh hanya disebut atau dikutip, bukan pelakunya." },
+  { code: "trivial", label: "Remeh / seremonial", hint: "Kunjungan, ucapan selamat, seremoni tanpa substansi." },
+  { code: "not_newsworthy", label: "Tak relevan untuk rekam jejak", hint: "Benar, tetapi tak berarti bagi rekam jejak tokoh ini." },
+  { code: "duplicate", label: "Duplikat", hint: "Sudah ada catatan atau peristiwa yang sama." },
+  { code: "mixed", label: "Campuran beberapa kejadian", hint: "Artikelnya tentang kejadian berbeda yang tergabung, mis. dua kebakaran di provinsi lain." },
+  { code: "hoax", label: "Hoaks / sudah dibantah", hint: "Klaimnya keliru atau sudah dibantah." },
+  { code: "garbled", label: "Judul/ringkasan rusak", hint: "Isinya ada, tetapi judul atau ringkasannya kacau." },
+  { code: "cv_material", label: "Bahan CV, bukan peristiwa", hint: "Pelantikan, jabatan baru, latar belakang: masuk ke CV tokoh. Pipeline menemukan dan memasukkannya sendiri." },
+  { code: "other", label: "Lainnya", hint: "Tulis alasannya di catatan." },
+] as const;
+
+export type ReasonCode = (typeof REASONS)[number]["code"];
+
+export function isReasonCode(value: unknown): value is ReasonCode {
+  return typeof value === "string" && REASONS.some((r) => r.code === value);
+}
+
+export function reasonLabel(code: string | null | undefined): string {
+  return REASONS.find((r) => r.code === code)?.label ?? code ?? "";
+}
+
+/** The pipeline's guess at what the curator would do; see curation_suggest.py. */
+export interface Suggestion {
+  reason: ReasonCode | null;
+  confidence: number | null;
+  support: number;
+  examples: number[];
+  auto_hide: boolean;
+}
+
+/** Why the curator ruled as they did, as recorded beside the verdict. */
+export interface Ruling {
+  reasons: ReasonCode[];
+  note: string | null;
+  suggested: string | null;
+}
+
 export type LinkVerdict = "confirmed" | "rejected";
 
 export function isLinkVerdict(value: unknown): value is LinkVerdict {
@@ -40,22 +82,32 @@ export function isLinkVerdict(value: unknown): value is LinkVerdict {
 
 export type Kind = "record" | "peristiwa";
 
-/** Which slice of the queue to show. `links` = records with unruled proposals. */
-export type Filter = "unreviewed" | "live" | "rejected" | "links";
+/**
+ * Which slice of the queue to show. `links` = records with unruled proposals;
+ * `followups` = events with an unruled follow-up proposal on either side;
+ * `suggested` = unreviewed events the suggester would take down; `auto` =
+ * events it did take down, waiting for a curator to confirm or restore.
+ */
+export type Filter = "unreviewed" | "suggested" | "auto" | "live" | "rejected" | "links" | "followups";
 
 const PUBLIC = "e.status IN ('new', 'summarized', 'approved')";
 
+const AUTO_HIDDEN = `e.curated IS NULL AND EXISTS (
+    SELECT 1 FROM curation_suggestions cs WHERE cs.event_id = e.id AND cs.auto_hide = 1)`;
+
 const FILTER_SQL: Record<Filter, string> = {
-  live: "e.curated IS DISTINCT FROM 'rejected'",
+  live: `e.curated IS NOT 'rejected' AND NOT (${AUTO_HIDDEN})`,
   rejected: "e.curated = 'rejected'",
   unreviewed: "e.curated IS NULL",
+  suggested: `e.curated IS NULL AND EXISTS (
+    SELECT 1 FROM curation_suggestions cs
+     WHERE cs.event_id = e.id AND cs.reason IS NOT NULL AND cs.auto_hide = 0)`,
+  auto: AUTO_HIDDEN,
+  followups: `EXISTS (
+    SELECT 1 FROM followup_links l
+     WHERE (l.earlier_id = e.id OR l.later_id = e.id) AND l.verdict IS NULL)`,
   links: `EXISTS (
-    SELECT 1 FROM record_links l
-     WHERE l.record_id = e.id
-       AND NOT EXISTS (SELECT 1 FROM record_link_verdicts v
-                        WHERE v.record_id = l.record_id
-                          AND v.peristiwa_id = l.peristiwa_id
-                          AND v.verdict IS NOT NULL))`,
+    SELECT 1 FROM record_links l WHERE l.record_id = e.id AND l.verdict IS NULL)`,
 };
 
 export interface QueueRow {
@@ -68,10 +120,54 @@ export interface QueueRow {
   curated: Verdict | null;
   outlet_count: number;
   article_count: number;
-  has_summary: boolean;
+  has_summary: boolean | number;
   /** Proposed peristiwa links nobody has ruled on (records only). */
   open_links: number;
   confirmed_links: number;
+  /** Takedown reasons, for a rejected row. */
+  reasons: ReasonCode[];
+  suggestion: Suggestion | null;
+}
+
+interface SuggestionColumns {
+  s_reason: ReasonCode | null;
+  s_confidence: number | null;
+  s_support: number | null;
+  s_examples: string | null;
+  s_auto_hide: number | null;
+  scored: boolean | number;
+}
+
+const SUGGESTION_SELECT = `cs.reason AS s_reason, cs.confidence AS s_confidence,
+            cs.support AS s_support, cs.examples AS s_examples,
+            cs.auto_hide AS s_auto_hide, cs.event_id IS NOT NULL AS scored`;
+
+function jsonCodes(raw: string | null | undefined): ReasonCode[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isReasonCode) : [];
+  } catch {
+    return [];
+  }
+}
+
+function suggestionOf(r: SuggestionColumns): Suggestion | null {
+  if (!r.scored || (!r.s_reason && !r.s_auto_hide)) return null;
+  let examples: number[] = [];
+  try {
+    const parsed: unknown = JSON.parse(r.s_examples ?? "[]");
+    if (Array.isArray(parsed)) examples = parsed.filter((x): x is number => typeof x === "number");
+  } catch {
+    // a malformed list only costs the "like these" links
+  }
+  return {
+    reason: isReasonCode(r.s_reason) ? r.s_reason : null,
+    confidence: r.s_confidence === null ? null : Number(r.s_confidence),
+    support: Number(r.s_support ?? 0),
+    examples,
+    auto_hide: Number(r.s_auto_hide ?? 0) === 1,
+  };
 }
 
 export const PAGE_SIZE = 50;
@@ -86,9 +182,9 @@ export async function getQueue(
   filter: Filter,
   page = 1
 ): Promise<QueueRow[]> {
-  return query<QueueRow>(
+  const rows = await query<Omit<QueueRow, "reasons" | "suggestion"> & SuggestionColumns & { reasons: string | null }>(
     `SELECT e.id AS event_id, e.kind, e.figure_id, f.name AS figure_name,
-            e.event_date, e.title, e.curated,
+            e.event_date, e.title, e.curated, cr.reasons, ${SUGGESTION_SELECT},
             COALESCE(src.outlet_count, 0)  AS outlet_count,
             COALESCE(src.article_count, 0) AS article_count,
             es.event_id IS NOT NULL        AS has_summary,
@@ -97,45 +193,41 @@ export async function getQueue(
        FROM events e
        LEFT JOIN figures f ON f.id = e.figure_id
        LEFT JOIN event_summaries es ON es.event_id = e.id
-       LEFT JOIN LATERAL (
-         SELECT count(DISTINCT a.source)::int AS outlet_count,
-                count(*)::int                 AS article_count
-           FROM articles a WHERE a.event_id = e.id
-       ) src ON TRUE
-       LEFT JOIN LATERAL (
-         SELECT count(*) FILTER (WHERE v.verdict IS NULL)::int        AS open_links,
-                count(*) FILTER (WHERE v.verdict = 'confirmed')::int  AS confirmed_links
-           FROM (SELECT record_id, peristiwa_id FROM record_links
-                  UNION
-                 SELECT record_id, peristiwa_id FROM record_link_verdicts) p
-           LEFT JOIN record_link_verdicts v
-             ON v.record_id = p.record_id AND v.peristiwa_id = p.peristiwa_id
-          WHERE (e.kind = 'record' AND p.record_id = e.id)
-             OR (e.kind = 'peristiwa' AND p.peristiwa_id = e.id)
-       ) lk ON TRUE
-      WHERE e.kind = $1 AND ${PUBLIC} AND ${FILTER_SQL[filter]}
-      ORDER BY e.event_date DESC NULLS LAST, e.id DESC
-      LIMIT $2 OFFSET $3`,
+       LEFT JOIN curation_labels cr ON cr.event_id = e.id
+       LEFT JOIN curation_suggestions cs ON cs.event_id = e.id
+       LEFT JOIN (
+         SELECT event_id, count(DISTINCT source) AS outlet_count, count(*) AS article_count
+           FROM articles WHERE event_id IS NOT NULL GROUP BY event_id
+       ) src ON src.event_id = e.id
+       LEFT JOIN (
+         SELECT CASE WHEN ?1 = 'record' THEN record_id ELSE peristiwa_id END AS event_id,
+                count(*) FILTER (WHERE verdict IS NULL)        AS open_links,
+                count(*) FILTER (WHERE verdict = 'confirmed')  AS confirmed_links
+           FROM record_links GROUP BY 1
+       ) lk ON lk.event_id = e.id
+      WHERE e.kind = ?1 AND ${PUBLIC} AND ${FILTER_SQL[filter]}
+      ORDER BY ${filter === "suggested" ? "cs.confidence DESC NULLS LAST," : ""}
+               e.event_date DESC NULLS LAST, e.id DESC
+      LIMIT ?2 OFFSET ?3`,
     [kind, PAGE_SIZE, (Math.max(page, 1) - 1) * PAGE_SIZE]
   );
+  return rows.map(({ s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored, reasons, ...r }) => ({
+    ...r,
+    has_summary: Boolean(r.has_summary),
+    reasons: jsonCodes(reasons),
+    suggestion: suggestionOf({ s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored }),
+  }));
 }
 
 export async function getQueueCounts(kind: Kind): Promise<Record<Filter, number>> {
+  const keys = Object.keys(FILTER_SQL) as Filter[];
   const row = await queryOne<Record<Filter, string>>(
-    `SELECT count(*) FILTER (WHERE ${FILTER_SQL.unreviewed}) AS unreviewed,
-            count(*) FILTER (WHERE ${FILTER_SQL.live})       AS live,
-            count(*) FILTER (WHERE ${FILTER_SQL.rejected})   AS rejected,
-            count(*) FILTER (WHERE ${FILTER_SQL.links})      AS links
+    `SELECT ${keys.map((k) => `count(*) FILTER (WHERE ${FILTER_SQL[k]}) AS ${k}`).join(",\n            ")}
        FROM events e
-      WHERE e.kind = $1 AND ${PUBLIC}`,
+      WHERE e.kind = ? AND ${PUBLIC}`,
     [kind]
   );
-  return {
-    unreviewed: Number(row?.unreviewed ?? 0),
-    live: Number(row?.live ?? 0),
-    rejected: Number(row?.rejected ?? 0),
-    links: Number(row?.links ?? 0),
-  };
+  return Object.fromEntries(keys.map((k) => [k, Number(row?.[k] ?? 0)])) as Record<Filter, number>;
 }
 
 export async function getKindCounts(): Promise<Record<Kind, number>> {
@@ -152,6 +244,10 @@ export async function getKindCounts(): Promise<Record<Kind, number>> {
 // One event
 
 export interface ItemSource {
+  /** The article's id, for opening it in the reading pane. */
+  id: string;
+  /** Whether the pipeline holds its text, so it can be read here. */
+  has_body: boolean;
   source: string;
   url: string;
   title: string | null;
@@ -193,7 +289,8 @@ export function parsePositions(raw: unknown): Position[] {
 
 /** The CV fields beside positions, as /kurasi edits them. */
 export interface Profile {
-  bio: string;
+  /** Not edited in /kurasi; null leaves the stored one as it is. */
+  bio: string | null;
   facts: { label: string; value: string }[];
   education: { year?: string; detail: string }[];
   sources: { label: string; url: string }[];
@@ -219,8 +316,6 @@ export interface FigureRef {
   profile: Profile;
   cv_checked_at: string | null;
   active: boolean;
-  /** Set while the edit waits for apply_curation.py to reach the pipeline. */
-  edit_pending: boolean;
 }
 
 /** Someone the coverage names. `articles` = how many of the event's articles. */
@@ -238,6 +333,12 @@ export interface NamedPerson {
   verdict: string | null;
   /** Peristiwa only: a related figure the curator struck. */
   struck?: boolean;
+  /** The record's own figure: who the record is about. */
+  owner?: boolean;
+  /** Figures only: the rest of the CV, so every figure edits the same way. */
+  profile?: Profile;
+  cv_checked_at?: string | null;
+  active?: boolean;
 }
 
 export interface LinkRow {
@@ -246,6 +347,17 @@ export interface LinkRow {
   title: string | null;
   event_date: string | null;
   figure_name: string | null;
+  score: number | null;
+  evidence: string[];
+  verdict: LinkVerdict | null;
+  proposed: boolean;
+}
+
+/** A follow-up pair seen from one end: the event on the other side. */
+export interface FollowupRow {
+  event_id: number;
+  title: string | null;
+  event_date: string | null;
   score: number | null;
   evidence: string[];
   verdict: LinkVerdict | null;
@@ -270,6 +382,86 @@ export interface Item {
   /** Peristiwa around the record's date that are not linked yet (records only). */
   nearby: { event_id: number; title: string | null; event_date: string | null }[];
   next_id: number | null;
+  ruling: Ruling | null;
+  suggestion: Suggestion | null;
+  /** What this event follows up, and what follows it up. */
+  followups: { earlier: FollowupRow[]; later: FollowupRow[] };
+  /** The labelled events the suggestion leans on, for "like these". */
+  examples: { event_id: number; title: string | null; reasons: ReasonCode[] }[];
+  /** NULL = the figure's own act; 'about' = coverage concerning them. */
+  framing: string | null;
+  /** Rework requests on this event, newest first. */
+  reworks: Rework[];
+  /** "Jadikan info CV" drafts from this event, newest first. */
+  cvProposals: CvProposal[];
+  /**
+   * The quote the record shows: NULL = none found yet (the pipeline keeps
+   * looking), '' = the curator chose none.
+   */
+  quote: string | null;
+  quote_url: string | null;
+  /** Every attributed quote in the coverage (event_quotes), owner's first. */
+  quotes: QuoteRow[];
+}
+
+/** One quote from an event's articles and whose words it is. */
+export interface QuoteRow {
+  id: number;
+  quote: string;
+  /** The speaker as the article writes them. */
+  speaker: string | null;
+  figure_id: string | null;
+  figure_name: string | null;
+  assigned_by: "auto" | "curator" | null;
+  url: string | null;
+  source: string | null;
+}
+
+/** CV entries drafted from an event's articles (jejak/cv_extract.py). */
+export interface CvDraft {
+  positions: Position[];
+  facts: { label: string; value: string }[];
+  education: { year?: string; detail: string }[];
+  sources: { label: string; url: string }[];
+}
+
+export interface CvProposal {
+  id: number;
+  figure_id: string;
+  /** 'auto': found and applied by the pipeline's kurasi stage (kurasi.auto_cv). */
+  origin: string;
+  note: string | null;
+  status: ReworkStatus;
+  proposal: CvDraft | null;
+  error: string | null;
+  created_at: string;
+}
+
+/** An event as a rework sees it, before and after. */
+export interface ReworkSnapshot {
+  kind: Kind;
+  figure_id: string | null;
+  framing: string | null;
+  title: string | null;
+  event_type: string | null;
+  summary_text: string | null;
+}
+
+export type ReworkStatus = "queued" | "running" | "ready" | "accepted" | "discarded" | "failed";
+
+/** A curator's request to have an event written again (scripts/kurasi_ops.py rework). */
+export interface Rework {
+  id: number;
+  note: string | null;
+  framing: "own" | "about" | null;
+  new_figure_id: string | null;
+  to_peristiwa: boolean;
+  status: ReworkStatus;
+  error: string | null;
+  before: ReworkSnapshot | null;
+  after: ReworkSnapshot | null;
+  created_at: string;
+  finished_at: string | null;
 }
 
 function parseAliases(raw: unknown): string[] {
@@ -288,6 +480,57 @@ function plain(html: string | null): string | null {
   if (!html) return null;
   const text = html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
   return text || null;
+}
+
+/** Shorter than this, a stored body is a failed fetch's leftovers (a cookie
+ *  notice, "Baca berita tanpa iklan"), not something to read. */
+const MIN_READABLE = 200;
+
+export interface ReadingArticle {
+  id: string;
+  source: string;
+  url: string;
+  title: string | null;
+  published_at: string | null;
+  lead: string | null;
+  /** Paragraphs, in Indonesian (a translation when `lang` says otherwise). */
+  paragraphs: string[];
+  /** The language the article was published in, when it was not Indonesian. */
+  lang: string | null;
+  /** The stored text stops at a paywall ("Arsip premium…"). */
+  truncated: boolean;
+}
+
+/** How an outlet's paywall ends the text the fetcher was given. */
+const PAYWALL = /Arsip premium dapat diakses|Gabung Premium KOMPAS\.com PLUS|Baca selengkapnya di aplikasi/i;
+
+/**
+ * One of the event's articles, as the curation page's reading pane shows it:
+ * the text the pipeline fetched, so the curator need not leave the page — most
+ * news sites refuse to be framed.
+ *
+ * Only an article of this event: the id comes from the URL.
+ */
+export async function getReading(eventId: number, articleId: string): Promise<ReadingArticle | null> {
+  const row = await queryOne<{
+    id: string; source: string; url: string; title: string | null;
+    published_at: string | null; summary: string | null; body: string | null; body_lang: string | null;
+  }>(
+    `SELECT id, source, url, title, published_at, summary, body, body_lang
+       FROM articles WHERE id = ? AND event_id = ?`,
+    [articleId, eventId]
+  );
+  if (!row) return null;
+  const body = row.body?.trim() ?? "";
+  const paragraphs = body.length >= MIN_READABLE
+    ? body.split(/\n+/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean)
+    : [];
+  return {
+    id: row.id, source: row.source, url: row.url, title: row.title,
+    published_at: row.published_at, lead: plain(row.summary), paragraphs,
+    lang: row.body_lang && row.body_lang !== "id" ? row.body_lang : null,
+    truncated: PAYWALL.test(body),
+  };
 }
 
 function escapeRegExp(s: string): string {
@@ -327,14 +570,35 @@ async function namedPeople(
   eventId: number
 ): Promise<NamedPerson[]> {
   const [figures, candidates] = await Promise.all([
-    query<{ id: string; name: string; role: string | null; aliases: string | null; positions: string | null }>(
-      `SELECT id, name, role, aliases, positions FROM figures WHERE active`
+    query<{
+      id: string; name: string; role: string | null; aliases: string | null; positions: string | null;
+      bio: string | null; facts: string | null; education: string | null; sources: string | null;
+      cv_checked_at: string | null;
+    }>(
+      `SELECT id, name, role, aliases, positions, bio, facts, education, sources, cv_checked_at
+         FROM figures WHERE active`
     ),
+    // The queue's names (3+ outlets), and any name mined from this event's
+    // own articles however few outlets used it: here the curator is reading
+    // the evidence, so one article is enough to ask. Decided names are
+    // carried out at once (kurasi_ops.py), so an applied verdict is settled.
     query<{ slug: string; name: string; role: string | null; verdict: string | null; full_name: string | null; records: string | null }>(
       `SELECT slug, name, COALESCE(curated_role, role) AS role, verdict, full_name, records
-         FROM figure_candidates
+         FROM candidate_review
         WHERE slug NOT IN (SELECT id FROM figures)
-          AND (verdict IS NULL OR applied_at IS NULL)`
+          AND (verdict IS NULL OR applied_at IS NULL)
+       UNION
+       SELECT c.slug, c.name,
+              (SELECT m2.role FROM figure_mentions m2
+                WHERE m2.slug = c.slug AND m2.role <> '' LIMIT 1),
+              NULL, NULL, json_array(json_object('id', ?1))
+         FROM figure_candidates c
+        WHERE c.status = 'candidate'
+          AND c.slug NOT IN (SELECT id FROM figures)
+          AND c.slug NOT IN (SELECT slug FROM candidate_review)
+          AND EXISTS (SELECT 1 FROM figure_mentions m JOIN articles a ON a.id = m.article_id
+                       WHERE m.slug = c.slug AND a.event_id = ?1)`,
+      [eventId]
     ),
   ]);
 
@@ -363,6 +627,10 @@ async function namedPeople(
       aliases: parseAliases(f.aliases), positions: parsePositions(f.positions),
       articles: n, verdict: null,
       struck: relatedIds.get(f.id),
+      profile: {
+        bio: f.bio ?? "", facts: jsonList(f.facts), education: jsonList(f.education), sources: jsonList(f.sources),
+      },
+      cv_checked_at: f.cv_checked_at, active: true,
     });
   }
   for (const c of candidates) {
@@ -380,50 +648,86 @@ async function namedPeople(
   return out.sort((a, b) => b.articles - a.articles || a.name.localeCompare(b.name));
 }
 
+async function getFollowups(eventId: number): Promise<{ earlier: FollowupRow[]; later: FollowupRow[] }> {
+  const rows = await query<Omit<FollowupRow, "proposed"> & { evidence: string | null; side: "earlier" | "later"; proposed: number }>(
+    `SELECT CASE WHEN l.later_id = ?1 THEN 'earlier' ELSE 'later' END AS side,
+            o.id AS event_id, o.title, o.event_date,
+            l.score, l.evidence, l.verdict, l.origin IS NOT 'curator' AS proposed
+       FROM followup_links l
+       JOIN events o ON o.id = CASE WHEN l.later_id = ?1 THEN l.earlier_id ELSE l.later_id END
+      WHERE l.earlier_id = ?1 OR l.later_id = ?1
+      ORDER BY (l.verdict = 'confirmed') DESC NULLS LAST,
+               (l.verdict = 'rejected') ASC NULLS FIRST,
+               l.score DESC NULLS LAST`,
+    [eventId]
+  );
+  const out = { earlier: [] as FollowupRow[], later: [] as FollowupRow[] };
+  for (const { side, ...r } of rows) {
+    out[side].push({ ...r, proposed: Boolean(r.proposed), evidence: parseAliases(r.evidence) });
+  }
+  return out;
+}
+
 async function getLinks(kind: Kind, eventId: number): Promise<LinkRow[]> {
   // The same pairs seen from either end: a record page lists peristiwa, a
   // peristiwa page lists records.
   const [self, other] = kind === "record"
     ? ["record_id", "peristiwa_id"]
     : ["peristiwa_id", "record_id"];
-  const rows = await query<LinkRow & { evidence: string | null }>(
-    `SELECT p.${other} AS event_id, o.title, o.event_date,
+  const rows = await query<Omit<LinkRow, "proposed"> & { evidence: string | null; proposed: number }>(
+    `SELECT l.${other} AS event_id, o.title, o.event_date,
             f.name AS figure_name,
-            l.score, l.evidence, v.verdict,
-            l.record_id IS NOT NULL AS proposed
-       FROM (SELECT record_id, peristiwa_id FROM record_links WHERE ${self} = $1
-              UNION
-             SELECT record_id, peristiwa_id FROM record_link_verdicts WHERE ${self} = $1) p
-       JOIN events o ON o.id = p.${other}
+            l.score, l.evidence, l.verdict,
+            l.origin IS NOT 'curator' AS proposed
+       FROM record_links l
+       JOIN events o ON o.id = l.${other}
        LEFT JOIN figures f ON f.id = o.figure_id
-       LEFT JOIN record_links l
-         ON l.record_id = p.record_id AND l.peristiwa_id = p.peristiwa_id
-       LEFT JOIN record_link_verdicts v
-         ON v.record_id = p.record_id AND v.peristiwa_id = p.peristiwa_id
-      ORDER BY (v.verdict = 'confirmed') DESC NULLS LAST,
-               (v.verdict = 'rejected') ASC NULLS FIRST,
+      WHERE l.${self} = ?
+      ORDER BY (l.verdict = 'confirmed') DESC NULLS LAST,
+               (l.verdict = 'rejected') ASC NULLS FIRST,
                l.score DESC NULLS LAST`,
     [eventId]
   );
-  return rows.map((r) => ({ ...r, evidence: parseAliases(r.evidence) }));
+  return rows.map((r) => ({ ...r, proposed: Boolean(r.proposed), evidence: parseAliases(r.evidence) }));
 }
 
 export async function getItem(eventId: number): Promise<Item | null> {
-  const ev = await queryOne<Omit<Item, "sources" | "owner" | "named" | "links" | "nearby" | "next_id">>(
+  const row = await queryOne<
+    Omit<Item, "sources" | "owner" | "named" | "links" | "nearby" | "next_id" | "ruling" | "suggestion" | "examples" | "reworks" | "cvProposals" | "quotes">
+    & SuggestionColumns
+    & { r_reasons: string | null; r_note: string | null; r_suggested: string | null }
+  >(
     `SELECT e.id AS event_id, e.kind, e.figure_id, e.event_date, e.last_seen,
-            e.title, e.event_type, e.status, e.curated,
-            es.summary_text AS summary
+            e.title, e.event_type, e.status, e.curated, e.framing, e.quote, e.quote_url,
+            es.summary_text AS summary,
+            cr.reasons AS r_reasons, cr.note AS r_note, cr.suggested AS r_suggested,
+            ${SUGGESTION_SELECT}
        FROM events e
        LEFT JOIN event_summaries es ON es.event_id = e.id
-      WHERE e.id = $1`,
+       LEFT JOIN curation_labels cr ON cr.event_id = e.id
+       LEFT JOIN curation_suggestions cs ON cs.event_id = e.id
+      WHERE e.id = ?`,
     [eventId]
   );
-  if (!ev) return null;
+  if (!row) return null;
+  const { s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored, r_reasons, r_note, r_suggested, ...ev } = row;
+  const suggestion = suggestionOf({ s_reason, s_confidence, s_support, s_examples, s_auto_hide, scored });
+  const ruling: Ruling | null = r_reasons === null && r_note === null
+    ? null
+    : { reasons: jsonCodes(r_reasons), note: r_note, suggested: r_suggested };
+  const examples = suggestion?.examples.length
+    ? await query<{ event_id: number; title: string | null; reasons: string | null }>(
+        `SELECT cr.event_id, COALESCE(e.title, cr.title) AS title, cr.reasons
+           FROM curation_labels cr LEFT JOIN events e ON e.id = cr.event_id
+          WHERE cr.event_id IN (SELECT value FROM json_each(?))`,
+        [suggestion.examples.slice(0, 5)]
+      )
+    : [];
 
-  const [articles, owner, related, links, next] = await Promise.all([
-    query<ItemSource & { body: string | null }>(
-      `SELECT source, url, title, published_at, summary AS lead, body
-         FROM articles WHERE event_id = $1
+  const [articles, owner, related, links, next, followups, reworks, cvProposals, quotes] = await Promise.all([
+    query<Omit<ItemSource, "has_body"> & { body: string | null }>(
+      `SELECT id, source, url, title, published_at, summary AS lead, body
+         FROM articles WHERE event_id = ?
         ORDER BY published_at NULLS FIRST, id`,
       [eventId]
     ),
@@ -431,35 +735,38 @@ export async function getItem(eventId: number): Promise<Item | null> {
       ? queryOne<{
           id: string; name: string; role: string | null; aliases: string | null; positions: string | null;
           bio: string | null; facts: string | null; education: string | null; sources: string | null;
-          cv_checked_at: string | null; active: boolean; edit_pending: boolean;
+          cv_checked_at: string | null; active: number;
         }>(
           `SELECT f.id, f.name, f.role, f.aliases, f.positions, f.bio, f.facts, f.education,
-                  f.sources, f.cv_checked_at, f.active,
-                  (fe.figure_id IS NOT NULL AND fe.applied_at IS NULL) AS edit_pending
+                  f.sources, f.cv_checked_at, f.active
              FROM figures f
-             LEFT JOIN figure_edits fe ON fe.figure_id = f.id
-            WHERE f.id = $1`,
+            WHERE f.id = ?`,
           [ev.figure_id]
         )
       : Promise.resolve(null),
     ev.kind === "peristiwa"
-      ? query<{ figure_id: string; struck: boolean }>(
-          `SELECT figure_id, false AS struck FROM event_figures WHERE event_id = $1
+      // A row in event_figure_rejections is a strike; the pipeline also
+      // dropped the event_figures row when it was made.
+      ? query<{ figure_id: string; struck: number }>(
+          `SELECT figure_id, 0 AS struck FROM event_figures WHERE event_id = ?1
             UNION
-           SELECT figure_id, true FROM event_figure_rejections
-            WHERE event_id = $1 AND struck`,
+           SELECT figure_id, 1 FROM event_figure_rejections WHERE event_id = ?1`,
           [eventId]
-        )
+        ).then((rows) => rows.map((r) => ({ figure_id: r.figure_id, struck: Boolean(r.struck) })))
       : Promise.resolve([]),
     getLinks(ev.kind, eventId),
     queryOne<{ id: number }>(
       `SELECT e.id FROM events e
-        WHERE e.kind = $1 AND ${PUBLIC} AND e.curated IS NULL AND e.id <> $2
-          AND (COALESCE(e.event_date, ''), e.id) < (COALESCE($3, ''), $2)
+        WHERE e.kind = ?1 AND ${PUBLIC} AND e.curated IS NULL AND e.id <> ?2
+          AND (COALESCE(e.event_date, ''), e.id) < (COALESCE(?3, ''), ?2)
         ORDER BY COALESCE(e.event_date, '') DESC, e.id DESC
         LIMIT 1`,
       [ev.kind, eventId, ev.event_date]
     ),
+    getFollowups(eventId),
+    getReworks(eventId),
+    getCvProposals(eventId),
+    getQuotes(eventId, ev.figure_id),
   ]);
 
   // A struck figure wins over the still-present event_figures row.
@@ -484,24 +791,43 @@ export async function getItem(eventId: number): Promise<Item | null> {
         `SELECT e.id AS event_id, e.title, e.event_date
            FROM events e
           WHERE e.kind = 'peristiwa' AND ${PUBLIC}
-            AND e.curated IS DISTINCT FROM 'rejected'
-            AND e.event_date::timestamptz
-                BETWEEN $1::timestamptz - interval '7 days'
-                    AND $1::timestamptz + interval '7 days'
-            AND e.id <> ALL($2::int[])
-          ORDER BY abs(extract(epoch FROM e.event_date::timestamptz - $1::timestamptz))
+            AND e.curated IS NOT 'rejected'
+            AND abs(julianday(e.event_date) - julianday(?1)) <= 7
+            AND e.id NOT IN (SELECT value FROM json_each(?2))
+          ORDER BY abs(julianday(e.event_date) - julianday(?1))
           LIMIT 40`,
         [ev.event_date ?? new Date().toISOString(), links.map((l) => l.event_id)]
       )
     : [];
 
+  // The record's figure heads the list: one place for every person in the
+  // coverage, the owner marked rather than kept apart.
+  if (owner) {
+    const terms = [owner.name, ...parseAliases(owner.aliases)].filter((t) => t.trim().length > 2);
+    named.unshift({
+      kind: "figure", id: owner.id, name: owner.name, role: owner.role,
+      aliases: parseAliases(owner.aliases), positions: parsePositions(owner.positions),
+      articles: texts.filter((t) => terms.some((x) => wordPattern(x, "i").test(t))).length,
+      verdict: null, owner: true,
+      profile: {
+        bio: owner.bio ?? "", facts: jsonList(owner.facts),
+        education: jsonList(owner.education), sources: jsonList(owner.sources),
+      },
+      cv_checked_at: owner.cv_checked_at, active: Boolean(owner.active),
+    });
+  }
+
   return {
     ...ev,
-    sources: articles.map(({ body, ...a }) => ({ ...a, lead: plain(a.lead) || plain(body)?.slice(0, 280) || null })),
+    sources: articles.map(({ body, ...a }) => ({
+      ...a,
+      lead: plain(a.lead) || plain(body)?.slice(0, 280) || null,
+      has_body: (body?.trim().length ?? 0) >= MIN_READABLE,
+    })),
     owner: owner
       ? {
-          id: owner.id, name: owner.name, role: owner.role, active: owner.active,
-          edit_pending: owner.edit_pending, cv_checked_at: owner.cv_checked_at,
+          id: owner.id, name: owner.name, role: owner.role, active: Boolean(owner.active),
+          cv_checked_at: owner.cv_checked_at,
           aliases: parseAliases(owner.aliases),
           positions: parsePositions(owner.positions),
           profile: {
@@ -516,21 +842,259 @@ export async function getItem(eventId: number): Promise<Item | null> {
     links,
     nearby,
     next_id: next?.id ?? null,
+    ruling,
+    suggestion,
+    followups,
+    examples: examples.map((x) => ({ ...x, reasons: jsonCodes(x.reasons) })),
+    reworks,
+    cvProposals,
+    quotes,
   };
+}
+
+async function getQuotes(eventId: number, ownerId: string | null): Promise<QuoteRow[]> {
+  // The owner's words first, then other figures', then the unplaced.
+  return query<QuoteRow>(
+    `SELECT q.id, q.quote, q.speaker, q.figure_id, f.name AS figure_name, q.assigned_by, q.url,
+            a.source
+       FROM event_quotes q
+       LEFT JOIN figures f ON f.id = q.figure_id
+       LEFT JOIN articles a ON a.id = q.article_id
+      WHERE q.event_id = ?1
+      ORDER BY q.figure_id IS ?2 DESC, q.figure_id IS NULL, f.name, length(q.quote) DESC`,
+    [eventId, ownerId]
+  );
+}
+
+/**
+ * Whose words a quote is: a figure, or nobody tracked (null). The curator's
+ * say is kept: collection never reassigns a listed quote. When the quote the
+ * record shows is taken off its owner, the record shows the owner's longest
+ * other quote instead, or none.
+ */
+export async function assignQuote(quoteId: number, figureId: string | null): Promise<number> {
+  const q = await queryOne<{ event_id: number; quote: string }>(
+    `SELECT event_id, quote FROM event_quotes WHERE id = ?`, [quoteId]
+  );
+  if (!q) throw new Error(`unknown quote: ${quoteId}`);
+  if (figureId) {
+    const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ?`, [figureId]);
+    if (!fig) throw new Error(`unknown figure: ${figureId}`);
+  }
+  await ltx(async () => {
+    await lrun(`UPDATE event_quotes SET figure_id = ?, assigned_by = 'curator' WHERE id = ?`, [figureId, quoteId]);
+    const ev = await queryOne<{ figure_id: string | null; quote: string | null }>(
+      `SELECT figure_id, quote FROM events WHERE id = ?`, [q.event_id]
+    );
+    if (ev && ev.quote === q.quote && ev.figure_id !== figureId) {
+      const next = await queryOne<{ quote: string; url: string | null }>(
+        `SELECT quote, url FROM event_quotes WHERE event_id = ? AND figure_id = ? AND id <> ?
+          ORDER BY length(quote) DESC LIMIT 1`,
+        [q.event_id, ev.figure_id, quoteId]
+      );
+      await lrun(`UPDATE events SET quote = ?, quote_url = ? WHERE id = ?`,
+                 [next?.quote ?? "", next?.url ?? null, q.event_id]);
+    }
+  });
+  return q.event_id;
+}
+
+/**
+ * A quote the curator adds by hand: words the extractor missed or cut short.
+ * It is the curator's say (collection never reassigns it); an existing quote
+ * with the same words takes the new speaker instead. `show` also makes it the
+ * quote the record shows, when it is the owner's words.
+ */
+export async function addQuote(
+  eventId: number,
+  q: { quote: string; speaker: string | null; figureId: string | null; url: string | null; show: boolean }
+): Promise<void> {
+  const words = q.quote.replace(/^["“”'‘’\s]+|["“”'‘’\s]+$/g, "").replace(/\s+/g, " ");
+  if (!words) throw new Error("quote is empty");
+  const ev = await queryOne<{ figure_id: string | null }>(`SELECT figure_id FROM events WHERE id = ?`, [eventId]);
+  if (!ev) throw new Error(`unknown event: ${eventId}`);
+  if (q.figureId) {
+    const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ?`, [q.figureId]);
+    if (!fig) throw new Error(`unknown figure: ${q.figureId}`);
+  }
+  // The source must be one of the event's own articles.
+  const art = q.url
+    ? await queryOne<{ id: string; url: string }>(
+        `SELECT id, url FROM articles WHERE event_id = ? AND url = ?`, [eventId, q.url])
+    : null;
+  if (q.url && !art) throw new Error("source is not one of this event's articles");
+  await ltx(async () => {
+    await lrun(
+      `INSERT INTO event_quotes (event_id, article_id, url, quote, speaker, figure_id, assigned_by, found_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'curator', ?)
+       ON CONFLICT (event_id, quote) DO UPDATE SET
+         speaker = COALESCE(excluded.speaker, event_quotes.speaker),
+         figure_id = excluded.figure_id, assigned_by = 'curator',
+         article_id = COALESCE(excluded.article_id, event_quotes.article_id),
+         url = COALESCE(excluded.url, event_quotes.url)`,
+      [eventId, art?.id ?? null, art?.url ?? null, words, q.speaker, q.figureId, new Date().toISOString()]
+    );
+    if (q.show && q.figureId && q.figureId === ev.figure_id) {
+      await lrun(`UPDATE events SET quote = ?, quote_url = ? WHERE id = ?`, [words, art?.url ?? null, eventId]);
+    }
+  });
+}
+
+/**
+ * The quote a record shows: one of its owner's (quoteId), none (null: the
+ * pipeline will not refill it), or back to the pipeline's own pick ("auto").
+ */
+export async function showQuote(eventId: number, quoteId: number | null | "auto"): Promise<void> {
+  if (quoteId === "auto") {
+    await lrun(`UPDATE events SET quote = NULL, quote_url = NULL WHERE id = ?`, [eventId]);
+    return;
+  }
+  if (quoteId === null) {
+    await lrun(`UPDATE events SET quote = '', quote_url = NULL WHERE id = ?`, [eventId]);
+    return;
+  }
+  const q = await queryOne<{ quote: string; url: string | null }>(
+    `SELECT q.quote, q.url FROM event_quotes q JOIN events e ON e.id = q.event_id
+      WHERE q.id = ? AND q.event_id = ? AND q.figure_id = e.figure_id`,
+    [quoteId, eventId]
+  );
+  if (!q) throw new Error("only the record's own figure's words can be shown");
+  await lrun(`UPDATE events SET quote = ?, quote_url = ? WHERE id = ?`, [q.quote, q.url, eventId]);
+}
+
+async function getCvProposals(eventId: number): Promise<CvProposal[]> {
+  const rows = await query<Omit<CvProposal, "proposal"> & { proposal: string | null }>(
+    // What went onto the CV where something did, else what was drafted.
+    `SELECT id, figure_id, origin, note, status, coalesce(accepted, proposal) AS proposal, error, created_at
+       FROM cv_proposals WHERE event_id = ? ORDER BY id DESC LIMIT 5`,
+    [eventId]
+  );
+  return rows.map((r) => {
+    let proposal: CvDraft | null = null;
+    try {
+      proposal = r.proposal ? (JSON.parse(r.proposal) as CvDraft) : null;
+    } catch {
+      proposal = null;
+    }
+    return { ...r, proposal };
+  });
+}
+
+async function getReworks(eventId: number): Promise<Rework[]> {
+  const rows = await query<Omit<Rework, "before" | "after" | "to_peristiwa"> & {
+    before: string | null; after: string | null; to_peristiwa: number;
+  }>(
+    `SELECT id, note, framing, new_figure_id, to_peristiwa, status, error, before, after,
+            created_at, finished_at
+       FROM rework_requests WHERE event_id = ? ORDER BY id DESC LIMIT 10`,
+    [eventId]
+  );
+  const snap = (raw: string | null): ReworkSnapshot | null => {
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as ReworkSnapshot;
+    } catch {
+      return null;
+    }
+  };
+  return rows.map((r) => ({ ...r, to_peristiwa: Boolean(r.to_peristiwa), before: snap(r.before), after: snap(r.after) }));
+}
+
+/**
+ * Ask for an event to be written again: with the curator's note correcting
+ * the current draft, framed as about the figure rather than by them, given to
+ * another figure, or made a peristiwa — any combination. The local model
+ * drafts it in the background; nothing changes until the draft is accepted.
+ */
+export async function requestRework(
+  eventId: number,
+  opts: { note: string | null; framing: "own" | "about" | null; newFigureId: string | null; toPeristiwa: boolean }
+): Promise<void> {
+  if (!opts.note && !opts.framing && !opts.newFigureId && !opts.toPeristiwa) {
+    throw new Error("a rework needs a note or a change to ask for");
+  }
+  const busy = await queryOne(
+    // One at a time per event; a run that died (a closed laptop) stops
+    // blocking after a quarter of an hour.
+    `SELECT 1 FROM rework_requests
+      WHERE event_id = ? AND status IN ('queued', 'running')
+        AND created_at > ?`, [eventId, new Date(Date.now() - 15 * 60_000).toISOString()]
+  );
+  if (busy) throw new Error("a rework of this event is already running");
+  await lrun(
+    `INSERT INTO rework_requests (event_id, note, framing, new_figure_id, to_peristiwa, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [eventId, opts.note, opts.framing, opts.newFigureId, opts.toPeristiwa, new Date().toISOString()]
+  );
+  const row = await queryOne<{ id: number }>(`SELECT max(id) AS id FROM rework_requests WHERE event_id = ?`, [eventId]);
+  pipelineOpInBackground("rework", String(row!.id));
+}
+
+/** Make a ready draft the event's entry. */
+export async function acceptRework(requestId: number): Promise<void> {
+  await pipelineOp("rework-accept", String(requestId));
+}
+
+/** Throw a ready draft away; the event stays as it was. */
+export async function discardRework(requestId: number): Promise<void> {
+  await lrun(
+    `UPDATE rework_requests SET status = 'discarded', decided_at = ? WHERE id = ? AND status IN ('ready', 'failed')`,
+    [new Date().toISOString(), requestId]
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Writes
 
-/** Record a verdict. `null` clears it, putting the event back in `unreviewed`. */
-export async function setCuration(eventId: number, verdict: Verdict | null): Promise<void> {
-  await query(`UPDATE events SET curated = $1 WHERE id = $2`, [verdict, eventId]);
+/**
+ * Record a verdict and why. `null` clears it, putting the event back in
+ * `unreviewed` and dropping its label.
+ *
+ * The label snapshots the event as the curator saw it, so it still means
+ * something after the pipeline re-clusters or drops the event; it is what
+ * jejak/curation_suggest.py learns from. Written together with the verdict,
+ * so the two never disagree.
+ */
+export async function setCuration(
+  eventId: number,
+  verdict: Verdict | null,
+  reasons: ReasonCode[] = [],
+  note: string | null = null,
+  suggested: string | null = null
+): Promise<void> {
+  await ltx(async () => {
+    await lrun(`UPDATE events SET curated = ? WHERE id = ?`, [verdict, eventId]);
+    if (verdict === null) {
+      await lrun(`DELETE FROM curation_labels WHERE event_id = ?`, [eventId]);
+      return;
+    }
+    await lrun(
+      `INSERT INTO curation_labels
+              (event_id, verdict, reasons, note, kind, figure_id, title, summary,
+               outlets, suggested, decided_at)
+       SELECT e.id, ?2, ?3, ?4, e.kind, e.figure_id, e.title, es.summary_text,
+              (SELECT count(DISTINCT a.source) FROM articles a WHERE a.event_id = e.id),
+              ?5, ?6
+         FROM events e
+         LEFT JOIN event_summaries es ON es.event_id = e.id
+        WHERE e.id = ?1
+       ON CONFLICT (event_id) DO UPDATE
+         SET verdict = excluded.verdict, reasons = excluded.reasons,
+             note = excluded.note, title = excluded.title,
+             summary = excluded.summary, outlets = excluded.outlets,
+             suggested = COALESCE(excluded.suggested, curation_labels.suggested),
+             decided_at = excluded.decided_at`,
+      [eventId, verdict, JSON.stringify(reasons), note, suggested, new Date().toISOString()]
+    );
+  });
 }
 
 /**
- * Rule on a record → peristiwa pair. `null` withdraws the ruling: the row
- * stays, verdict-less, until apply_curation.py has cleared it in the pipeline
- * too, or a rejected pair would never be proposed again.
+ * Rule on a record → peristiwa pair, or (`null`) withdraw the ruling.
+ *
+ * The verdict sits on the link row itself. A pair the pipeline never proposed
+ * is the curator's own (`origin = 'curator'`) and goes when withdrawn; a
+ * rejected proposal stays, so link.py never proposes it again.
  */
 export async function setLinkVerdict(
   recordId: number,
@@ -538,32 +1102,188 @@ export async function setLinkVerdict(
   verdict: LinkVerdict | null
 ): Promise<void> {
   const kinds = await query<{ id: number; kind: string }>(
-    `SELECT id, kind FROM events WHERE id = ANY($1::int[])`,
-    [[recordId, peristiwaId]]
+    `SELECT id, kind FROM events WHERE id IN (?, ?)`,
+    [recordId, peristiwaId]
   );
   const kindOf = new Map(kinds.map((k) => [k.id, k.kind]));
   if (kindOf.get(recordId) !== "record" || kindOf.get(peristiwaId) !== "peristiwa") {
     throw new Error("a link joins a record to a peristiwa");
   }
-  await query(
-    `INSERT INTO record_link_verdicts (record_id, peristiwa_id, verdict, decided_at)
-     VALUES ($1, $2, $3, now()::text)
-     ON CONFLICT (record_id, peristiwa_id) DO UPDATE
-       SET verdict = EXCLUDED.verdict, decided_at = EXCLUDED.decided_at,
-           applied_at = NULL`,
-    [recordId, peristiwaId, verdict]
+  await setPairVerdict("record_links", "record_id", "peristiwa_id", recordId, peristiwaId, verdict);
+}
+
+/** The shared write behind record links and follow-ups. */
+async function setPairVerdict(
+  table: "record_links" | "followup_links",
+  a: string,
+  b: string,
+  aId: number,
+  bId: number,
+  verdict: LinkVerdict | null
+): Promise<void> {
+  await ltx(async () => {
+    if (verdict === null) {
+      await lrun(`UPDATE ${table} SET verdict = NULL WHERE ${a} = ? AND ${b} = ?`, [aId, bId]);
+      await lrun(`DELETE FROM ${table} WHERE ${a} = ? AND ${b} = ? AND origin = 'curator'`, [aId, bId]);
+      return;
+    }
+    await lrun(
+      `INSERT INTO ${table} (${a}, ${b}, origin, verdict, created_at)
+       VALUES (?, ?, 'curator', ?, ?)
+       ON CONFLICT (${a}, ${b}) DO UPDATE SET verdict = excluded.verdict`,
+      [aId, bId, verdict, new Date().toISOString()]
+    );
+  });
+}
+
+/** An event the curator might chain to the one open, before or after it. */
+export interface FollowupCandidate {
+  event_id: number;
+  title: string | null;
+  event_date: string | null;
+  /** Whether it happened before the open event, by date. */
+  before: boolean;
+  /** Distinctive words both share; why it is suggested. */
+  shared: string[];
+}
+
+const STOP = new Set(`yang dengan untuk dari dalam akan pada tidak juga atau sudah karena bahwa oleh
+saat setelah masih para lebih belum hingga agar bisa harus jadi menjadi terkait soal usai jelang
+antara sebut minta tegaskan ungkap kata menyatakan menolak menyampaikan mengatakan meminta
+tentang terhadap kepada sebagai bersama secara akibat berbagai beberapa daerah indonesia
+presiden menteri pemerintah warga tahun hari baru kembali sumber lalu memiliki tersebut atas
+sekitar satu dua tiga menurut mungkin waktu butuh membutuhkan berhasil peristiwa sejumlah
+banyak telah dapat adalah ialah merupakan dilakukan melakukan memberikan diberikan pihak
+kegiatan upaya rencana`.split(/\s+/));
+
+function words(text: string | null | undefined): Set<string> {
+  return new Set(
+    (text ?? "")
+      // "[Sumber 2]" citation markers in summaries.
+      .replace(/\[sumber[^\]]*\]/gi, " ")
+      .toLowerCase().normalize("NFKD").replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/).filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w))
   );
 }
 
 /**
- * Correct a tracked figure.
+ * Events the curator might chain to this one, so a follow-up is picked from
+ * a list instead of typed in by number.
  *
- * Written to `figures` as well, so the site shows it now; `figure_edits` is
- * what survives the next push (sync_figures lays it back over the pipeline's
- * row) and what apply_curation.py hands to the pipeline.
+ * Same kind, and for a record the same figure: a figure's story is told on
+ * their page. Without a search, the ones within FOLLOWUP_WINDOW_DAYS that
+ * share the most distinctive title-and-summary words (a word scores by how
+ * rare it is among the candidates, so "kebakaran" counts for less than
+ * "garibaldi"); with one, any whose title contains it.
+ * Pairs already proposed or ruled on are left out — they are listed above.
+ */
+const FOLLOWUP_WINDOW_DAYS = 60;
+
+export async function getFollowupCandidates(item: Item, search = ""): Promise<FollowupCandidate[]> {
+  const exclude = [item.event_id, ...item.followups.earlier.map((f) => f.event_id), ...item.followups.later.map((f) => f.event_id)];
+  const q = search.trim();
+  const rows = await query<{ event_id: number; title: string | null; event_date: string | null; summary: string | null }>(
+    `SELECT e.id AS event_id, e.title, e.event_date, es.summary_text AS summary
+       FROM events e
+       LEFT JOIN event_summaries es ON es.event_id = e.id
+      WHERE e.kind = ?1 AND ${PUBLIC} AND e.curated IS NOT 'rejected'
+        AND e.id NOT IN (SELECT value FROM json_each(?2))
+        AND (?3 IS NULL OR e.figure_id = ?3)
+        AND CASE WHEN ?5 <> '' THEN e.title LIKE '%' || ?5 || '%' ESCAPE '\\'
+                 ELSE e.event_date IS NOT NULL AND ?4 IS NOT NULL
+                      AND abs(julianday(e.event_date) - julianday(?4)) <= ${FOLLOWUP_WINDOW_DAYS}
+            END
+      ORDER BY e.event_date DESC NULLS LAST
+      LIMIT ${q ? 20 : 1500}`,
+    [item.kind, exclude, item.kind === "record" ? item.figure_id : null, item.event_date, q.replace(/[%_\\]/g, "\\$&")]
+  );
+  // A record's own figure is in every one of their records; it says nothing.
+  const own = new Set(
+    item.owner ? [...words(item.owner.name), ...item.owner.aliases.flatMap((a) => [...words(a)])] : []
+  );
+  const mine = new Set([...words(`${item.title ?? ""} ${item.summary ?? ""}`)].filter((w) => !own.has(w)));
+  const myTitle = words(item.title);
+  const docs = rows.map((r) => ({ r, w: words(`${r.title ?? ""} ${r.summary ?? ""}`), t: words(r.title) }));
+  const df = new Map<string, number>();
+  for (const { w } of docs) for (const t of w) if (mine.has(t)) df.set(t, (df.get(t) ?? 0) + 1);
+  // Shared by more than one candidate in ten, a word is the beat, not the story.
+  const common = Math.max(3, docs.length / 10);
+  const at = item.event_date ?? "";
+  const scored = docs.map(({ r, w, t }) => {
+    const shared = [...w]
+      .filter((x) => mine.has(x) && (df.get(x) ?? 0) <= common)
+      .sort((a, b) => (df.get(a) ?? 0) - (df.get(b) ?? 0));
+    // What a headline says is the story; a word in a title on either side counts triple.
+    const inTitle = shared.filter((x) => myTitle.has(x) || t.has(x));
+    const score = shared.reduce((n, x) => n + (inTitle.includes(x) ? 3 : 1) / (df.get(x) ?? 1), 0);
+    return {
+      score,
+      cand: {
+        event_id: r.event_id, title: r.title, event_date: r.event_date,
+        before: (r.event_date ?? "") < at || ((r.event_date ?? "") === at && r.event_id < item.event_id),
+        shared: shared.slice(0, 5),
+      },
+      inTitle: inTitle.length,
+    };
+  });
+  if (q) return scored.map((x) => x.cand).slice(0, 10);
+  return scored
+    .filter((x) => x.cand.shared.length >= 2 && x.inTitle >= 1)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((x) => x.cand);
+}
+
+/**
+ * Chain two events as a confirmed follow-up, whichever way round they were
+ * given: the earlier by date is the one followed up. Equal dates fall back to
+ * the lower id, which is the one clustered first.
+ */
+export async function confirmFollowupBetween(a: number, b: number): Promise<void> {
+  const rows = await query<{ id: number; event_date: string | null }>(
+    `SELECT id, event_date FROM events WHERE id IN (?, ?)`,
+    [a, b]
+  );
+  const ea = rows.find((r) => r.id === a);
+  const eb = rows.find((r) => r.id === b);
+  if (!ea || !eb) throw new Error("unknown event");
+  const aFirst = (ea.event_date ?? "") < (eb.event_date ?? "")
+    || ((ea.event_date ?? "") === (eb.event_date ?? "") && a < b);
+  await setFollowupVerdict(aFirst ? a : b, aFirst ? b : a, "confirmed");
+}
+
+/**
+ * Rule on a follow-up pair, or (`null`) withdraw the ruling, as for record
+ * links. Both events must be the same kind, and a record's follow-up must be
+ * the same figure's.
+ */
+export async function setFollowupVerdict(
+  earlierId: number,
+  laterId: number,
+  verdict: LinkVerdict | null
+): Promise<void> {
+  if (earlierId === laterId) throw new Error("an event cannot follow itself");
+  const rows = await query<{ id: number; kind: string; figure_id: string | null; event_date: string | null }>(
+    `SELECT id, kind, figure_id, event_date FROM events WHERE id IN (?, ?)`,
+    [earlierId, laterId]
+  );
+  const early = rows.find((r) => r.id === earlierId);
+  const late = rows.find((r) => r.id === laterId);
+  if (!early || !late) throw new Error("unknown event");
+  if (early.kind !== late.kind) throw new Error("a follow-up joins two events of the same kind");
+  if (early.kind === "record" && early.figure_id !== late.figure_id) {
+    throw new Error("a record's follow-up must be the same figure's record");
+  }
+  await setPairVerdict("followup_links", "earlier_id", "later_id", earlierId, laterId, verdict);
+}
+
+/**
+ * Correct a tracked figure, in the roster the pipeline attributes with.
  *
- * `positions` null leaves them as they are (a merge or a retirement says
- * nothing about offices); a list, even an empty one, replaces them.
+ * `positions` null leaves them as they are (a retirement says nothing about
+ * offices); a list, even an empty one, replaces them. Editing offices or the
+ * CV marks the figure `cv_curated`, so scripts/import_cv.py never overwrites
+ * a human correction.
  */
 export async function saveFigureEdit(
   figureId: string,
@@ -574,112 +1294,285 @@ export async function saveFigureEdit(
   positions: Position[] | null = null,
   profile: Profile | null = null
 ): Promise<void> {
-  const json = JSON.stringify(aliases);
   const pos = positions === null ? null : JSON.stringify(positions);
   const cv = profile === null
     ? [null, null, null, null]
     : [profile.bio, JSON.stringify(profile.facts), JSON.stringify(profile.education), JSON.stringify(profile.sources)];
-  await query(
-    `INSERT INTO figure_edits (figure_id, name, role, aliases, active, positions,
-                               bio, facts, education, sources, edited_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now()::text)
-     ON CONFLICT (figure_id) DO UPDATE
-       SET name = EXCLUDED.name, role = EXCLUDED.role, aliases = EXCLUDED.aliases,
-           active = EXCLUDED.active,
-           positions = COALESCE(EXCLUDED.positions, figure_edits.positions),
-           bio = COALESCE(EXCLUDED.bio, figure_edits.bio),
-           facts = COALESCE(EXCLUDED.facts, figure_edits.facts),
-           education = COALESCE(EXCLUDED.education, figure_edits.education),
-           sources = COALESCE(EXCLUDED.sources, figure_edits.sources),
-           edited_at = EXCLUDED.edited_at, applied_at = NULL`,
-    [figureId, name, role, json, active, pos, ...cv]
+  const changed = await lrun(
+    `UPDATE figures SET name = ?2, role = ?3, aliases = ?4, active = ?5,
+            positions = COALESCE(?6, positions), bio = COALESCE(?7, bio),
+            facts = COALESCE(?8, facts), education = COALESCE(?9, education),
+            sources = COALESCE(?10, sources),
+            cv_curated = CASE WHEN ?6 IS NOT NULL OR ?7 IS NOT NULL THEN 1 ELSE cv_curated END
+      WHERE id = ?1`,
+    [figureId, name, role ?? "", JSON.stringify(aliases), active, pos, ...cv]
   );
-  await query(
-    `UPDATE figures SET name = $2, role = $3, aliases = $4, active = $5,
-            positions = COALESCE($6, positions), bio = COALESCE($7, bio),
-            facts = COALESCE($8, facts), education = COALESCE($9, education),
-            sources = COALESCE($10, sources)
-      WHERE id = $1`,
-    [figureId, name, role, json, active, pos, ...cv]
-  );
+  if (changed === 0) throw new Error(`unknown figure: ${figureId}`);
 }
 
 /** Every active figure, for the merge target picker. */
-export type FigureOption = { id: string; name: string; role: string | null };
+export type FigureOption = {
+  id: string;
+  name: string;
+  role: string | null;
+  aliases: string[];
+  /** Records the figure owns, so a suggested merge can say which way round. */
+  records: number;
+};
 
 export async function getFigureOptions(): Promise<FigureOption[]> {
-  return query(`SELECT id, name, role FROM figures WHERE active ORDER BY name`);
+  const rows = await query<{ id: string; name: string; role: string | null; aliases: string | null; records: number }>(
+    `SELECT f.id, f.name, f.role, f.aliases,
+            (SELECT count(*) FROM events e WHERE e.figure_id = f.id AND e.kind = 'record') AS records
+       FROM figures f WHERE f.active ORDER BY f.name`
+  );
+  return rows.map((r) => ({ ...r, aliases: parseAliases(r.aliases) }));
+}
+
+/** A tracked figure that may be the same person as someone on the page. */
+export interface DuplicateHint {
+  figure: FigureOption;
+  /** Why it was suggested, in the curator's words. */
+  why: string;
+}
+
+// Given names shared by too many people to suggest anything on their own.
+const COMMON_NAMES = new Set(`muhammad mohammad mohamad muhamad moh mochamad ahmad achmad abdul
+abdullah siti nur nurul sri budi agus dwi tri eko putra putri wahyu adi andi arif rahmat
+hendra dedi joko bambang yusuf ali hasan ibrahim ismail umar anwar rizki rizky fajar`.split(/\s+/));
+
+// Words that come before a name without being part of it.
+const LEADING = new Set(["pak", "bapak", "bu", "ibu", "h", "hj", "dr", "drs", "ir", "kh", "prof", "haji"]);
+
+function nameTokens(name: string): string[] {
+  const words = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  while (words.length > 1 && LEADING.has(words[0])) words.shift();
+  return words;
+}
+
+function contains(long: string[], short: string[]): boolean {
+  for (let i = 0; i + short.length <= long.length; i++) {
+    if (short.every((w, j) => long[i + j] === w)) return true;
+  }
+  return false;
+}
+
+function editDistance(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** Every word of `short` in `long`, in order, gaps allowed. */
+function inOrder(long: string[], short: string[]): boolean {
+  let i = 0;
+  for (const w of long) if (w === short[i]) i++;
+  return i === short.length;
 }
 
 /**
- * Fold a duplicate figure into the one it duplicates.
- *
- * The moves run as one statement, so the site never shows the records split
- * between the two. The alias union and the retirement go through
- * saveFigureEdit, which is what keeps them over the next push.
- * `figure_merges` hands the same decision to the pipeline
- * (apply_curation.py → jejak.roster.merge_figure).
+ * How alike two spellings are, 0 when not worth suggesting. A shared surname
+ * alone is not enough — Santoso, Hidayat or Nugroho are half the country —
+ * and a one-word name only counts when it is someone's actual name, not one
+ * of their aliases ("Prabowo" is in a stray alias of Pramono's).
  */
-export async function mergeFigure(fromId: string, intoId: string): Promise<void> {
-  if (fromId === intoId) throw new Error("cannot merge a figure into itself");
-  const rows = await query<{ id: string; name: string; role: string | null; aliases: string | null; active: boolean }>(
-    `SELECT id, name, role, aliases, active FROM figures WHERE id = ANY($1)`,
-    [[fromId, intoId]]
-  );
-  const from = rows.find((r) => r.id === fromId);
-  const into = rows.find((r) => r.id === intoId);
-  if (!from || !into) throw new Error("unknown figure");
-  if (!into.active) throw new Error(`${intoId} is retired; merge into an active figure`);
-
-  await query(
-    `WITH m AS (
-       INSERT INTO figure_merges (from_id, into_id, decided_at)
-       VALUES ($1, $2, now()::text)
-       ON CONFLICT (from_id) DO UPDATE
-         SET into_id = EXCLUDED.into_id, decided_at = EXCLUDED.decided_at, applied_at = NULL
-       RETURNING 1
-     ), e AS (
-       UPDATE events SET figure_id = $2 WHERE figure_id = $1 RETURNING 1
-     ), a AS (
-       UPDATE articles SET figure_id = $2 WHERE figure_id = $1 RETURNING 1
-     ), ef AS (
-       INSERT INTO event_figures (event_id, figure_id)
-       SELECT event_id, $2 FROM event_figures WHERE figure_id = $1
-       ON CONFLICT DO NOTHING RETURNING 1
-     ), efd AS (
-       DELETE FROM event_figures WHERE figure_id = $1 RETURNING 1
-     )
-     SELECT (SELECT count(*) FROM m) + (SELECT count(*) FROM e) + (SELECT count(*) FROM a)
-          + (SELECT count(*) FROM ef) + (SELECT count(*) FROM efd) AS n`,
-    [fromId, intoId]
-  );
-
-  const have = new Set([into.name, ...parseAliases(into.aliases)].map((a) => a.toLowerCase()));
-  const aliases = parseAliases(into.aliases);
-  for (const a of [from.name, ...parseAliases(from.aliases)]) {
-    if (a && !have.has(a.toLowerCase())) {
-      have.add(a.toLowerCase());
-      aliases.push(a);
-    }
+function likeness(a: string, b: string, singleOk: boolean): [number, string] {
+  const ta = nameTokens(a);
+  const tb = nameTokens(b);
+  if (ta.length === 0 || tb.length === 0) return [0, ""];
+  const ja = ta.join(" ");
+  const jb = tb.join(" ");
+  if (ja === jb) return [100, `nama sama: “${b}”`];
+  const [long, short] = ta.length >= tb.length ? [ta, tb] : [tb, ta];
+  const single = short.length === 1;
+  if (single && !(singleOk && short[0].length >= 5 && !COMMON_NAMES.has(short[0]))) {
+    return ja.length >= 8 && editDistance(ja, jb) <= 2 ? [70, `ejaan mirip: “${a}” / “${b}”`] : [0, ""];
   }
-  await saveFigureEdit(intoId, into.name, into.role, aliases, true);
-  await saveFigureEdit(fromId, from.name, from.role, parseAliases(from.aliases), false);
+  if (contains(long, short)) return [80, `“${a}” dan “${b}”: yang satu memuat yang lain`];
+  if (!single && inOrder(long, short)) return [75, `“${a}” dan “${b}”: nama yang sama, lebih lengkap`];
+  if (ja.length >= 8 && editDistance(ja, jb) <= 2) return [70, `ejaan mirip: “${a}” / “${b}”`];
+  return [0, ""];
 }
 
-/** Strike a related figure from a peristiwa, or (`struck = false`) restore it. */
+/** Aliases that join two people ("Prabowo Subianto-Gibran Rakabuming") match
+ *  both; they are left out of the comparison. */
+function usable(term: string): boolean {
+  return !/\S\s*[-–\/&]\s*\S/.test(term) || term.trim().split(/\s+/).length <= 2;
+}
+
+/**
+ * Tracked figures that may be the same person as `person`, best first — so
+ * the curator is shown a merge rather than having to remember the roster.
+ * Compared on every spelling either side answers to (name and aliases).
+ */
+export function likelyDuplicates(
+  person: { id: string; name: string; aliases: string[] },
+  figures: FigureOption[],
+  limit = 3
+): DuplicateHint[] {
+  const mine = [person.name, ...person.aliases].filter(usable);
+  const hits: { score: number; hint: DuplicateHint }[] = [];
+  for (const f of figures) {
+    if (f.id === person.id) continue;
+    let best: [number, string] = [0, ""];
+    for (const a of mine) {
+      for (const b of [f.name, ...f.aliases].filter(usable)) {
+        const l = likeness(a, b, a === person.name || b === f.name);
+        if (l[0] > best[0]) best = l;
+      }
+    }
+    if (best[0] > 0) hits.push({ score: best[0] + Math.min(f.records, 50) / 100, hint: { figure: f, why: best[1] } });
+  }
+  return hits.sort((x, y) => y.score - x.score).slice(0, limit).map((h) => h.hint);
+}
+
+/**
+ * Fold a duplicate figure into the one it duplicates: its records move, its
+ * names join the other's aliases, and it is retired. Carried out by the
+ * pipeline's own jejak.roster.merge_figure (scripts/kurasi_ops.py).
+ */
+export async function mergeFigure(fromId: string, intoId: string): Promise<void> {
+  await pipelineOp("merge", fromId, intoId);
+}
+
+/**
+ * A tracked "figure" that is no one — a place, an office, a headline fragment.
+ * Retired and taken off every peristiwa; its records come down
+ * (scripts/kurasi_ops.py not-a-person).
+ */
+export async function removeNotAPerson(figureId: string): Promise<void> {
+  await pipelineOp("not-a-person", figureId);
+}
+
+/**
+ * Strike a related figure from a peristiwa, or (`struck = false`) restore it.
+ * A strike is remembered in event_figure_rejections, so promote_peristiwa
+ * never adds the figure back.
+ */
 export async function setRelatedFigure(
   eventId: number,
   figureId: string,
   struck: boolean
 ): Promise<void> {
-  // A restore is kept as a row too: the pipeline may already hold the strike,
-  // and only apply_curation.py can lift it there.
-  await query(
-    `INSERT INTO event_figure_rejections (event_id, figure_id, struck, decided_at)
-     VALUES ($1, $2, $3, now()::text)
-     ON CONFLICT (event_id, figure_id) DO UPDATE
-       SET struck = EXCLUDED.struck, decided_at = EXCLUDED.decided_at,
-           applied_at = NULL`,
-    [eventId, figureId, struck]
+  await ltx(async () => {
+    if (struck) {
+      await lrun(
+        `INSERT OR IGNORE INTO event_figure_rejections (event_id, figure_id, decided_at)
+         VALUES (?, ?, ?)`,
+        [eventId, figureId, new Date().toISOString()]
+      );
+      await lrun(`DELETE FROM event_figures WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]);
+    } else {
+      await lrun(`DELETE FROM event_figure_rejections WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]);
+      await lrun(`INSERT OR IGNORE INTO event_figures (event_id, figure_id) VALUES (?, ?)`, [eventId, figureId]);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// What the pipeline learns from the curator (jejak/kurasi.py)
+
+export interface KurasiReport {
+  run_at: string;
+  drafted: { reworks: number; cv: number; failed: number };
+  learned: { summary: number; cv: number; marked: number };
+  name_prefixes: string[];
+  names_queue: number;
+  lessons_active: number;
+  labels: number;
+}
+
+/** The last run of the nightly `kurasi` stage. */
+export async function getLatestReport(): Promise<KurasiReport | null> {
+  const row = await queryOne<{ run_at: string; stats: string }>(
+    `SELECT run_at, stats FROM kurasi_reports ORDER BY id DESC LIMIT 1`
   );
+  if (!row) return null;
+  try {
+    return { run_at: row.run_at, ...(JSON.parse(row.stats) as Omit<KurasiReport, "run_at">) };
+  } catch {
+    return null;
+  }
+}
+
+export interface Lesson {
+  id: number;
+  kind: "summary" | "cv";
+  event_id: number | null;
+  figure_id: string | null;
+  wrong: string | null;
+  note: string | null;
+  right: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export async function getLessons(): Promise<Lesson[]> {
+  const rows = await query<Omit<Lesson, "active"> & { active: number }>(
+    `SELECT id, kind, event_id, figure_id, wrong, note, right, active, created_at
+       FROM curation_lessons ORDER BY id DESC LIMIT 200`
+  );
+  return rows.map((r) => ({ ...r, active: Boolean(r.active) }));
+}
+
+/** A lesson switched off is never shown to the model again. */
+export async function setLessonActive(id: number, active: boolean): Promise<void> {
+  await lrun(`UPDATE curation_lessons SET active = ? WHERE id = ?`, [active, id]);
+}
+
+/** An organisation by its long and short names: "Komisi Pemberantasan Korupsi", "KPK". */
+export interface Organization {
+  id: number;
+  name: string;
+  short_name: string | null;
+}
+
+// Same as jejak/db.py, so the page works before the pipeline has next run.
+const ORGANIZATIONS_DDL = `CREATE TABLE IF NOT EXISTS organizations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    short_name  TEXT UNIQUE COLLATE NOCASE,
+    updated_at  TEXT NOT NULL
+)`;
+
+export async function getOrganizations(): Promise<Organization[]> {
+  await lrun(ORGANIZATIONS_DDL);
+  return query<Organization>(`SELECT id, name, short_name FROM organizations ORDER BY name COLLATE NOCASE`);
+}
+
+/**
+ * Adds an organisation (id null) or renames one. A name may be used once
+ * across both columns, so "KPK" cannot be one organisation's short name and
+ * another's long one.
+ */
+export async function saveOrganization(id: number | null, name: string, shortName: string | null): Promise<void> {
+  await lrun(ORGANIZATIONS_DDL);
+  if (!name) throw new Error("name is required");
+  if (shortName && shortName.toLowerCase() === name.toLowerCase()) shortName = null;
+  const clash = await queryOne<{ name: string }>(
+    `SELECT name FROM organizations
+      WHERE id IS NOT ?1
+        AND (name = ?2 COLLATE NOCASE OR short_name = ?2 COLLATE NOCASE
+             OR (?3 IS NOT NULL AND (name = ?3 COLLATE NOCASE OR short_name = ?3 COLLATE NOCASE)))`,
+    [id, name, shortName]
+  );
+  if (clash) throw new Error(`already used by ${clash.name}`);
+  const now = new Date().toISOString();
+  if (id === null) {
+    await lrun(`INSERT INTO organizations (name, short_name, updated_at) VALUES (?, ?, ?)`, [name, shortName, now]);
+  } else {
+    await lrun(`UPDATE organizations SET name = ?, short_name = ?, updated_at = ? WHERE id = ?`, [name, shortName, now, id]);
+  }
+}
+
+export async function deleteOrganization(id: number): Promise<void> {
+  await lrun(ORGANIZATIONS_DDL);
+  await lrun(`DELETE FROM organizations WHERE id = ?`, [id]);
 }

@@ -8,6 +8,13 @@
 # Every stage keeps going on failure: each CLI stage commits its own work, and
 # the final --push always runs, so whatever did succeed reaches Neon.
 
+# Keep the Mac from idle-sleeping until the run ends (the display may still
+# turn off). A sleep mid-run pauses it with jejak.db's write lock held.
+if [ -z "$JEJAK_CAFFEINATED" ]; then
+    export JEJAK_CAFFEINATED=1
+    exec /usr/bin/caffeinate -i /bin/bash "$0" "$@"
+fi
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_FILE="$REPO_ROOT/scripts/publish_local.log"
 LOCK_FILE="$REPO_ROOT/scripts/.publish_local.lock"
@@ -89,35 +96,48 @@ fi
 # runs only work locally; their rows ride along with the evening push. A run
 # starting at 18:00 or later pushes if none has today (so a run launchd catches
 # up after sleep still counts). PUSH=1 forces a push.
+#
+# If yesterday got no push at all (the Mac was asleep or closed through the
+# evening), the next run catches up whatever the hour. It stamps yesterday,
+# not today, so this evening's push still happens.
 PUSH_STAMP="$REPO_ROOT/scripts/.last_neon_push"
 today=$(date +%F)
+yesterday=$(date -v-1d +%F 2>/dev/null || date -d yesterday +%F)
+last_push=$(cat "$PUSH_STAMP" 2>/dev/null)
 do_push=0
-if [ "${PUSH:-0}" = 1 ] || { [ "$(date +%H)" -ge 18 ] && [ "$(cat "$PUSH_STAMP" 2>/dev/null)" != "$today" ]; }; then
+push_stamp="$today"
+if [ "${PUSH:-0}" = 1 ] || { [ "$(date +%H)" -ge 18 ] && [ "$last_push" != "$today" ]; }; then
     do_push=1
+elif [ "$last_push" != "$today" ] && [ "$last_push" \< "$yesterday" ]; then
+    do_push=1
+    push_stamp="$yesterday"
+    log "no push since ${last_push:-never} - catching up yesterday's on this run."
 fi
 
-# Curator decisions from /kurasi go in first, so this run's attribution,
-# clustering and linking already follow them. Only on the run that pushes:
-# reading them is a Neon round trip too, and that run is awake anyway.
-if [ "$do_push" = 1 ]; then
-    run_stage "apply curation" scripts/apply_curation.py --apply \
-        || log "apply curation failed - the decisions stay pending for the next push run."
-fi
+# /kurasi writes its decisions straight into jejak.db, so there is nothing to
+# bring down before the stages: they already follow the curator. That also
+# makes jejak.db the only copy of the curator's work, so it is backed up first
+# (backups/, newest 7 kept).
+run_stage "backup" scripts/backup_db.py \
+    || log "backup failed - continuing; check disk space in backups/."
 
-# Generated CVs (cv/<figure-id>.json) into the roster. After apply curation, so
-# a figure a curator just edited is already marked and is not overwritten.
+# Generated CVs (cv/<figure-id>.json) into the roster. A figure a curator has
+# edited is marked and skipped.
 run_stage "import cv" scripts/import_cv.py --apply
 
 run_stage "ingest" -m jejak.cli ingest
 run_stage "backfill" -m jejak.cli backfill --days 6
-run_stage "fetch" -m jejak.cli fetch --limit 200
+run_stage "fetch" -m jejak.cli fetch --limit 1000
 run_stage "mentions" -m jejak.cli mentions --limit 1000
-for stage in cluster link quotes translate summarize sentiment buzzer; do
+# Curation upkeep (jejak/kurasi.py): draft any rework or CV request /kurasi
+# left undone, learn from the curator's decisions, rebuild the names queue.
+run_stage "kurasi" -m jejak.cli kurasi
+for stage in cluster link quotes translate summarize sentiment buzzer suggest; do
     run_stage "$stage" -m jejak.cli "$stage"
 done
 if [ "$do_push" = 1 ]; then
     if run_stage "push to Neon" scripts/sync_to_neon.py --push; then
-        echo "$today" > "$PUSH_STAMP"
+        echo "$push_stamp" > "$PUSH_STAMP"
     else
         log "push to Neon failed - the next evening run retries it."
     fi
