@@ -8,6 +8,13 @@
 # Every stage keeps going on failure: each CLI stage commits its own work, and
 # the final --push always runs, so whatever did succeed reaches Neon.
 
+# Keep the Mac from idle-sleeping until the run ends (the display may still
+# turn off). A sleep mid-run pauses it with jejak.db's write lock held.
+if [ -z "$JEJAK_CAFFEINATED" ]; then
+    export JEJAK_CAFFEINATED=1
+    exec /usr/bin/caffeinate -i /bin/bash "$0" "$@"
+fi
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_FILE="$REPO_ROOT/scripts/publish_local.log"
 LOCK_FILE="$REPO_ROOT/scripts/.publish_local.lock"

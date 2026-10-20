@@ -63,8 +63,9 @@ def _names(who: str, terms: list[str]) -> bool:
     return any(re.search(rf"\b{re.escape(t)}\b", who) for t in terms)
 
 
-def find_quote(body: str, name: str, aliases: list[str]) -> str | None:
-    """The longest quote in `body` explicitly attributed to this figure."""
+def find_quote(body: str, name: str, aliases: list[str],
+               exclude: set[str] | frozenset[str] = frozenset()) -> str | None:
+    """The longest quote in `body` explicitly attributed to this figure, other than `exclude`."""
     if not body:
         return None
     terms = _terms(name, aliases)
@@ -78,6 +79,7 @@ def find_quote(body: str, name: str, aliases: list[str]) -> str | None:
         # Read backwards from the verb: the run ending right before it.
         if _names(" ".join(_speaker(m.group("who").split()[::-1]).split()[::-1]), terms)
     ]
+    found = [q for q in found if q not in exclude]
     return max(found, key=len) if found else None
 
 
@@ -102,13 +104,18 @@ def quote_pending(conn: sqlite3.Connection) -> dict[str, int]:
             aliases = json.loads(ev["aliases"]) if ev["aliases"] else []
         except (TypeError, ValueError):
             aliases = []
+        # Quotes the curator said are someone else's words are never picked.
+        disowned = {r[0] for r in conn.execute(
+            "SELECT quote FROM event_quotes WHERE event_id = ? AND assigned_by = 'curator' "
+            "AND figure_id IS NOT (SELECT figure_id FROM events WHERE id = ?)",
+            (ev["id"], ev["id"]))}
         best: tuple[str, str] | None = None
         for art in conn.execute(
             "SELECT url, body FROM articles WHERE event_id = ? AND fetch_status = 'ok' "
             "ORDER BY published_at",
             (ev["id"],),
         ):
-            q = find_quote(art["body"], ev["name"], aliases)
+            q = find_quote(art["body"], ev["name"], aliases, disowned)
             if q and (best is None or len(q) > len(best[0])):
                 best = (q, art["url"])
         if best:

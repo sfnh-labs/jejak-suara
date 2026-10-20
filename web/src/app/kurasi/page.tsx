@@ -67,6 +67,8 @@ export default async function Kurasi({
             <Link href="/kurasi/kandidat" style={{ color: MUTED }}>Antrean nama baru</Link>
             {" · "}
             <Link href="/kurasi/pelajaran" style={{ color: MUTED }}>Pelajaran model</Link>
+            {" · "}
+            <Link href="/kurasi/organisasi" style={{ color: MUTED }}>Organisasi</Link>
           </div>
           <h1
             style={{

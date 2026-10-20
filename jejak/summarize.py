@@ -146,6 +146,10 @@ def _format_articles(articles: list[sqlite3.Row]) -> str:
     blocks = []
     for i, a in enumerate(articles, 1):
         body = a["title"]
+        # A derived article (jejak/actors.py) keeps the headline of the article
+        # it came from, which names someone else; the model gets the passage.
+        if "derived_from" in a.keys() and a["derived_from"]:
+            body = "Petikan dari liputan tentang hal lain"
         full = a["body"] if "body" in a.keys() else None
         if full:
             body += "\n\n" + full
@@ -460,8 +464,8 @@ def draft_event(
         # The web numbers sources in this same order to link each [Sumber N]
         # to its article (web/src/lib/data.ts), so keep the two in step. The id
         # breaks ties between articles published at the same moment.
-        "SELECT source, url, title, summary, body, published_at FROM articles "
-        "WHERE event_id = ? ORDER BY published_at, id",
+        "SELECT source, url, title, summary, body, published_at, derived_from "
+        "FROM articles WHERE event_id = ? ORDER BY published_at, id",
         (event_id,),
     ).fetchall()
     if not articles:
@@ -605,4 +609,8 @@ def summarize_pending(conn: sqlite3.Connection,
             # Postgres ids). One bad row shouldn't block every event behind
             # it in the queue.
             print(f"skip event {eid}: {e}")
+        except TimeoutError:
+            # One answer slower than the client's timeout ended the whole
+            # stage with 268 events still queued; the next run retries it.
+            print(f"skip event {eid}: the model timed out")
     return results

@@ -325,6 +325,16 @@ CREATE TABLE IF NOT EXISTS event_quotes (
 CREATE INDEX IF NOT EXISTS idx_event_quotes_event ON event_quotes(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_quotes_figure ON event_quotes(figure_id);
 
+-- Organisations by their long and short names ("Komisi Pemberantasan
+-- Korupsi" / "KPK"), kept by the curator in /kurasi/organisasi. The figure
+-- editor offers both when filling in an office's organisation.
+CREATE TABLE IF NOT EXISTS organizations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,  -- "Komisi Pemberantasan Korupsi"
+    short_name  TEXT UNIQUE COLLATE NOCASE,           -- "KPK", or NULL when it has none
+    updated_at  TEXT NOT NULL
+);
+
 -- "Jadikan info CV" in /kurasi: what an article says about someone's
 -- offices, background and education, drafted by the local model
 -- (jejak/cv_extract.py) for the curator to check, edit and accept onto that
@@ -453,6 +463,13 @@ _MIGRATIONS = {
         ("fetch_status", "TEXT"),
         ("body_original", "TEXT"),
         ("body_lang", "TEXT"),
+        # jejak/actors.py: another tracked figure's own statement inside an
+        # article is copied out as an article of theirs. derived_from is the
+        # article it was read from; derived_mode 'join' (the passage recalls
+        # something earlier) may only join a record they already have.
+        ("derived_from", "TEXT"),
+        ("derived_mode", "TEXT"),
+        ("actors_scanned_at", "TEXT"),
     ],
     "events": [
         ("event_type", "TEXT DEFAULT 'other'"),
@@ -483,6 +500,9 @@ _MIGRATIONS = {
         ("attempts", "INTEGER NOT NULL DEFAULT 0"),
         ("learned_at", "TEXT"),
         ("accepted", "TEXT"),          # JSON: what the curator kept
+        # 'auto' = found, drafted and applied by the kurasi stage on its own
+        # (kurasi.auto_cv); 'curator' = asked for in /kurasi.
+        ("origin", "TEXT NOT NULL DEFAULT 'curator'"),
     ],
     "comments": [
         ("comment_id", "TEXT"),

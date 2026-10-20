@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from time import mktime
 
@@ -15,6 +17,22 @@ import feedparser
 
 from . import mentions
 from .config import Figure, Source, load_figures, load_sources
+
+USER_AGENT = "jejak-suara/0.1 (+research; contact: set-me@example.com)"
+# feedparser.parse(url) fetches with no timeout: one feed that stops answering
+# mid-response hung the nightly run for a day, holding jejak.db's write lock.
+TIMEOUT = 30
+
+
+def _download(url: str) -> bytes | None:
+    """One feed's XML, or None when the outlet does not answer in time."""
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return resp.read()
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        print(f"ingest: skipped {url}: {e}")
+        return None
 
 
 def _now() -> str:
@@ -109,9 +127,11 @@ def reattribute(conn: sqlite3.Connection,
     figures = figures or load_figures(conn)
     stats = {"checked": 0, "changed": 0, "kept": 0, "events_removed": 0}
 
-    query = "SELECT id, figure_id, title FROM articles"
+    # A derived article (jejak/actors.py) belongs to the figure it quotes, not
+    # to whoever its headline names.
+    query = "SELECT id, figure_id, title FROM articles WHERE derived_from IS NULL"
     if only_unclustered:
-        query += " WHERE event_id IS NULL"
+        query += " AND event_id IS NULL"
     for art in conn.execute(query).fetchall():
         stats["checked"] += 1
         subject = _attribute(art["title"] or "", figures)
@@ -166,10 +186,14 @@ def ingest(conn: sqlite3.Connection,
     sources = sources or load_sources()
     figures = figures or load_figures()
     stats = {"fetched": 0, "matched": 0, "general": 0,
-             "inserted": 0, "skipped_existing": 0}
+             "inserted": 0, "skipped_existing": 0, "feeds_failed": 0}
 
     for src in sources:
-        feed = feedparser.parse(src.rss)
+        body = _download(src.rss)
+        if body is None:
+            stats["feeds_failed"] += 1
+            continue
+        feed = feedparser.parse(body)
         for entry in feed.entries:
             stats["fetched"] += 1
             title = getattr(entry, "title", "") or ""
@@ -203,6 +227,7 @@ def ingest(conn: sqlite3.Connection,
                  summary, _published_iso(entry), _now()),
             )
             stats["inserted"] += 1
+        # Per feed, so the write lock is never held across a download.
+        conn.commit()
 
-    conn.commit()
     return stats

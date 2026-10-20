@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { REASONS, getFigureOptions, getFollowupCandidates, getItem, getReading, likelyDuplicates, positionTitle, reasonLabel, type FigureOption, type FigureRef, type FollowupCandidate, type FollowupRow, type Position, type Profile, type Item, type Rework, type ReworkSnapshot, type CvProposal, type LinkRow, type NamedPerson } from "@/lib/curation";
+import { REASONS, getFigureOptions, getOrganizations, type Organization, getFollowupCandidates, getItem, getReading, likelyDuplicates, positionTitle, reasonLabel, type FigureOption, type FigureRef, type FollowupCandidate, type FollowupRow, type Position, type Profile, type Item, type Rework, type ReworkSnapshot, type CvProposal, type LinkRow, type NamedPerson, type QuoteRow } from "@/lib/curation";
 import { decide } from "../kandidat/actions";
 import { AcceptCandidateForm } from "../AcceptCandidateForm";
+import { FigurePicker, SpeakerEditor } from "../FigurePicker";
 import { ArticleReader, type ReaderTerm } from "../ArticleReader";
-import { addFollowup, curate, editFigure, mergeFigures, relateFigure, ruleFollowup, ruleLink, rework, decideRework, notAPerson, cvDraft, decideCvDraft } from "../actions";
+import { addFollowup, curate, editFigure, mergeFigures, relateFigure, ruleFollowup, ruleLink, rework, decideRework, notAPerson, setQuoteSpeaker, pickQuote, newQuote } from "../actions";
 import { storyImageSource, storylines } from "@/lib/data";
 import { EventBanner } from "../EventImage";
 import { placeGroups, provinceLabel, provincesIn } from "@/lib/places";
@@ -28,7 +29,7 @@ export default async function KurasiItem({
   const { perlu, cari = "", baca } = await searchParams;
   const eventId = Number(id);
   if (!Number.isInteger(eventId) || eventId <= 0) notFound();
-  const [item, figures] = await Promise.all([getItem(eventId), getFigureOptions()]);
+  const [item, figures, orgs] = await Promise.all([getItem(eventId), getFigureOptions(), getOrganizations()]);
   if (!item) notFound();
   const [candidates, reading] = await Promise.all([
     getFollowupCandidates(item, cari.slice(0, 100)),
@@ -63,6 +64,7 @@ export default async function KurasiItem({
   const sections = [
     { id: "isi", title: "Isi" },
     { id: "nama", title: "Tokoh" },
+    { id: "kutipan", title: "Kutipan" },
     { id: "tautan", title: isRecord ? "Bagian dari peristiwa" : "Catatan di dalamnya" },
     { id: "lini", title: "Lini cerita" },
   ];
@@ -125,6 +127,7 @@ export default async function KurasiItem({
 
         <VerdictBar item={item} sections={sections} missing={perlu} figures={figures} />
         <FigureOptions figures={figures} />
+        <OrgOptions orgs={orgs} />
 
         <Card n={n("isi")} id="isi" title="Isi" note="Ringkasan yang tayang dan artikel yang menjadi sumbernya. Baca ini dulu sebelum memutuskan.">
           {item.summary ? (
@@ -136,6 +139,7 @@ export default async function KurasiItem({
               Belum dirangkum. Yang tayang adalah judul dari hasil klaster.
             </p>
           )}
+          {isRecord ? <ShownQuote item={item} /> : null}
           <SubPanel
             title={`Artikel sumber (${item.sources.length})`}
             note="Klik judul untuk membacanya di sini; ↗ membuka situs aslinya."
@@ -194,6 +198,20 @@ export default async function KurasiItem({
           }
         >
           <NamedList item={item} figures={figures} />
+        </Card>
+
+        <Card
+          n={n("kutipan")}
+          id="kutipan"
+          title="Kutipan"
+          count={item.quotes.length}
+          note={
+            isRecord
+              ? "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media dan tokoh yang dicocokkan pipeline. Betulkan pemiliknya bila salah, dan pilih kutipan pemilik catatan yang tampil di situs."
+              : "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media dan tokoh yang dicocokkan pipeline. Betulkan pemiliknya bila salah."
+          }
+        >
+          <QuoteList item={item} figures={figures} />
         </Card>
 
         <Card
@@ -280,9 +298,9 @@ function Card({
   return (
     <section
       id={id}
-      style={{ background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8, marginTop: 18, scrollMarginTop: 96, overflow: "hidden" }}
+      style={{ background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8, marginTop: 18, scrollMarginTop: 96 }}
     >
-      <header style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "14px 18px", background: "var(--color-cream-dark)", borderBottom: `1px solid ${RULE}` }}>
+      <header style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "14px 18px", background: "var(--color-cream-dark)", borderBottom: `1px solid ${RULE}`, borderRadius: "7px 7px 0 0" }}>
         <span
           aria-hidden
           style={{
@@ -478,7 +496,6 @@ function VerdictBar({
           </form>
         </details>
         <ReworkMenu item={item} figures={figures} />
-        <CvMenu item={item} figures={figures} />
         {item.curated ? (
           <form action={curate}>
             <Hidden fields={{ event_id: item.event_id, verdict: "" }} />
@@ -496,6 +513,7 @@ function VerdictBar({
         </div>
       ) : null}
       {!item.curated && s ? <SuggestionLine item={item} /> : null}
+      <CvNote item={item} figures={figures} />
       <nav style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${RULE}` }}>
         {sections.map((x, i) => (
           <a key={x.id} href={`#${x.id}`} style={{ color: MUTED, textDecoration: "none" }}>
@@ -540,140 +558,29 @@ function ReworkMenu({ item, figures }: { item: Item; figures: FigureOption[] }) 
 }
 
 /**
- * "Jadikan info CV…": for coverage that is a fact about someone rather than
- * something they did — an appointment, a family tie, a background. The local
- * model drafts the CV entries; the curator edits and accepts them, and the
- * record comes down as "Bahan CV".
+ * What the pipeline put on a CV from this record (jejak/kurasi.py auto_cv):
+ * appointments, profiles and the like are found, drafted and applied with no
+ * curator step, and the record comes down as "Bahan CV". Shown so a wrong one
+ * can be undone by hand: "Tayangkan lagi" restores the record, and the CV is
+ * edited under "Pelaku" or on the figure's own record.
  */
-function CvMenu({ item, figures }: { item: Item; figures: FigureOption[] }) {
-  const running = item.cvProposals.some((r) => r.status === "queued" || r.status === "running");
-  const ready = item.cvProposals.find((r) => r.status === "ready" || r.status === "failed");
-  return (
-    <details open={running || Boolean(ready)} style={{ position: "static" }}>
-      <summary style={{ ...button(ready ? "ink" : "quiet"), listStyle: "none", display: "inline-block" }}>
-        {running ? "Menyusun info CV…" : ready ? "Tinjau info CV…" : "Jadikan info CV…"}
-      </summary>
-      <div
-        style={{
-          position: "absolute", left: 0, right: 0, top: "calc(100% + 4px)", zIndex: 6,
-          background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8, padding: "14px 16px",
-          boxShadow: "0 8px 24px rgba(22, 19, 15, 0.14)", maxHeight: "70vh", overflowY: "auto", display: "grid", gap: 12,
-        }}
-      >
-        <div style={{ fontSize: 12.5, color: INK, fontWeight: 600 }}>
-          Bukan perbuatan, tapi keterangan tentang seseorang?{" "}
-          <span style={{ color: MUTED, fontWeight: 400 }}>
-            Pelantikan, jabatan baru, hubungan keluarga, latar belakang. Model lokal menyusun isian CV dari artikel ini;
-            kamu periksa dan ubah, lalu terima. Catatan ini diturunkan dengan alasan “Bahan CV”.
-          </span>
-        </div>
-        {running ? (
-          <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>
-            Model lokal sedang membaca artikel, biasanya kurang dari semenit.{" "}
-            <Link href={`/kurasi/${item.event_id}`} style={{ color: INK }}>Muat ulang</Link>
-          </p>
-        ) : ready ? (
-          <CvReview proposal={ready} item={item} figures={figures} />
-        ) : (
-          <form action={cvDraft} style={{ display: "grid", gap: 10 }}>
-            <Hidden fields={{ event_id: item.event_id }} />
-            <label style={label}>
-              CV siapa? (ketik nama untuk mencari)
-              <input
-                name="figure_id"
-                list={FIGURE_LIST}
-                required
-                autoComplete="off"
-                defaultValue={item.figure_id ?? ""}
-                pattern={figures.map((f) => f.id).join("|")}
-                title="Pilih tokoh dari daftar saran"
-                style={input}
-              />
-            </label>
-            <label style={label}>
-              Yang perlu diambil (opsional)
-              <textarea name="note" rows={2} placeholder="mis. hubungan keluarga dengan Benny Sinomba Siregar" style={{ ...input, resize: "vertical", fontFamily: "inherit" }} />
-            </label>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button type="submit" style={button("ink")}>Susun info CV</button>
-            </div>
-          </form>
-        )}
-      </div>
-    </details>
-  );
-}
-
-/** The drafted entries as editable rows: blank a row to leave it out. */
-function CvReview({ proposal: p, item, figures }: { proposal: CvProposal; item: Item; figures: FigureOption[] }) {
+function CvNote({ item, figures }: { item: Item; figures: FigureOption[] }) {
+  const p = item.cvProposals.find((r) => r.status === "accepted");
+  if (!p?.proposal) return null;
   const who = figures.find((f) => f.id === p.figure_id)?.name ?? p.figure_id;
-  if (p.status === "failed" || !p.proposal) {
-    return (
-      <form action={decideCvDraft} style={{ display: "grid", gap: 8 }}>
-        <Hidden fields={{ event_id: item.event_id, proposal_id: p.id, decision: "discard" }} />
-        <p style={{ fontSize: 13, color: "var(--color-clay)", margin: 0 }}>
-          {p.error}{p.error?.includes("Ollama") ? " Jalankan Ollama (ollama serve), lalu coba lagi." : ""}
-        </p>
-        <div><button type="submit" style={button("quiet")}>Tutup, coba lagi</button></div>
-      </form>
-    );
-  }
   const d = p.proposal;
-  const three = { display: "grid", gap: 6, gridTemplateColumns: "minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.2fr)" } as const;
-  const two = { display: "grid", gap: 6, gridTemplateColumns: "minmax(110px, 0.6fr) minmax(160px, 1.4fr)" } as const;
-  const head = { fontSize: 11, color: MUTED } as const;
-  const cell = { ...input, width: "100%" };
-  const empty = d.positions.length + d.facts.length + d.education.length === 0;
+  const entries = [
+    ...d.positions.map((x) => [x.role, x.org].filter(Boolean).join(" ") + (x.period ? ` (${x.period})` : "")),
+    ...d.facts.map((x) => `${x.label}: ${x.value}`),
+    ...d.education.map((x) => (x.year ? `${x.year}: ` : "") + x.detail),
+  ];
   return (
-    <form action={decideCvDraft} style={{ display: "grid", gap: 12 }}>
-      {/* Enter in a row must not accept: a disabled first button absorbs it. */}
-      <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
-      <Hidden fields={{ event_id: item.event_id, proposal_id: p.id }} />
-      <div style={{ fontSize: 13 }}>
-        Untuk CV <strong>{who}</strong>.{" "}
-        <span style={{ color: MUTED }}>
-          {empty ? "Model tidak menemukan keterangan biografis; isi sendiri bila ada." : "Ubah yang keliru; kosongkan baris yang tidak perlu."}
-        </span>
-      </div>
-      <div style={three}>
-        <span style={head}>Jabatan</span><span style={head}>Lembaga</span><span style={head}>Periode</span>
-        {[...d.positions, { role: "", org: "", period: "" }].map((x, i) => (
-          <PositionCv key={i} role={x.role} org={x.org} period={x.period} cell={cell} />
-        ))}
-      </div>
-      <div style={two}>
-        <span style={head}>Fakta</span><span style={head}>Isi</span>
-        {[...d.facts, { label: "", value: "" }].map((x, i) => (
-          <FactRow key={i} a={["cv_label", x.label, ""]} b={["cv_value", x.value, ""]} style={cell} hint={false} />
-        ))}
-      </div>
-      <div style={two}>
-        <span style={head}>Tahun</span><span style={head}>Pendidikan</span>
-        {[...d.education, { year: "", detail: "" }].map((x, i) => (
-          <FactRow key={i} a={["cv_year", x.year ?? "", ""]} b={["cv_detail", x.detail, ""]} style={cell} hint={false} />
-        ))}
-      </div>
-      <div style={two}>
-        <span style={head}>Sumber</span><span style={head}>URL</span>
-        {d.sources.map((x, i) => (
-          <FactRow key={i} a={["cv_src_label", x.label, ""]} b={["cv_src_url", x.url, ""]} style={cell} hint={false} />
-        ))}
-      </div>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-        <button type="submit" name="decision" value="accept" style={button("accept")}>Masukkan ke CV, turunkan catatan</button>
-        <button type="submit" name="decision" value="discard" formNoValidate style={button("quiet")}>Buang</button>
-      </div>
-    </form>
-  );
-}
-
-function PositionCv({ role, org, period, cell }: { role: string; org: string; period: string; cell: React.CSSProperties }) {
-  return (
-    <>
-      <input name="cv_role" defaultValue={role} style={cell} aria-label="Jabatan" />
-      <input name="cv_org" defaultValue={org} style={cell} aria-label="Lembaga" />
-      <input name="cv_period" defaultValue={period} style={cell} aria-label="Periode" />
-    </>
+    <div style={{ fontSize: 12.5, color: "var(--color-mud)", marginTop: 8 }}>
+      <strong style={{ color: INK }}>
+        {p.origin === "auto" ? "Masuk CV otomatis" : "Masuk CV"} {who}:
+      </strong>{" "}
+      {entries.join(" · ") || "—"}
+    </div>
   );
 }
 
@@ -889,9 +796,26 @@ function PositionRow({ position: p, main }: { position: Position; main: boolean 
   return (
     <>
       <input name="pos_role" defaultValue={p.role} placeholder={main ? "mis. Ketua" : ""} style={cell} aria-label="Jabatan" />
-      <input name="pos_org" defaultValue={p.org} placeholder={main ? "mis. MPR RI" : ""} style={cell} aria-label="Lembaga" />
+      <input name="pos_org" list={ORG_LIST} autoComplete="off" defaultValue={p.org} placeholder={main ? "mis. MPR RI" : ""} style={cell} aria-label="Lembaga" />
       <input name="pos_period" defaultValue={p.period} placeholder={main ? "2024–sekarang" : ""} style={cell} aria-label="Periode" />
     </>
+  );
+}
+
+const ORG_LIST = "org-options";
+
+/**
+ * Both names of every organisation in /kurasi/organisasi, for the office
+ * rows: typing "KPK" or "Komisi Pem…" offers either form, the other as hint.
+ */
+function OrgOptions({ orgs }: { orgs: Organization[] }) {
+  return (
+    <datalist id={ORG_LIST}>
+      {orgs.flatMap((o) => [
+        ...(o.short_name ? [<option key={`${o.id}s`} value={o.short_name} label={o.name} />] : []),
+        <option key={`${o.id}l`} value={o.name} label={o.short_name ?? ""} />,
+      ])}
+    </datalist>
   );
 }
 
@@ -906,7 +830,14 @@ function FigureOptions({ figures }: { figures: FigureOption[] }) {
   return (
     <datalist id={FIGURE_LIST}>
       {figures.map((f) => (
-        <option key={f.id} value={f.id} label={`${f.name}${f.role ? ` · ${f.role}` : ""}`}>
+        <option
+          key={f.id}
+          value={f.id}
+          label={`${f.name}${f.role ? ` · ${f.role}` : ""}`}
+          data-name={f.name}
+          data-role={f.role ?? ""}
+          data-aliases={f.aliases.join("|")}
+        >
           {f.name}{f.role ? ` · ${f.role}` : ""}
         </option>
       ))}
@@ -1517,5 +1448,191 @@ function AddFollowup({ item, candidates, search }: { item: Item; candidates: Fol
         {search ? <Link href={`/kurasi/${item.event_id}#lini`} style={{ fontSize: 12.5, color: MUTED, alignSelf: "center" }}>Kembali ke saran</Link> : null}
       </form>
     </SubPanel>
+  );
+}
+
+/** What the record shows as its owner's words, in the Isi card. */
+function ShownQuote({ item }: { item: Item }) {
+  const box = { marginTop: 14, paddingLeft: 12, borderLeft: `3px solid ${RULE}` } as const;
+  if (item.quote) {
+    const outlet = item.sources.find((s) => s.url === item.quote_url)?.source;
+    return (
+      <div style={box}>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 3 }}>
+          Kutipan yang tampil{outlet ? ` · ${outlet}` : ""} · <a href="#kutipan" style={{ color: MUTED }}>ganti ↓</a>
+        </div>
+        <p style={{ fontFamily: "var(--font-serif)", fontSize: 15, lineHeight: 1.55, margin: 0, fontStyle: "italic" }}>“{item.quote}”</p>
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...box, fontSize: 12.5, color: MUTED }}>
+      {item.quote === ""
+        ? "Tanpa kutipan: kamu memilih tidak menampilkannya."
+        : "Belum ada kutipan dari pemilik catatan."}{" "}
+      <a href="#kutipan" style={{ color: MUTED }}>Lihat kutipan ↓</a>
+    </div>
+  );
+}
+
+/** Beyond this many, the rest fold away. */
+const QUOTES_OPEN = 10;
+
+/** "Name · title" for a picker's starting value. */
+function figureLabel(figures: FigureOption[], id: string | null): string | null {
+  const f = id ? figures.find((x) => x.id === id) : undefined;
+  return f ? (f.role ? `${f.name} · ${f.role}` : f.name) : null;
+}
+
+function QuoteList({ item, figures }: { item: Item; figures: FigureOption[] }) {
+  const isRecord = item.kind === "record";
+  const footer = (
+    <>
+      {isRecord && item.figure_id ? <ShownQuoteChoice item={item} /> : null}
+      <AddQuote item={item} figures={figures} />
+    </>
+  );
+  if (item.quotes.length === 0) {
+    return (
+      <>
+        <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>
+          {item.sources.some((a) => a.has_body)
+            ? "Tidak ada kalimat langsung yang jelas pembicaranya."
+            : "Belum ada artikel yang teksnya sudah diambil; kutipan muncul setelah pipeline mengambilnya."}
+        </p>
+        {footer}
+      </>
+    );
+  }
+  const head = item.quotes.slice(0, QUOTES_OPEN);
+  const rest = item.quotes.slice(QUOTES_OPEN);
+  const list = (rows: QuoteRow[], offset: number) => (
+    <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+      {rows.map((q, i) => <QuoteItem key={q.id} quote={q} item={item} figures={figures} first={offset + i === 0} />)}
+    </ul>
+  );
+  return (
+    <>
+      {list(head, 0)}
+      {rest.length ? (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12.5, color: MUTED }}>Kutipan lainnya ({rest.length})</summary>
+          {list(rest, QUOTES_OPEN)}
+        </details>
+      ) : null}
+      {footer}
+    </>
+  );
+}
+
+/** "Tanpa kutipan", or handing the choice back to the pipeline. */
+function ShownQuoteChoice({ item }: { item: Item }) {
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+      {item.quote !== "" ? (
+        <form action={pickQuote}>
+          <Hidden fields={{ event_id: item.event_id, quote_id: "none" }} />
+          <button type="submit" style={button("quiet")}>Tanpa kutipan</button>
+        </form>
+      ) : (
+        <form action={pickQuote}>
+          <Hidden fields={{ event_id: item.event_id, quote_id: "auto" }} />
+          <button type="submit" style={button("quiet")}>Biarkan pipeline memilih lagi</button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/** A quote the extractor missed or cut short, typed in by the curator. */
+function AddQuote({ item, figures }: { item: Item; figures: FigureOption[] }) {
+  const withText = item.sources.filter((s) => s.url);
+  return (
+    <details style={{ marginTop: 12 }}>
+      <summary style={{ cursor: "pointer", fontSize: 12.5, color: MUTED }}>Tambah kutipan</summary>
+      <form action={newQuote} style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        <Hidden fields={{ event_id: item.event_id }} />
+        <textarea
+          name="quote"
+          rows={3}
+          required
+          maxLength={2000}
+          placeholder="Kalimat langsungnya, tanpa tanda petik"
+          aria-label="Kutipan"
+          style={{ ...input, resize: "vertical", fontFamily: "var(--font-serif)", lineHeight: 1.5 }}
+        />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <FigurePicker
+            listId={FIGURE_LIST}
+            defaultId={item.figure_id}
+            defaultLabel={figureLabel(figures, item.figure_id)}
+            placeholder="Cari tokoh yang berbicara (kosongkan bila bukan tokoh)"
+          />
+          <input
+            name="speaker"
+            maxLength={200}
+            placeholder="Pembicara seperti ditulis media (opsional)"
+            aria-label="Pembicara seperti ditulis media"
+            style={{ ...input, flex: "1 1 200px" }}
+          />
+        </div>
+        <select name="url" defaultValue="" aria-label="Sumber" style={input}>
+          <option value="">Sumber: tanpa artikel</option>
+          {withText.map((s) => (
+            <option key={s.id} value={s.url}>{s.source}{s.title ? ` · ${s.title}` : ""}</option>
+          ))}
+        </select>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          {item.kind === "record" && item.figure_id ? (
+            <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="checkbox" name="show" value="1" defaultChecked={!item.quote} />
+              Tampilkan di catatan (bila tokohnya pemilik catatan)
+            </label>
+          ) : null}
+          <button type="submit" style={button("ink")}>Tambah</button>
+        </div>
+      </form>
+    </details>
+  );
+}
+
+function QuoteItem({ quote: q, item, figures, first }: { quote: QuoteRow; item: Item; figures: FigureOption[]; first: boolean }) {
+  const own = Boolean(item.figure_id) && q.figure_id === item.figure_id;
+  const shown = Boolean(item.quote) && item.quote === q.quote;
+  const title = q.figure_id ? figures.find((f) => f.id === q.figure_id)?.role : null;
+  return (
+    <li style={{ padding: "12px 0", borderTop: first ? "none" : `1px solid ${RULE}`, ...(shown ? { boxShadow: "inset 3px 0 0 var(--color-clay)", paddingLeft: 12 } : {}) }}>
+      <p style={{ fontFamily: "var(--font-serif)", fontSize: 14.5, lineHeight: 1.55, margin: 0 }}>“{q.quote}”</p>
+      <div style={{ fontSize: 12, color: MUTED, margin: "4px 0 8px" }}>
+        — {q.speaker ?? "(tanpa nama)"}
+        {q.source ? ` · ${q.source}` : ""}
+        {q.url ? <> <a href={q.url} target="_blank" rel="noreferrer" aria-label="Buka di situs asli" style={{ color: MUTED, textDecoration: "none" }}>↗</a></> : null}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {q.figure_id ? (
+          <Pill tone={own ? "ink" : "neutral"} title={q.assigned_by === "curator" ? "Dipilih kurator" : "Dicocokkan otomatis dari nama pembicara"}>
+            {q.figure_name ?? q.figure_id}{q.assigned_by === "curator" ? " ✓" : ""}
+          </Pill>
+        ) : (
+          <Pill tone="pending" title={q.assigned_by === "curator" ? "Kamu menandainya bukan tokoh yang dilacak" : "Pembicaranya tidak cocok dengan satu tokoh pun"}>
+            {q.assigned_by === "curator" ? "bukan tokoh yang dilacak" : "belum ada tokoh"}
+          </Pill>
+        )}
+        {q.figure_id ? (
+          <span style={{ fontSize: 12, color: MUTED }}>
+            {[title, own ? "pemilik catatan" : null, q.assigned_by === "curator" ? null : "dicocokkan otomatis"].filter(Boolean).join(" · ")}
+          </span>
+        ) : null}
+        {shown ? <Pill tone="accept">tampil di catatan</Pill> : null}
+        <span style={{ flex: 1 }} />
+        {item.kind === "record" && own && !shown ? (
+          <form action={pickQuote}>
+            <Hidden fields={{ event_id: item.event_id, quote_id: q.id }} />
+            <button type="submit" style={button("accept")}>Tampilkan di catatan</button>
+          </form>
+        ) : null}
+        <SpeakerEditor quoteId={q.id} listId={FIGURE_LIST} canClear={Boolean(q.figure_id) || q.assigned_by !== "curator"} />
+      </div>
+    </li>
   );
 }

@@ -43,8 +43,8 @@ export default async function Pelajaran() {
         </header>
         {lessons.length === 0 ? (
           <p style={{ fontSize: 14, color: MUTED, padding: "24px 0" }}>
-            Belum ada pelajaran. Pelajaran muncul setelah kamu menerima draf “Kerjakan ulang” atau mengoreksi draf
-            “Jadikan info CV”, dan putaran kurasi berikutnya berjalan.
+            Belum ada pelajaran. Pelajaran muncul setelah kamu menerima draf “Kerjakan ulang” dan putaran kurasi
+            berikutnya berjalan.
           </p>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>

@@ -4,12 +4,18 @@
 Requests start the moment the curator makes them (scripts/kurasi_ops.py, run
 by the page in the background). The stage only takes what that left undone —
 still queued, abandoned mid-run, or failed because Ollama was down — so
-nothing is drafted twice, and nothing it drafts is applied without the
-curator accepting it.
+nothing is drafted twice, and nothing it drafts for a request is applied
+without the curator accepting it.
+
+The one exception is CV material (auto_cv): records that are a fact about
+their figure rather than an act are found, drafted and put on the CV by the
+stage itself, and come down as "Bahan CV".
 """
 from __future__ import annotations
 
 import json
+import re
+import sqlite3
 from datetime import datetime, timezone
 
 from . import cv_extract, summarize
@@ -268,6 +274,205 @@ def learn_name_prefixes(conn, min_names: int = 3) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# CV material, found and applied without the curator
+
+AUTO_CV_PER_RUN = 40     # model checks per run; the rest wait for the next one
+AUTO_CV_NOTE = "Otomatis: masuk CV"
+# Only a record this recent may reorder a CV. A profile from last year still
+# says "Sekretaris Kabinet (2015 – kini)"; put first, it would make a past
+# office the figure's title.
+FRESH_DAYS = 60
+
+
+def _same(a: str, b: str) -> bool:
+    return a.strip().lower() == b.strip().lower()
+
+
+def apply_cv(conn, figure_id: str, kept: dict, fresh: bool = True) -> None:
+    """Merge CV entries into a figure.
+
+    Offices already listed (same role and body) are not repeated. A current one
+    ("… – kini") from a `fresh` record goes first, since the first office is
+    the figure's title; from an older record everything is only appended, and
+    the title stays. A fact is added only under a label the CV lacks: what is
+    there may be the curator's, and a newer article is no better source for a
+    birth date. The articles join the CV's sources.
+    `cv_curated` is left alone: these are the model's, not the curator's, and
+    scripts/import_cv.py may still replace them.
+    """
+    f = conn.execute("SELECT positions, facts, education, sources FROM figures WHERE id = ?",
+                     (figure_id,)).fetchone()
+    if f is None:
+        raise Refused(f"unknown figure: {figure_id}")
+
+    def load(raw):
+        try:
+            v = json.loads(raw or "[]")
+        except ValueError:
+            return []
+        return v if isinstance(v, list) else []
+
+    positions = load(f["positions"])
+    for pos in kept.get("positions", []):
+        if any(_same(x.get("role", ""), pos["role"]) and _same(x.get("org", ""), pos["org"])
+               for x in positions):
+            continue
+        if fresh and re.search(r"kini|sekarang", pos.get("period", ""), re.I):
+            positions.insert(0, pos)
+        else:
+            positions.append(pos)
+    facts = load(f["facts"])
+    for fact in kept.get("facts", []):
+        if not any(_same(x.get("label", ""), fact["label"]) for x in facts):
+            facts.append(fact)
+    education = load(f["education"])
+    for e in kept.get("education", []):
+        if not any(_same(x.get("detail", ""), e["detail"]) for x in education):
+            education.append({"year": e["year"], "detail": e["detail"]} if e.get("year")
+                             else {"detail": e["detail"]})
+    sources = load(f["sources"])
+    for src in kept.get("sources", []):
+        if not any(x.get("url") == src["url"] for x in sources):
+            sources.append(src)
+    title = (" ".join(x for x in (positions[0].get("role", "").strip(),
+                                  positions[0].get("org", "").strip()) if x)
+             if positions and fresh else None)
+    conn.execute(
+        "UPDATE figures SET positions = ?, role = COALESCE(?, role), facts = ?, education = ?, "
+        "sources = ? WHERE id = ?",
+        (json.dumps(positions, ensure_ascii=False), title or None,
+         json.dumps(facts, ensure_ascii=False), json.dumps(education, ensure_ascii=False),
+         json.dumps(sources, ensure_ascii=False), figure_id))
+
+
+def _take_down_as_cv(conn, event_id: int, figure_id: str) -> None:
+    """The record comes down as "Bahan CV", as setCuration in /kurasi records it."""
+    conn.execute("UPDATE events SET curated = 'rejected' WHERE id = ?", (event_id,))
+    conn.execute(
+        """INSERT INTO curation_labels
+                  (event_id, verdict, reasons, note, kind, figure_id, title, summary,
+                   outlets, suggested, decided_at)
+           SELECT e.id, 'rejected', ?, ?, e.kind, e.figure_id, e.title, es.summary_text,
+                  (SELECT count(DISTINCT a.source) FROM articles a WHERE a.event_id = e.id),
+                  NULL, ?
+             FROM events e LEFT JOIN event_summaries es ON es.event_id = e.id
+            WHERE e.id = ?
+           ON CONFLICT (event_id) DO UPDATE
+              SET verdict = excluded.verdict, reasons = excluded.reasons, note = excluded.note,
+                  title = excluded.title, summary = excluded.summary,
+                  outlets = excluded.outlets, decided_at = excluded.decided_at""",
+        (json.dumps(["cv_material"]), f"{AUTO_CV_NOTE} {figure_id}", _now(), event_id))
+
+
+def _add_title_office(conn, draft: dict, event_id: int, office: str) -> None:
+    """The office named in the title, as "<year> – kini" from the record's
+    date, when the model found none. When it did, its fuller name for the same
+    office ("Kepala Badan Narkotika Nasional" for "Kepala BNN") is kept and the
+    title's short one would only repeat it."""
+    if draft["positions"]:
+        return
+    when = conn.execute("SELECT event_date FROM events WHERE id = ?", (event_id,)).fetchone()[0] or ""
+    period = f"{when[:4]} – kini" if when[:4].isdigit() else ""
+    draft["positions"].insert(0, {"role": office, "org": "", "period": period})
+
+
+def _is_fresh(conn, event_id: int) -> bool:
+    when = conn.execute("SELECT event_date FROM events WHERE id = ?", (event_id,)).fetchone()[0]
+    try:
+        then = datetime.fromisoformat(when)
+    except (TypeError, ValueError):
+        return False
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - then).days <= FRESH_DAYS
+
+
+def cv_candidates(conn, limit: int = AUTO_CV_PER_RUN) -> list[sqlite3.Row]:
+    """Live, unruled records not yet checked whose own title passes the CV
+    keyword screen, newest first. The title, not the headlines: a record's
+    title is written about its figure, while one headline among many naming
+    someone's appointment says nothing about whose CV it is."""
+    rows = conn.execute(
+        """SELECT e.id, e.figure_id, e.title
+             FROM events e JOIN figures f ON f.id = e.figure_id AND f.active
+            WHERE e.kind = 'record' AND e.status IN ('new', 'summarized', 'approved')
+              AND e.curated IS NULL
+              AND NOT EXISTS (SELECT 1 FROM cv_proposals p WHERE p.event_id = e.id)
+            ORDER BY coalesce(e.last_seen, e.event_date) DESC""").fetchall()
+    return [r for r in rows if cv_extract.CANDIDATE.search(r["title"] or "")][:limit]
+
+
+def auto_cv(conn, limit: int = AUTO_CV_PER_RUN) -> dict[str, int]:
+    """Find CV material among new records and apply it, with no curator step.
+
+    For each candidate the local model first says whether the record is a fact
+    about its figure (an appointment, a profile, family) rather than an act;
+    if so it drafts the entries, they go onto the figure's CV, and the record
+    comes down as "Bahan CV". Every candidate leaves one cv_proposals row
+    (origin 'auto'), applied or not, so it is never checked twice. The row is
+    written only once the model is done: a crash mid-run leaves nothing half
+    applied, and the record is simply checked again next run.
+    """
+    stats = {"checked": 0, "applied": 0, "not_cv": 0, "empty": 0, "failed": 0}
+    for r in cv_candidates(conn, limit):
+        now = _now()
+        name = conn.execute("SELECT name FROM figures WHERE id = ?", (r["figure_id"],)).fetchone()[0]
+        # Titles that settle it outright: an appointment ("Dilantik Menjadi
+        # Menko Polkam"), whose office is read from the title itself, or a
+        # profile of the figure. The 7B model calls being sworn in an "act" too
+        # often to be asked about these.
+        office = cv_extract.office_from_title(r["title"], name)
+        try:
+            if office or cv_extract.is_profile_of(r["title"], name):
+                is_cv, why = True, "judul: pelantikan/penunjukan" if office else "judul: profil"
+            else:
+                is_cv, why = cv_extract.is_cv_material(conn, r["id"], r["figure_id"])
+            draft = None
+            if is_cv:
+                draft = cv_extract.draft_cv(conn, r["id"], r["figure_id"], None,
+                                            examples=lessons_for(conn, "cv", r["figure_id"],
+                                                                 event_words(conn, r["id"])))
+                if office:
+                    _add_title_office(conn, draft, r["id"], office)
+        except cv_extract.ModelDown as e:
+            # Nothing to gain from the rest of the list; it waits for next run.
+            stats["failed"] += 1
+            print(f"auto_cv: stopped at event {r['id']}: {e}")
+            break
+        except (RuntimeError, ValueError) as e:
+            # One bad answer (not JSON) or a record with no articles: skip it,
+            # unrecorded, so the next run tries it again.
+            stats["failed"] += 1
+            print(f"auto_cv: skipped event {r['id']}: {e}")
+            continue
+        stats["checked"] += 1
+        entries = sum(len(draft[k]) for k in ("positions", "facts", "education")) if draft else 0
+        if is_cv and entries:
+            status, error = "accepted", None
+        elif is_cv:
+            status, error = "discarded", f"auto: bahan CV, tetapi tak ada isian ({why})"
+        else:
+            status, error = "discarded", f"auto: bukan bahan CV ({why})"
+        with conn:
+            conn.execute(
+                """INSERT INTO cv_proposals
+                       (event_id, figure_id, note, status, proposal, accepted, error,
+                        created_at, finished_at, decided_at, learned_at, origin)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auto')""",
+                (r["id"], r["figure_id"], why or None, status,
+                 json.dumps(draft, ensure_ascii=False) if draft else None,
+                 json.dumps(draft, ensure_ascii=False) if status == "accepted" else None,
+                 error, now, now, now, now))
+            if status == "accepted":
+                apply_cv(conn, r["figure_id"], draft, fresh=_is_fresh(conn, r["id"]))
+                _take_down_as_cv(conn, r["id"], r["figure_id"])
+                stats["applied"] += 1
+            else:
+                stats["not_cv" if not is_cv else "empty"] += 1
+    return stats
+
+
+# ---------------------------------------------------------------------------
 # The stage
 
 def catch_up(conn) -> dict[str, int]:
@@ -294,7 +499,7 @@ def catch_up(conn) -> dict[str, int]:
 def run_stage(conn) -> dict:
     """The nightly `kurasi` stage: catch up, learn, refresh the names queue, report."""
     from . import candidate_queue
-    stats: dict = {"drafted": catch_up(conn), "learned": learn(conn)}
+    stats: dict = {"drafted": catch_up(conn), "cv_auto": auto_cv(conn), "learned": learn(conn)}
     stats["name_prefixes"] = learn_name_prefixes(conn)
     stats["names_queue"] = candidate_queue.refresh(conn)
     stats["lessons_active"] = conn.execute(

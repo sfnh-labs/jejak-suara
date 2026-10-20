@@ -18,13 +18,14 @@ import {
   setRelatedFigure,
   requestRework,
   removeNotAPerson,
-  requestCvDraft,
-  acceptCvDraft,
-  discardCvDraft,
-  type CvDraft,
   setLessonActive,
+  saveOrganization,
+  deleteOrganization,
   acceptRework,
   discardRework,
+  assignQuote,
+  addQuote,
+  showQuote,
 } from "@/lib/curation";
 
 /*
@@ -260,41 +261,55 @@ export async function notAPerson(formData: FormData): Promise<void> {
   done(eventId(formData));
 }
 
-/** "Jadikan info CV": draft CV entries for a figure from this event's articles. */
-export async function cvDraft(formData: FormData): Promise<void> {
-  const id = eventId(formData);
-  const figureId = text(formData, "figure_id", 120).toLowerCase();
-  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
-  await requestCvDraft(id, figureId, text(formData, "note", 1000) || null);
-  done(id);
-}
-
-/** Accept the CV entries as the curator left them, or throw the draft away. */
-export async function decideCvDraft(formData: FormData): Promise<void> {
-  const id = eventId(formData);
-  const proposalId = eventId(formData, "proposal_id");
-  if (formData.get("decision") !== "accept") {
-    await discardCvDraft(proposalId);
-    done(id);
-    return;
-  }
-  const column = (field: string, max = 300) => formData.getAll(field).map((v) => String(v).trim().slice(0, max));
-  const [roles, orgs, periods] = [column("cv_role"), column("cv_org"), column("cv_period")];
-  const [labels, values] = [column("cv_label"), column("cv_value", 500)];
-  const [years, details] = [column("cv_year"), column("cv_detail", 500)];
-  const [srcLabels, srcUrls] = [column("cv_src_label"), column("cv_src_url", 1000)];
-  const kept: CvDraft = {
-    positions: roles.map((role, i) => ({ role, org: orgs[i] ?? "", period: periods[i] ?? "" })).filter((x) => x.role),
-    facts: labels.map((label, i) => ({ label, value: values[i] ?? "" })).filter((x) => x.label && x.value),
-    education: details.map((detail, i) => (years[i] ? { year: years[i], detail } : { detail })).filter((x) => x.detail),
-    sources: srcUrls.map((url, i) => ({ label: srcLabels[i] || url, url })).filter((x) => /^https?:\/\//.test(x.url)),
-  };
-  await acceptCvDraft(proposalId, kept);
-  done(id);
-}
-
 export async function toggleLesson(formData: FormData): Promise<void> {
   const id = eventId(formData, "lesson_id");
   await setLessonActive(id, formData.get("active") === "1");
   revalidatePath("/kurasi/pelajaran");
+}
+
+/** Adds or renames an organisation; "delete" removes it. */
+export async function editOrganization(formData: FormData): Promise<void> {
+  const raw = formData.get("org_id");
+  const id = raw ? eventId(formData, "org_id") : null;
+  if (formData.get("op") === "delete") {
+    if (id === null) throw new Error("org_id is required");
+    await deleteOrganization(id);
+  } else {
+    await saveOrganization(id, text(formData, "name", 200), text(formData, "short_name", 60) || null);
+  }
+  revalidatePath("/kurasi", "layout");
+}
+
+/** Whose words a quote is ("clear": no tracked figure). */
+export async function setQuoteSpeaker(formData: FormData): Promise<void> {
+  const quoteId = eventId(formData, "quote_id");
+  let figureId: string | null = null;
+  if (formData.get("op") !== "clear") {
+    figureId = text(formData, "figure_id", 120).toLowerCase();
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
+  }
+  done(await assignQuote(quoteId, figureId));
+}
+
+/** A quote the curator adds by hand; the figure is optional (unplaced). */
+export async function newQuote(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const figureId = text(formData, "figure_id", 120).toLowerCase() || null;
+  if (figureId && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
+  await addQuote(id, {
+    quote: text(formData, "quote", 2000),
+    speaker: text(formData, "speaker", 200) || null,
+    figureId,
+    url: optional(formData, "url"),
+    show: formData.get("show") === "1",
+  });
+  done(id);
+}
+
+/** The quote a record shows: a quote id, "none", or "auto". */
+export async function pickQuote(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const choice = String(formData.get("quote_id") ?? "");
+  await showQuote(id, choice === "none" ? null : choice === "auto" ? "auto" : eventId(formData, "quote_id"));
+  done(id);
 }

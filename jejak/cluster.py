@@ -163,13 +163,14 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
     Uses hybrid matching: cosine similarity on sentence embeddings + a guard of
     MIN_SHARED content words (excluding figure names) to avoid false merges.
     """
-    stats = {"clustered": 0, "new_events": 0, "promoted": 0, "pruned": 0}
+    stats = {"clustered": 0, "new_events": 0, "promoted": 0, "pruned": 0,
+             "derived_dropped": 0}
     now_iso = datetime.now(timezone.utc).isoformat()
     peristiwa_window = timedelta(days=WINDOW_DAYS)
     record_window = timedelta(days=RECORD_WINDOW_DAYS)
 
     rows = conn.execute(
-        """SELECT id, figure_id, title, summary, body, published_at
+        """SELECT id, figure_id, title, summary, body, published_at, derived_mode
            FROM articles WHERE event_id IS NULL
            ORDER BY published_at"""
     ).fetchall()
@@ -222,6 +223,11 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
         threshold = PERISTIWA_THRESHOLD if is_general else THRESHOLD
         min_shared = PERISTIWA_MIN_SHARED if is_general else MIN_SHARED
         window = peristiwa_window if is_general else record_window
+        # A recalled statement (jejak/actors.py) is dated by the article that
+        # recalls it, so the record it belongs to can be a few days older.
+        join_only = art["derived_mode"] == "join"
+        if join_only:
+            window = peristiwa_window
 
         match_id = None
         best = threshold
@@ -248,6 +254,14 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
             if cosine_similarity(vec, seed_vec) < threshold:
                 continue
             best, match_id = sim, eid
+
+        if match_id is None and join_only:
+            # Nothing of theirs to join: a new record would carry the wrong date.
+            conn.execute("DELETE FROM article_embeddings WHERE article_id = ?", (art["id"],))
+            conn.execute("DELETE FROM article_scans WHERE article_id = ?", (art["id"],))
+            conn.execute("DELETE FROM articles WHERE id = ?", (art["id"],))
+            stats["derived_dropped"] += 1
+            continue
 
         if match_id is None:
             art_texts = [txt]

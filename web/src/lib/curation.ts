@@ -44,7 +44,7 @@ export const REASONS = [
   { code: "mixed", label: "Campuran beberapa kejadian", hint: "Artikelnya tentang kejadian berbeda yang tergabung, mis. dua kebakaran di provinsi lain." },
   { code: "hoax", label: "Hoaks / sudah dibantah", hint: "Klaimnya keliru atau sudah dibantah." },
   { code: "garbled", label: "Judul/ringkasan rusak", hint: "Isinya ada, tetapi judul atau ringkasannya kacau." },
-  { code: "cv_material", label: "Bahan CV, bukan peristiwa", hint: "Pelantikan, jabatan baru, latar belakang: masuk ke CV tokoh (lihat “Jadikan info CV”)." },
+  { code: "cv_material", label: "Bahan CV, bukan peristiwa", hint: "Pelantikan, jabatan baru, latar belakang: masuk ke CV tokoh. Pipeline menemukan dan memasukkannya sendiri." },
   { code: "other", label: "Lainnya", hint: "Tulis alasannya di catatan." },
 ] as const;
 
@@ -394,6 +394,27 @@ export interface Item {
   reworks: Rework[];
   /** "Jadikan info CV" drafts from this event, newest first. */
   cvProposals: CvProposal[];
+  /**
+   * The quote the record shows: NULL = none found yet (the pipeline keeps
+   * looking), '' = the curator chose none.
+   */
+  quote: string | null;
+  quote_url: string | null;
+  /** Every attributed quote in the coverage (event_quotes), owner's first. */
+  quotes: QuoteRow[];
+}
+
+/** One quote from an event's articles and whose words it is. */
+export interface QuoteRow {
+  id: number;
+  quote: string;
+  /** The speaker as the article writes them. */
+  speaker: string | null;
+  figure_id: string | null;
+  figure_name: string | null;
+  assigned_by: "auto" | "curator" | null;
+  url: string | null;
+  source: string | null;
 }
 
 /** CV entries drafted from an event's articles (jejak/cv_extract.py). */
@@ -407,6 +428,8 @@ export interface CvDraft {
 export interface CvProposal {
   id: number;
   figure_id: string;
+  /** 'auto': found and applied by the pipeline's kurasi stage (kurasi.auto_cv). */
+  origin: string;
   note: string | null;
   status: ReworkStatus;
   proposal: CvDraft | null;
@@ -670,12 +693,12 @@ async function getLinks(kind: Kind, eventId: number): Promise<LinkRow[]> {
 
 export async function getItem(eventId: number): Promise<Item | null> {
   const row = await queryOne<
-    Omit<Item, "sources" | "owner" | "named" | "links" | "nearby" | "next_id" | "ruling" | "suggestion" | "examples" | "reworks" | "cvProposals">
+    Omit<Item, "sources" | "owner" | "named" | "links" | "nearby" | "next_id" | "ruling" | "suggestion" | "examples" | "reworks" | "cvProposals" | "quotes">
     & SuggestionColumns
     & { r_reasons: string | null; r_note: string | null; r_suggested: string | null }
   >(
     `SELECT e.id AS event_id, e.kind, e.figure_id, e.event_date, e.last_seen,
-            e.title, e.event_type, e.status, e.curated, e.framing,
+            e.title, e.event_type, e.status, e.curated, e.framing, e.quote, e.quote_url,
             es.summary_text AS summary,
             cr.reasons AS r_reasons, cr.note AS r_note, cr.suggested AS r_suggested,
             ${SUGGESTION_SELECT}
@@ -701,7 +724,7 @@ export async function getItem(eventId: number): Promise<Item | null> {
       )
     : [];
 
-  const [articles, owner, related, links, next, followups, reworks, cvProposals] = await Promise.all([
+  const [articles, owner, related, links, next, followups, reworks, cvProposals, quotes] = await Promise.all([
     query<Omit<ItemSource, "has_body"> & { body: string | null }>(
       `SELECT id, source, url, title, published_at, summary AS lead, body
          FROM articles WHERE event_id = ?
@@ -743,6 +766,7 @@ export async function getItem(eventId: number): Promise<Item | null> {
     getFollowups(eventId),
     getReworks(eventId),
     getCvProposals(eventId),
+    getQuotes(eventId, ev.figure_id),
   ]);
 
   // A struck figure wins over the still-present event_figures row.
@@ -824,12 +848,124 @@ export async function getItem(eventId: number): Promise<Item | null> {
     examples: examples.map((x) => ({ ...x, reasons: jsonCodes(x.reasons) })),
     reworks,
     cvProposals,
+    quotes,
   };
+}
+
+async function getQuotes(eventId: number, ownerId: string | null): Promise<QuoteRow[]> {
+  // The owner's words first, then other figures', then the unplaced.
+  return query<QuoteRow>(
+    `SELECT q.id, q.quote, q.speaker, q.figure_id, f.name AS figure_name, q.assigned_by, q.url,
+            a.source
+       FROM event_quotes q
+       LEFT JOIN figures f ON f.id = q.figure_id
+       LEFT JOIN articles a ON a.id = q.article_id
+      WHERE q.event_id = ?1
+      ORDER BY q.figure_id IS ?2 DESC, q.figure_id IS NULL, f.name, length(q.quote) DESC`,
+    [eventId, ownerId]
+  );
+}
+
+/**
+ * Whose words a quote is: a figure, or nobody tracked (null). The curator's
+ * say is kept: collection never reassigns a listed quote. When the quote the
+ * record shows is taken off its owner, the record shows the owner's longest
+ * other quote instead, or none.
+ */
+export async function assignQuote(quoteId: number, figureId: string | null): Promise<number> {
+  const q = await queryOne<{ event_id: number; quote: string }>(
+    `SELECT event_id, quote FROM event_quotes WHERE id = ?`, [quoteId]
+  );
+  if (!q) throw new Error(`unknown quote: ${quoteId}`);
+  if (figureId) {
+    const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ?`, [figureId]);
+    if (!fig) throw new Error(`unknown figure: ${figureId}`);
+  }
+  await ltx(async () => {
+    await lrun(`UPDATE event_quotes SET figure_id = ?, assigned_by = 'curator' WHERE id = ?`, [figureId, quoteId]);
+    const ev = await queryOne<{ figure_id: string | null; quote: string | null }>(
+      `SELECT figure_id, quote FROM events WHERE id = ?`, [q.event_id]
+    );
+    if (ev && ev.quote === q.quote && ev.figure_id !== figureId) {
+      const next = await queryOne<{ quote: string; url: string | null }>(
+        `SELECT quote, url FROM event_quotes WHERE event_id = ? AND figure_id = ? AND id <> ?
+          ORDER BY length(quote) DESC LIMIT 1`,
+        [q.event_id, ev.figure_id, quoteId]
+      );
+      await lrun(`UPDATE events SET quote = ?, quote_url = ? WHERE id = ?`,
+                 [next?.quote ?? "", next?.url ?? null, q.event_id]);
+    }
+  });
+  return q.event_id;
+}
+
+/**
+ * A quote the curator adds by hand: words the extractor missed or cut short.
+ * It is the curator's say (collection never reassigns it); an existing quote
+ * with the same words takes the new speaker instead. `show` also makes it the
+ * quote the record shows, when it is the owner's words.
+ */
+export async function addQuote(
+  eventId: number,
+  q: { quote: string; speaker: string | null; figureId: string | null; url: string | null; show: boolean }
+): Promise<void> {
+  const words = q.quote.replace(/^["“”'‘’\s]+|["“”'‘’\s]+$/g, "").replace(/\s+/g, " ");
+  if (!words) throw new Error("quote is empty");
+  const ev = await queryOne<{ figure_id: string | null }>(`SELECT figure_id FROM events WHERE id = ?`, [eventId]);
+  if (!ev) throw new Error(`unknown event: ${eventId}`);
+  if (q.figureId) {
+    const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ?`, [q.figureId]);
+    if (!fig) throw new Error(`unknown figure: ${q.figureId}`);
+  }
+  // The source must be one of the event's own articles.
+  const art = q.url
+    ? await queryOne<{ id: string; url: string }>(
+        `SELECT id, url FROM articles WHERE event_id = ? AND url = ?`, [eventId, q.url])
+    : null;
+  if (q.url && !art) throw new Error("source is not one of this event's articles");
+  await ltx(async () => {
+    await lrun(
+      `INSERT INTO event_quotes (event_id, article_id, url, quote, speaker, figure_id, assigned_by, found_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'curator', ?)
+       ON CONFLICT (event_id, quote) DO UPDATE SET
+         speaker = COALESCE(excluded.speaker, event_quotes.speaker),
+         figure_id = excluded.figure_id, assigned_by = 'curator',
+         article_id = COALESCE(excluded.article_id, event_quotes.article_id),
+         url = COALESCE(excluded.url, event_quotes.url)`,
+      [eventId, art?.id ?? null, art?.url ?? null, words, q.speaker, q.figureId, new Date().toISOString()]
+    );
+    if (q.show && q.figureId && q.figureId === ev.figure_id) {
+      await lrun(`UPDATE events SET quote = ?, quote_url = ? WHERE id = ?`, [words, art?.url ?? null, eventId]);
+    }
+  });
+}
+
+/**
+ * The quote a record shows: one of its owner's (quoteId), none (null: the
+ * pipeline will not refill it), or back to the pipeline's own pick ("auto").
+ */
+export async function showQuote(eventId: number, quoteId: number | null | "auto"): Promise<void> {
+  if (quoteId === "auto") {
+    await lrun(`UPDATE events SET quote = NULL, quote_url = NULL WHERE id = ?`, [eventId]);
+    return;
+  }
+  if (quoteId === null) {
+    await lrun(`UPDATE events SET quote = '', quote_url = NULL WHERE id = ?`, [eventId]);
+    return;
+  }
+  const q = await queryOne<{ quote: string; url: string | null }>(
+    `SELECT q.quote, q.url FROM event_quotes q JOIN events e ON e.id = q.event_id
+      WHERE q.id = ? AND q.event_id = ? AND q.figure_id = e.figure_id`,
+    [quoteId, eventId]
+  );
+  if (!q) throw new Error("only the record's own figure's words can be shown");
+  await lrun(`UPDATE events SET quote = ?, quote_url = ? WHERE id = ?`, [q.quote, q.url, eventId]);
 }
 
 async function getCvProposals(eventId: number): Promise<CvProposal[]> {
   const rows = await query<Omit<CvProposal, "proposal"> & { proposal: string | null }>(
-    `SELECT id, figure_id, note, status, proposal, error, created_at
+    // What went onto the CV where something did, else what was drafted.
+    `SELECT id, figure_id, origin, note, status, coalesce(accepted, proposal) AS proposal, error, created_at
        FROM cv_proposals WHERE event_id = ? ORDER BY id DESC LIMIT 5`,
     [eventId]
   );
@@ -842,90 +978,6 @@ async function getCvProposals(eventId: number): Promise<CvProposal[]> {
     }
     return { ...r, proposal };
   });
-}
-
-/**
- * "Jadikan info CV": have the local model draft what this event's articles
- * say about a figure's offices, background and education
- * (scripts/kurasi_ops.py cv-draft), for the curator to check and accept.
- */
-export async function requestCvDraft(eventId: number, figureId: string, note: string | null): Promise<void> {
-  const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ? AND active`, [figureId]);
-  if (!fig) throw new Error(`unknown figure: ${figureId}`);
-  const busy = await queryOne(
-    `SELECT 1 FROM cv_proposals WHERE event_id = ? AND status IN ('queued', 'running') AND created_at > ?`,
-    [eventId, new Date(Date.now() - 15 * 60_000).toISOString()]
-  );
-  if (busy) throw new Error("a CV draft for this event is already running");
-  await lrun(
-    `INSERT INTO cv_proposals (event_id, figure_id, note, created_at) VALUES (?, ?, ?, ?)`,
-    [eventId, figureId, note, new Date().toISOString()]
-  );
-  const row = await queryOne<{ id: number }>(`SELECT max(id) AS id FROM cv_proposals WHERE event_id = ?`, [eventId]);
-  pipelineOpInBackground("cv-draft", String(row!.id));
-}
-
-const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-
-/**
- * Put the entries the curator kept onto the figure's CV, then take the record
- * down as "Bahan CV" — it was a fact about someone, not something they did.
- *
- * Offices already listed (same role and body) are not repeated; a current one
- * ("… – kini") goes first, since the first office is the figure's title. A
- * fact replaces one with the same label. The article joins the CV's sources.
- */
-export async function acceptCvDraft(proposalId: number, kept: CvDraft): Promise<void> {
-  const p = await queryOne<{ event_id: number; figure_id: string; status: string }>(
-    `SELECT event_id, figure_id, status FROM cv_proposals WHERE id = ?`, [proposalId]
-  );
-  if (!p || p.status !== "ready") throw new Error("this CV draft is not ready");
-  const f = await queryOne<{ positions: string | null; facts: string | null; education: string | null; sources: string | null }>(
-    `SELECT positions, facts, education, sources FROM figures WHERE id = ?`, [p.figure_id]
-  );
-  if (!f) throw new Error(`unknown figure: ${p.figure_id}`);
-
-  const positions = parsePositions(f.positions);
-  for (const pos of kept.positions) {
-    if (positions.some((x) => sameText(x.role, pos.role) && sameText(x.org, pos.org))) continue;
-    if (/kini|sekarang/i.test(pos.period)) positions.unshift(pos);
-    else positions.push(pos);
-  }
-  const facts = jsonList<{ label: string; value: string }>(f.facts);
-  for (const fact of kept.facts) {
-    const i = facts.findIndex((x) => sameText(x.label, fact.label));
-    if (i >= 0) facts[i] = fact;
-    else facts.push(fact);
-  }
-  const education = jsonList<{ year?: string; detail: string }>(f.education);
-  for (const e of kept.education) {
-    if (!education.some((x) => sameText(x.detail, e.detail))) education.push(e);
-  }
-  const sources = jsonList<{ label: string; url: string }>(f.sources);
-  for (const src of kept.sources) {
-    if (!sources.some((x) => x.url === src.url)) sources.push(src);
-  }
-
-  await ltx(async () => {
-    await lrun(
-      `UPDATE figures SET positions = ?, role = COALESCE(?, role), facts = ?, education = ?, sources = ?,
-              cv_curated = 1 WHERE id = ?`,
-      [JSON.stringify(positions), positions[0] ? positionTitle(positions[0]) : null,
-       JSON.stringify(facts), JSON.stringify(education), JSON.stringify(sources), p.figure_id]
-    );
-    // What the curator kept, beside what the model drafted: the nightly
-    // `kurasi` stage learns from the difference.
-    await lrun(`UPDATE cv_proposals SET status = 'accepted', accepted = ?, decided_at = ? WHERE id = ?`,
-      [JSON.stringify(kept), new Date().toISOString(), proposalId]);
-  });
-  await setCuration(p.event_id, "rejected", ["cv_material"], `Masuk CV ${p.figure_id}`);
-}
-
-export async function discardCvDraft(proposalId: number): Promise<void> {
-  await lrun(
-    `UPDATE cv_proposals SET status = 'discarded', decided_at = ? WHERE id = ? AND status IN ('ready', 'failed')`,
-    [new Date().toISOString(), proposalId]
-  );
 }
 
 async function getReworks(eventId: number): Promise<Rework[]> {
@@ -1473,4 +1525,54 @@ export async function getLessons(): Promise<Lesson[]> {
 /** A lesson switched off is never shown to the model again. */
 export async function setLessonActive(id: number, active: boolean): Promise<void> {
   await lrun(`UPDATE curation_lessons SET active = ? WHERE id = ?`, [active, id]);
+}
+
+/** An organisation by its long and short names: "Komisi Pemberantasan Korupsi", "KPK". */
+export interface Organization {
+  id: number;
+  name: string;
+  short_name: string | null;
+}
+
+// Same as jejak/db.py, so the page works before the pipeline has next run.
+const ORGANIZATIONS_DDL = `CREATE TABLE IF NOT EXISTS organizations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    short_name  TEXT UNIQUE COLLATE NOCASE,
+    updated_at  TEXT NOT NULL
+)`;
+
+export async function getOrganizations(): Promise<Organization[]> {
+  await lrun(ORGANIZATIONS_DDL);
+  return query<Organization>(`SELECT id, name, short_name FROM organizations ORDER BY name COLLATE NOCASE`);
+}
+
+/**
+ * Adds an organisation (id null) or renames one. A name may be used once
+ * across both columns, so "KPK" cannot be one organisation's short name and
+ * another's long one.
+ */
+export async function saveOrganization(id: number | null, name: string, shortName: string | null): Promise<void> {
+  await lrun(ORGANIZATIONS_DDL);
+  if (!name) throw new Error("name is required");
+  if (shortName && shortName.toLowerCase() === name.toLowerCase()) shortName = null;
+  const clash = await queryOne<{ name: string }>(
+    `SELECT name FROM organizations
+      WHERE id IS NOT ?1
+        AND (name = ?2 COLLATE NOCASE OR short_name = ?2 COLLATE NOCASE
+             OR (?3 IS NOT NULL AND (name = ?3 COLLATE NOCASE OR short_name = ?3 COLLATE NOCASE)))`,
+    [id, name, shortName]
+  );
+  if (clash) throw new Error(`already used by ${clash.name}`);
+  const now = new Date().toISOString();
+  if (id === null) {
+    await lrun(`INSERT INTO organizations (name, short_name, updated_at) VALUES (?, ?, ?)`, [name, shortName, now]);
+  } else {
+    await lrun(`UPDATE organizations SET name = ?, short_name = ?, updated_at = ? WHERE id = ?`, [name, shortName, now, id]);
+  }
+}
+
+export async function deleteOrganization(id: number): Promise<void> {
+  await lrun(ORGANIZATIONS_DDL);
+  await lrun(`DELETE FROM organizations WHERE id = ?`, [id]);
 }

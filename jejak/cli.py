@@ -4,7 +4,8 @@
     python -m jejak.cli ingest               # pull RSS -> articles
     python -m jejak.cli backfill             # walk outlet archives backwards
     python -m jejak.cli fetch                # backfill full article bodies
-    python -m jejak.cli mentions             # discover figures from coverage
+    python -m jejak.cli mentions             # discover figures from coverage; other figures'
+                                             # statements become articles of theirs (actors.py)
     python -m jejak.cli cluster              # articles -> events
     python -m jejak.cli link                 # propose record -> peristiwa links
     python -m jejak.cli summarize            # grounded drafts for new events
@@ -34,7 +35,7 @@ from datetime import date
 from . import backfill as backfill_mod
 from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
-from . import db, fetch, figure_stance, ingest, link, mentions, quotes, sentiment, summarize, timeline as timeline_mod
+from . import actors, db, fetch, figure_stance, ingest, link, mentions, quotes, sentiment, summarize, timeline as timeline_mod
 from . import translate
 from . import curation_suggest
 from . import youtube_ingest
@@ -166,6 +167,9 @@ def main(argv: list[str] | None = None) -> int:
                 only_unclustered=not getattr(args, "reattribute", False),
                 gains_only=getattr(args, "gains_only", False),
             ))
+            # After reattribution: a statement by a figure promoted just now
+            # is copied out too, before clustering makes records of it.
+            print("actors:", actors.derive(conn, limit=getattr(args, "limit", 500)))
         if args.cmd in ("cluster", "run"):
             print("cluster:", cluster_mod.cluster(conn))
         if args.cmd in ("link", "run"):

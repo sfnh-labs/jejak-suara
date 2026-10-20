@@ -605,6 +605,26 @@ class TestQuotes:
         body = '"Ini semua berkat perjuangan para atlet yang gigih sekali," ujarnya.'
         assert self._q(body) is None
 
+    def test_pending_skips_quotes_the_curator_disowned(self, tmp_path):
+        """"Biarkan pipeline memilih lagi" must not bring back a quote the
+        curator said was someone else's words."""
+        conn = _fresh(tmp_path)
+        conn.execute("INSERT INTO figures (id, name, aliases) VALUES ('prabowo', ?, ?)",
+                     (self.NAME, '["Prabowo"]'))
+        conn.execute("INSERT INTO events (id, figure_id, kind, title, status, created_at) "
+                     "VALUES (1, 'prabowo', 'record', 't', 'active', 'x')")
+        long_q = "Kita akan bikin kaget banyak orang dengan pertumbuhan ekonomi kita"
+        short_q = "Kita jalan terus sampai seluruh program ini selesai dikerjakan"
+        body = (f'"{long_q}," kata Presiden Prabowo Subianto di Istana. '
+                f'"{short_q}," kata Prabowo.')
+        conn.execute("INSERT INTO articles (id, figure_id, source, url, title, fetched_at, "
+                     "event_id, body, fetch_status) VALUES ('a', 'prabowo', 's', 'u', 't', 'x', 1, ?, 'ok')",
+                     (body,))
+        conn.execute("INSERT INTO event_quotes (event_id, quote, figure_id, assigned_by, found_at) "
+                     "VALUES (1, ?, NULL, 'curator', 'x')", (long_q,))
+        quotes.quote_pending(conn)
+        assert conn.execute("SELECT quote FROM events WHERE id = 1").fetchone()[0] == short_q
+
 
 class TestNeonSync:
     def test_events_carry_their_id(self):
