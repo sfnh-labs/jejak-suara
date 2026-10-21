@@ -8,6 +8,7 @@
                                              # statements become articles of theirs (actors.py)
     python -m jejak.cli cluster              # articles -> events
     python -m jejak.cli link                 # propose record -> peristiwa links
+    python -m jejak.cli participants         # everyone in each record, not only its owner
     python -m jejak.cli summarize            # grounded drafts for new events
     python -m jejak.cli sentiment            # public-reaction scores for approved events
     python -m jejak.cli figure-stance        # stance toward the figure, from comments naming them
@@ -35,7 +36,7 @@ from datetime import date
 from . import backfill as backfill_mod
 from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
-from . import actors, db, fetch, figure_stance, ingest, link, mentions, quotes, sentiment, summarize, timeline as timeline_mod
+from . import actors, db, fetch, figure_stance, ingest, link, mentions, participants, quotes, sentiment, summarize, timeline as timeline_mod
 from . import translate
 from . import curation_suggest
 from . import youtube_ingest
@@ -95,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("link")
     sub.add_parser("summarize")
     sub.add_parser("quotes")
+    sub.add_parser("participants")
     sub.add_parser("sentiment")
     p_fs = sub.add_parser("figure-stance")
     p_fs.add_argument("--limit", type=int, default=None)
@@ -177,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
             print("follow-ups:", link.link_followups(conn))
         if args.cmd in ("quotes", "run"):
             print("quotes:", quotes.quote_pending(conn))
+        if args.cmd in ("participants", "run"):
+            print("participants:", participants.backfill(conn))
         if args.cmd in ("summarize", "run"):
             try:
                 for res in summarize.summarize_pending(conn):
