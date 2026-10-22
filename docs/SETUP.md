@@ -326,7 +326,10 @@ If the new machine uses different drives, update these:
 - `CLAUDE.md` at the repo root holds the git workflow: one short-lived
   `<area>/<slug>` branch per change, each in its own worktree from
   `scripts/worktree.sh` (a bash script; on Windows run it from Git Bash, with
-  Developer Mode on so it can make symlinks).
+  Developer Mode on so it can make symlinks). Without Developer Mode it stops
+  rather than copy `jejak.db`: a copy would split curation off the real
+  database. Start the pipeline's scheduled task and `next dev` from the main
+  checkout only, and keep that checkout on `main`.
 - Project memory checked into the repo (`memory/*.md`) comes along with the clone.
 - Per-user memory under `~\.claude-personal\projects\D--Projects-jejak-suara\memory\`
   does not. It holds the imagery-style and entity-model notes. Copy that folder
