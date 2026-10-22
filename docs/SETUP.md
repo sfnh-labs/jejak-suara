@@ -9,8 +9,14 @@ them (see [Paths that are hard-coded](#paths-that-are-hard-coded)).
 
 ## 1. What git does not carry
 
-Clone the repo, then copy these from the old machine by hand. None of them are
-in git.
+Clone the repo and turn on its git hooks, which keep the branch workflow in
+`CLAUDE.md`:
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+Then copy these from the old machine by hand. None of them are in git.
 
 | Item | Where | Why it matters |
 |---|---|---|
@@ -211,12 +217,12 @@ Log in again with `npx wrangler login`.
 ## 5. Imagery generator (ukiyo-e)
 
 Event (peristiwa) and figure (tokoh) art comes from a local Automatic1111
-Stable Diffusion WebUI, driven over its HTTP API. The scripts are not on `main`
-yet. They live on branch **`docs/ukiyo-e-imagery-skill`**:
+Stable Diffusion WebUI, driven over its HTTP API. The scripts and the skill are
+on `main`:
 
 - `scripts/gen_event_images_webui.py`: events, 1216×832, written to `web/public/images/peristiwa/`
 - `scripts/gen_figure_portrait_webui.py`: figures, 768×1024, written to `web/public/images/tokoh/`
-- `.claude/skills/ukiyo-e-imagery/SKILL.md`: the full operating guide for Claude Code. It's a project skill, so it loads automatically on any machine where this branch is checked out.
+- `.claude/skills/ukiyo-e-imagery/SKILL.md`: the full operating guide for Claude Code. It's a project skill, so it loads automatically wherever the repo is checked out.
 
 ### Hardware
 
@@ -266,7 +272,6 @@ Render one image at a time.
    normal.
 7. Smoke test, which renders event 728 once:
    ```powershell
-   git checkout docs/ukiyo-e-imagery-skill
    D:\Tools\python310\python.exe scripts\gen_event_images_webui.py --smoke
    ```
 
@@ -318,6 +323,10 @@ If the new machine uses different drives, update these:
 
 ## 6. Claude Code context
 
+- `CLAUDE.md` at the repo root holds the git workflow: one short-lived
+  `<area>/<slug>` branch per change, each in its own worktree from
+  `scripts/worktree.sh` (a bash script; on Windows run it from Git Bash, with
+  Developer Mode on so it can make symlinks).
 - Project memory checked into the repo (`memory/*.md`) comes along with the clone.
 - Per-user memory under `~\.claude-personal\projects\D--Projects-jejak-suara\memory\`
   does not. It holds the imagery-style and entity-model notes. Copy that folder
