@@ -325,6 +325,43 @@ CREATE TABLE IF NOT EXISTS event_quotes (
 CREATE INDEX IF NOT EXISTS idx_event_quotes_event ON event_quotes(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_quotes_figure ON event_quotes(figure_id);
 
+-- Everyone taking part in a record, not just the figure it is filed under
+-- (jejak/participants.py). events.figure_id stays the record's main actor
+-- for display; this says who else is in it and how:
+--   'actor'    does or says the act ("Menolak Menu MBG")
+--   'subject'  the record is about them but they did not do it (framing 'about')
+--   'target'   the act is aimed at them; set by a curator only
+--   'quoted'   speaks in the coverage without being the actor
+-- One row per figure per record, the strongest role winning. Rows with
+-- assigned_by 'curator' are never touched by the stage.
+CREATE TABLE IF NOT EXISTS record_figures (
+    event_id    INTEGER NOT NULL,
+    figure_id   TEXT NOT NULL,
+    role        TEXT NOT NULL,      -- actor | subject | target | quoted
+    source      TEXT NOT NULL,      -- owner | quote | derived | curator
+    quotes      INTEGER NOT NULL DEFAULT 0,  -- their quotes in the record's coverage
+    assigned_by TEXT NOT NULL DEFAULT 'auto',
+    PRIMARY KEY (event_id, figure_id),
+    FOREIGN KEY (event_id) REFERENCES events(id)
+);
+CREATE INDEX IF NOT EXISTS idx_record_figures_figure ON record_figures(figure_id);
+
+-- Records whose filed actor is probably wrong: they are never quoted in the
+-- coverage and exactly one other figure is, as when an article about the
+-- President's programme carries only the BGN head's words. A curator moves
+-- the record ('move'), keeps it ('keep') or marks it as about the owner
+-- ('about') in /kurasi; the stage only adds and withdraws undecided rows.
+CREATE TABLE IF NOT EXISTS actor_reviews (
+    event_id     INTEGER PRIMARY KEY,
+    owner_id     TEXT NOT NULL,
+    suggested_id TEXT NOT NULL,
+    quotes       INTEGER NOT NULL,  -- the suggested figure's quotes in it
+    found_at     TEXT NOT NULL,
+    decision     TEXT,              -- move | keep | about, NULL = waiting
+    decided_at   TEXT,
+    FOREIGN KEY (event_id) REFERENCES events(id)
+);
+
 -- Organisations by their long and short names ("Komisi Pemberantasan
 -- Korupsi" / "KPK"), kept by the curator in /kurasi/organisasi. The figure
 -- editor offers both when filling in an office's organisation.
