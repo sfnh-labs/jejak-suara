@@ -9,6 +9,10 @@
 # database, and gets its own web/.env.local pointing JEJAK_DB at it.
 set -euo pipefail
 
+# Git Bash's ln -s copies unless told otherwise, and a copied jejak.db forks
+# the database. Make it a real symlink or fail (needs Developer Mode).
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) export MSYS=winsymlinks:nativestrict ;; esac
+
 ROOT=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
 . "$(dirname "$0")/../.githooks/branch-name.sh"
 
