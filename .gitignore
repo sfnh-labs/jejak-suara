@@ -23,7 +23,7 @@ web/out/
 # Python
 __pycache__/
 *.py[cod]
-.venv/
+.venv
 venv/
 .pytest_cache/
 
@@ -36,6 +36,9 @@ smoke*.db
 
 # Editor
 .claude/settings.local.json
+
+# Branch worktrees (scripts/worktree.sh)
+.claude/worktrees/
 
 # Build/log artifacts
 scripts/*.log

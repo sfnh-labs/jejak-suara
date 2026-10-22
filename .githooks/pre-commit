@@ -1,0 +1,17 @@
+#!/bin/sh
+# No commits on main; every other branch is <area>/<slug>. See CLAUDE.md.
+. "$(dirname "$0")/branch-name.sh"
+
+# Detached HEAD (mid-rebase, bisect): nothing to check.
+branch=$(git symbolic-ref --short -q HEAD) || exit 0
+
+if [ "$branch" = main ]; then
+  # Finishing a merge is the one commit main takes.
+  [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] && exit 0
+  echo "pre-commit: main takes changes through a PR. Start a branch:" >&2
+  echo "    scripts/worktree.sh new <area>/<slug>" >&2
+  echo "  (a deliberate one-off: git commit --no-verify)" >&2
+  exit 1
+fi
+
+check_branch "$branch"

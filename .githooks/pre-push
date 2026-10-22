@@ -1,0 +1,20 @@
+#!/bin/sh
+# main moves only through merged PRs; pushed branches are <area>/<slug>.
+. "$(dirname "$0")/branch-name.sh"
+
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Deleting a remote branch is always fine, whatever its name.
+  [ "$local_sha" = "$zero" ] && continue
+  case "$remote_ref" in
+    refs/heads/main)
+      echo "pre-push: main moves through PRs: gh pr create --fill" >&2
+      echo "  (a deliberate one-off: git push --no-verify)" >&2
+      exit 1
+      ;;
+    refs/heads/*)
+      check_branch "${remote_ref#refs/heads/}" || exit 1
+      ;;
+  esac
+done
+exit 0
