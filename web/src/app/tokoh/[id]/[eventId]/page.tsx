@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import Nav from "@/components/Nav";
 import SourceList from "@/components/SourceList";
+import { peristiwaHref } from "@/components/EventCard";
 import { Quote } from "@/components/RecordCard";
 import ActorText from "@/components/ActorText";
 import SentimentTrack from "@/components/SentimentTrack";
@@ -125,7 +126,9 @@ export default async function DetailCatatan({
             <div className="section-label" style={{ marginBottom: 4 }}>Bagian dari peristiwa</div>
             {partOf.map((p) => (
               <div key={p.event_id} style={{ fontFamily: "var(--font-serif)", fontSize: 15.5, lineHeight: 1.45 }}>
-                {p.title ?? "Tanpa judul"}
+                <Link href={peristiwaHref(p.event_id)} className="link-subtle" style={{ color: "var(--color-ink)" }}>
+                  {p.title ?? "Tanpa judul"}
+                </Link>
                 <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: "var(--color-stone)", marginLeft: 8 }}>
                   {formatDateShort(p.event_date)}
                 </span>

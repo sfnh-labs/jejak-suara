@@ -54,12 +54,25 @@ function byDay(rows: FeedItem[]): [string, FeedItem[]][] {
   return out;
 }
 
-export default async function Beranda() {
-  const [figures, feed, history] = await Promise.all([
+/** Feed items per step of "Tampilkan lebih banyak", and the most one page shows. */
+const FEED_STEP = 40;
+const FEED_MAX = 400;
+
+export default async function Beranda({ searchParams }: { searchParams: Promise<{ n?: string }> }) {
+  // The feed grows in place rather than paging: ?n=80 is the first 80, so the
+  // month headings and day pills run on unbroken and the link below can land
+  // the reader on the first card they have not seen.
+  const asked = Number((await searchParams).n);
+  const shown = Number.isInteger(asked) ? Math.min(Math.max(asked, FEED_STEP), FEED_MAX) : FEED_STEP;
+  const [figures, fetched, history] = await Promise.all([
     getFigures(),
-    getFeed(40),
+    getFeed(shown + 1),
     getSentimentHistory(7),
   ]);
+  const hasMore = fetched.length > shown && shown < FEED_MAX;
+  const feed = fetched.slice(0, shown);
+  // The first card the previous step did not show, for the link's anchor.
+  const resumeAt = shown > FEED_STEP ? feedKey(feed[shown - FEED_STEP]) : null;
 
   const totalEvents = figures.reduce((n, f) => n + Number(f.event_count ?? 0), 0);
   const totalComments = figures.reduce((n, f) => n + Number(f.comment_count ?? 0), 0);
@@ -137,14 +150,14 @@ export default async function Beranda() {
                     </div>
                     {items.map((item) =>
                       item.kind === "peristiwa" ? (
-                        <div className="rail-row" key={`p-${item.peristiwa.event_id}`}>
+                        <div className="rail-row" key={feedKey(item)} id={feedKey(item) === resumeAt ? "lanjut" : undefined}>
                           <span className="rail-dot is-event" aria-hidden />
                           <div className="rail-event">
                             <EventTile peristiwa={item.peristiwa} />
                           </div>
                         </div>
                       ) : (
-                        <div className="rail-row" key={`r-${item.record.event_id}`}>
+                        <div className="rail-row" key={feedKey(item)} id={feedKey(item) === resumeAt ? "lanjut" : undefined}>
                           <span className="rail-dot is-record" aria-hidden />
                           <div className="rail-record">
                             <RecordCard record={item.record} showFigure bare marker="none" />
@@ -158,9 +171,30 @@ export default async function Beranda() {
             </section>
           ))
         )}
+
+        {hasMore ? (
+          // The rail runs on into the button, so it reads as more of the line.
+          <div className="rail-more">
+            <Link
+              href={`/?n=${Math.min(shown + FEED_STEP, FEED_MAX)}#lanjut`}
+              className="pill-link rail-more-link"
+              style={{ fontSize: 13, fontWeight: 600, padding: "8px 18px" }}
+            >
+              Tampilkan lebih banyak
+            </Link>
+          </div>
+        ) : feed.length >= FEED_MAX ? (
+          <p style={{ textAlign: "center", fontSize: 13, color: "var(--color-stone)", padding: "8px 0 64px" }}>
+            Lanjutkan di <Link href="/linimasa" className="link-subtle">Linimasa</Link> atau halaman tiap tokoh.
+          </p>
+        ) : null}
       </div>
     </div>
   );
+}
+
+function feedKey(item: FeedItem): string {
+  return item.kind === "peristiwa" ? `p-${item.peristiwa.event_id}` : `r-${item.record.event_id}`;
 }
 
 /** Newest record first; figures with no live record go to the end. */
@@ -201,7 +235,9 @@ function StoryBubbles({ figures, history }: { figures: FigureSummary[]; history:
       >
         TOKOH
       </div>
-      <HScroller label="Daftar tokoh, terbaru lebih dulu">
+      {/* Inset by the TOKOH column and gap, so the prev arrow sits outside the
+          strip like the next one rather than on the label. */}
+      <HScroller label="Daftar tokoh, terbaru lebih dulu" inset={34 + 16}>
         {byLatestRecord(figures).map((fig) => {
           const trend = TREND_MARK[trendFor(history, fig.id)];
           const recent = Number(fig.recent_count);

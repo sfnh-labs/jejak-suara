@@ -71,12 +71,15 @@ export function EventBody({
   size = 13.5,
   heading: Heading = "h3",
   titleSize = "clamp(18px, 3vw, 21px)",
+  linkTitle = true,
 }: {
   peristiwa: Peristiwa;
   /** Body text size; the summary's citations scale with it. */
   size?: number;
-  heading?: "h3" | "h4";
+  heading?: "h1" | "h3" | "h4";
   titleSize?: string;
+  /** False on the peristiwa's own page, where the title would link to itself. */
+  linkTitle?: boolean;
 }) {
   // The topic, not the model's KATEGORI: "Pernyataan" or "Penolakan" names the
   // kind of act and says nothing about what the event concerns.
@@ -120,7 +123,13 @@ export function EventBody({
           letterSpacing: "-0.01em",
         }}
       >
-        {title || "Tanpa judul"}
+        {linkTitle ? (
+          <Link href={peristiwaHref(peristiwa.event_id)} className="link-subtle" style={{ color: "inherit" }}>
+            {title || "Tanpa judul"}
+          </Link>
+        ) : (
+          title || "Tanpa judul"
+        )}
       </Heading>
 
       {summary ? (
@@ -136,11 +145,15 @@ export function EventBody({
 
       {peristiwa.story?.length ? (
         <div style={{ marginTop: 14 }}>
-          <StoryLine steps={peristiwa.story} />
+          <StoryLine steps={peristiwa.story} href={peristiwaHref} />
         </div>
       ) : null}
     </>
   );
+}
+
+export function peristiwaHref(eventId: number): string {
+  return `/peristiwa/${eventId}`;
 }
 
 /**

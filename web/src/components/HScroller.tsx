@@ -9,7 +9,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * that fits shows none. Trackpad, touch and shift-wheel scrolling still work;
  * the arrows are for a mouse, which has no other way to reach the rest.
  */
-export default function HScroller({ children, label }: { children: React.ReactNode; label: string }) {
+export default function HScroller({
+  children,
+  label,
+  inset = 0,
+}: {
+  children: React.ReactNode;
+  label: string;
+  /** How far the row starts in from its container's left edge (a label column
+   *  beside it, say), so the prev arrow clears the container, not just the row. */
+  inset?: number;
+}) {
   const row = useRef<HTMLDivElement>(null);
   const [canPrev, setCanPrev] = useState(false);
   const [canNext, setCanNext] = useState(false);
@@ -42,7 +52,7 @@ export default function HScroller({ children, label }: { children: React.ReactNo
   };
 
   return (
-    <div className="hscroller">
+    <div className="hscroller" style={{ ["--hs-inset" as string]: `${inset}px` }}>
       {/* A horizontal scroller clips vertically too, so the row gets 4px of
           headroom (taken back by the margin) for the bubble's hover lift. */}
       <div

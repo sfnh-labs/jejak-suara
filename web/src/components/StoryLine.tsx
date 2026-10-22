@@ -5,7 +5,7 @@ import type { StoryStep } from "@/lib/types";
 /**
  * "Lini cerita": the confirmed chain of follow-ups an event belongs to,
  * oldest first, with the event being read marked. Steps link only where the
- * caller has a page to send them to (records do; peristiwa have no page).
+ * caller has a page to send them to.
  */
 export default function StoryLine({
   steps,

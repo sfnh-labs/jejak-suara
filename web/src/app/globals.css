@@ -188,7 +188,7 @@
     cursor: pointer;
     z-index: 2;
   }
-  .hscroller-arrow.is-prev { left: -46px; }
+  .hscroller-arrow.is-prev { left: calc(-46px - var(--hs-inset, 0px)); }
   .hscroller-arrow.is-next { right: -46px; }
   @media (max-width: 1000px) {
     .hscroller-arrow.is-prev { left: 0; }
@@ -563,6 +563,29 @@
     width: 1.5px;
     background: #d8cfba;
   }
+  /* Where "Tampilkan lebih banyak" lands: clear of the sticky strip and the
+     month heading under it. */
+  .rail-row#lanjut { scroll-margin-top: calc(var(--strip-h, 44px) + 72px); }
+  /* "Tampilkan lebih banyak" hangs off the end of the rail: the line carries
+     on from the last card down into the pill, which straddles it like a day
+     pill does. */
+  .rail-more { position: relative; padding: 18px 0 64px; }
+  .rail-more::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    height: 36px;
+    left: 33.3333%;
+    width: 1.5px;
+    background: #d8cfba;
+  }
+  .rail-more-link {
+    position: relative;
+    display: inline-block;
+    margin-left: 33.3333%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+  }
   .rail-row {
     position: relative;
     display: grid;
@@ -637,6 +660,8 @@
     .rail-dot { left: 0; transform: none; box-shadow: 0 0 0 3px #f6f2e9; }
     .rail-day > .day-rail { left: -14px; }
     .rail-day > .day-rail > .day-pill { transform: none; }
+    .rail-more::before { left: 0; }
+    .rail-more-link { margin-left: -14px; transform: none; }
   }
   /* Home feed peristiwa: a banner tile whose detail opens in a callout in
      the record column. Hover opens it with no JS; a click pins it open

@@ -202,8 +202,18 @@ export async function getFigureEvents(figureId: string, page = 1): Promise<Event
 
 /** Cross-figure feed for the home page and Linimasa. */
 export async function getRecentEvents(limit = 60): Promise<EventRecord[]> {
+  // The ids are picked first, as in getFigureEvents, so the per-event
+  // aggregates run for the rows shown and not for every record before the
+  // sort — the home feed asks for more of them as the reader pages down.
   return query<EventRecord>(
-    `${RECORD_SELECT} ORDER BY ${FEED_ORDER} DESC LIMIT $1`,
+    `${RECORD_SELECT}
+       AND e.id IN (
+         SELECT p.id FROM events p
+          WHERE p.kind = 'record' AND ${LIVE("p")}
+          ORDER BY p.event_date DESC NULLS LAST, p.id DESC
+          LIMIT $1
+       )
+     ORDER BY ${FEED_ORDER} DESC NULLS LAST, e.id DESC`,
     [limit]
   );
 }
@@ -391,6 +401,29 @@ export async function storylines(
     );
   }
   return out;
+}
+
+/** One published peristiwa, with everything its card shows, or null. */
+export async function getPeristiwaById(id: number): Promise<Peristiwa | null> {
+  const [row] = await getPeristiwa(1, [id]);
+  return row ?? null;
+}
+
+/**
+ * The figure records a curator confirmed as part of a peristiwa, oldest first:
+ * what each figure said or did in it. The reverse of getRecordPeristiwa, and
+ * confirmed only for the same reason.
+ */
+export async function getPeristiwaRecords(peristiwaId: number): Promise<EventRecord[]> {
+  return query<EventRecord>(
+    `${RECORD_SELECT}
+       AND e.id IN (
+         SELECT v.record_id FROM record_links v
+          WHERE v.peristiwa_id = $1 AND v.verdict = 'confirmed'
+       )
+     ORDER BY e.event_date NULLS LAST, e.id`,
+    [peristiwaId]
+  );
 }
 
 /**
