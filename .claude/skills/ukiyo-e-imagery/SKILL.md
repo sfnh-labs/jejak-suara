@@ -22,6 +22,8 @@ optional figure id argument.
 
 To add work, append a tuple to the `EVENTS` / `FIGURES` list in the relevant
 script. Both scripts skip anything already present in the output directory.
+The output directory is relative to the script, so a run from a worktree
+writes into that worktree. See "One batch, start to finish" below.
 
 ## The recipe — do not change these
 
@@ -86,7 +88,7 @@ with no recoverable copy. Detached `Start-Process` plus a log file survives:
 ```powershell
 Start-Process -FilePath "D:\Tools\python310\python.exe" `
   -ArgumentList "scripts/gen_event_images_webui.py --count=1" `
-  -WorkingDirectory "D:\Projects\jejak-suara" `
+  -WorkingDirectory "D:\Projects\jejak-suara\.claude\worktrees\img-<slug>" `
   -RedirectStandardOutput "<scratchpad>\gen_slot.log" `
   -RedirectStandardError  "<scratchpad>\gen_slot.err.log" `
   -WindowStyle Hidden
@@ -120,7 +122,64 @@ exits — the session must stay open for the whole window. One image per slot,
 spaced generously; a 1AM–3AM window fit roughly 6 attempts including retries,
 at ~30K tokens total for scheduling and monitoring.
 
-## Not yet decided
+## How the site finds the images
 
-The `events` / figures schema has no `image` column. Nothing wires these files
-into the app yet. Do not invent that wiring without asking.
+There is no `image` column. The site reads two static manifests, because
+Cloudflare Workers has no `fs` at request time:
+
+- `web/src/lib/peristiwa-images.ts`: `PERISTIWA_IMAGES`, event id to
+  `<id>-<slug>.webp`.
+- `web/src/lib/tokoh-images.ts`: `TOKOH_IMAGES`, figure slug to
+  `{ portrait: "<slug>.webp", avatar: "<slug>-avatar.webp" }`.
+
+A file on disk that is not in its manifest never shows.
+
+## One batch, start to finish
+
+The Windows machine only generates images. Its `jejak.db` is a stale copy:
+never run pipeline stages or `sync_to_neon.py` here, and never take event ids
+from it.
+
+1. **Branch.** From the main checkout:
+   `scripts/worktree.sh new img/<slug> --web` (`--web` installs sharp, needed
+   in step 5), then EnterWorktree into `.claude/worktrees/img-<slug>`. Run every
+   later step there. The scheduler runs on the Mac, so nothing else touches
+   this checkout.
+2. **Pick events from Neon**, the live source. Event ids are Neon ids. A small
+   read-only query costs almost no transfer; never pull whole tables (free tier
+   is 5 GB a month). `DATABASE_URL` comes from `.env`:
+   ```sql
+   SELECT id, title FROM events
+   WHERE status IN ('new', 'summarized', 'approved')
+   ORDER BY id DESC LIMIT 30;
+   ```
+   Drop ids already in `PERISTIWA_IMAGES`.
+3. **Write scenes.** Append `(event_id, title, scene)` to `EVENTS` (figures:
+   `FIGURES`), following the prompt rules above.
+4. **Generate**, one detached run at a time (see "Running it").
+5. **Convert.** Move each new PNG to `originals/` at the repo root
+   (gitignored, keeps the full-size file) and write a `.webp` beside where it
+   was. Run from `web/` so `sharp` resolves:
+   ```bash
+   cd web && node -e "
+   const sharp = require('sharp'), fs = require('fs'), path = require('path');
+   for (const f of process.argv.slice(1)) {
+     const dst = path.join('..', 'originals', path.basename(f));
+     fs.mkdirSync(path.dirname(dst), { recursive: true });
+     fs.renameSync(f, dst);
+     sharp(dst).webp().toFile(f.replace(/\.png$/, '.webp'));
+   }" public/images/peristiwa/<id>-*.png
+   ```
+   Figures: rename to `<slug>.webp` and cut the avatar, a square face crop of
+   the same image, with `sharp(src).extract({ left, top, width, height })`.
+   The face sits in a different place in each render, so pick the box by eye.
+   Avatars run about 6–12 KB.
+6. **Register.** Add each file to its manifest. Check the result in the dev
+   server before committing.
+7. **Ship.** Commit the `.webp` files, the manifest and the `EVENTS` changes.
+   Run `pytest -q` and `cd web && npx tsc --noEmit && npm run lint`. Then
+   `gh pr create --fill`, `gh pr checks --watch`, `gh pr merge --merge`, and
+   from the main checkout `scripts/worktree.sh finish img/<slug>`.
+8. **After merge.** The Mac's main checkout picks up the images on its next
+   pull. Production needs a manual `npm run deploy` from `web/`; there is no
+   auto-deploy.
