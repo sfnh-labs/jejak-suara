@@ -27,7 +27,8 @@ STYLE_SUFFIX = (
     "dramatic perspective, washi paper texture"
 )
 NEGATIVE = "photorealistic, 3d, modern, digital art, painting, crowd, many people, multiple people, background characters"
-OUT_DIR = r"D:\Projects\jejak-suara\web\public\images\tokoh"
+# Relative to this file, so a run from a worktree writes into that worktree.
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "public", "images", "tokoh")
 WIDTH, HEIGHT = 768, 1024
 STEPS = 8
 
