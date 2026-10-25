@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import sys
 
 import re
@@ -68,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(encoding="utf-8")
+    # A floor for any socket opened without its own timeout. Every urlopen
+    # here passes one, yet a sentiment stage still sat in a blocking TLS read
+    # for three days; this makes such a read fail after a few minutes instead.
+    socket.setdefaulttimeout(300)
 
     parser = argparse.ArgumentParser(prog="jejak")
     sub = parser.add_subparsers(dest="cmd", required=True)
