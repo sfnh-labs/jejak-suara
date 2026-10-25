@@ -353,6 +353,18 @@ class TestLedgerHeading:
         )
         assert title == "Menolak kenaikan harga BBM"
 
+    def test_strips_citation_markers(self):
+        title, _ = summarize._split_title(
+            "JUDUL: Mengundang periset BRIN [Sumber 1], [Sumber 2]\n---\n- x [Sumber 1]"
+        )
+        assert title == "Mengundang periset BRIN"
+
+    def test_rejects_run_together_headings(self):
+        title, _ = summarize._split_title(
+            "JUDUL: Pidato--- [Sumber 1], Pidato--- [Sumber 2], Pidato--- [Sumber 3]\n---\n- x"
+        )
+        assert title is None
+
     def test_unlabelled_first_line_is_still_the_heading(self):
         title, body = summarize._split_title(
             "Meninjau genteng sabut kelapa\n\n- Meninjau genteng [Sumber 1]"
