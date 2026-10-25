@@ -20,6 +20,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
+from . import failures
+
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
@@ -598,9 +600,15 @@ def summarize_pending(conn: sqlite3.Connection,
     if limit is not None:
         sql += " LIMIT ?"
         params = (limit,)
+    gave_up = failures.given_up(conn, "summarize")
     ids = [r["id"] for r in conn.execute(sql, params).fetchall()]
+    if skipped := sum(1 for eid in ids if eid in gave_up):
+        print(f"summarize: leaving out {skipped} event(s) the model timed out on "
+              f"{failures.MAX_FAILURES} times (stage_failures)")
     results = []
     for eid in ids:
+        if eid in gave_up:
+            continue
         try:
             results.append(summarize_event(conn, eid))
         except ValueError as e:
@@ -611,6 +619,8 @@ def summarize_pending(conn: sqlite3.Connection,
             print(f"skip event {eid}: {e}")
         except TimeoutError:
             # One answer slower than the client's timeout ended the whole
-            # stage with 268 events still queued; the next run retries it.
-            print(f"skip event {eid}: the model timed out")
+            # stage with 268 events still queued; the next run retries it,
+            # up to failures.MAX_FAILURES times.
+            n = failures.record(conn, "summarize", eid, "the model timed out")
+            print(f"skip event {eid}: the model timed out ({n}/{failures.MAX_FAILURES})")
     return results

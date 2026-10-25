@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jejak import cv_extract, db, kurasi  # noqa: E402
+from jejak import cv_extract, db, failures, kurasi  # noqa: E402
 
 NOW = "2026-10-15T10:00:00+00:00"
 
@@ -152,6 +152,23 @@ def test_one_bad_answer_skips_only_that_record(conn, monkeypatch):
     stats = kurasi.auto_cv(conn)
     assert stats["failed"] == 2 and len(seen) == 2   # both tried, neither recorded
     assert len(kurasi.cv_candidates(conn)) == 2
+
+
+def test_a_record_that_keeps_failing_is_given_up_on(conn, monkeypatch):
+    _record(conn, 7, "ferry", "Ditunjuk Menjadi Ketua Kadin")
+    conn.commit()
+
+    def chat(messages, num_predict=800):
+        raise RuntimeError("the model did not return JSON")
+
+    monkeypatch.setattr(cv_extract, "_chat_json", chat)
+    for _ in range(failures.MAX_FAILURES - 1):
+        kurasi.auto_cv(conn)
+    assert len(kurasi.cv_candidates(conn)) == 1     # still retried
+    kurasi.auto_cv(conn)
+    assert kurasi.cv_candidates(conn) == []
+    row = conn.execute("SELECT status, origin FROM cv_proposals WHERE event_id = 7").fetchone()
+    assert tuple(row) == ("failed", "auto")
 
 
 def test_ground_keeps_only_what_the_articles_say():
