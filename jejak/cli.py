@@ -95,7 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("cluster")
     sub.add_parser("link")
     sub.add_parser("summarize")
-    sub.add_parser("quotes")
+    p_quotes = sub.add_parser("quotes")
+    p_quotes.add_argument("--full", action="store_true",
+                          help="reread every article, not just the ones not read yet")
     sub.add_parser("participants")
     sub.add_parser("sentiment")
     p_fs = sub.add_parser("figure-stance")
@@ -178,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             print("link:", link.link_records(conn))
             print("follow-ups:", link.link_followups(conn))
         if args.cmd in ("quotes", "run"):
-            print("quotes:", quotes.quote_pending(conn))
+            print("quotes:", quotes.quote_pending(conn, full=getattr(args, "full", False)))
         if args.cmd in ("participants", "run"):
             print("participants:", participants.backfill(conn))
         if args.cmd in ("summarize", "run"):

@@ -946,7 +946,16 @@ export async function addQuote(
  */
 export async function showQuote(eventId: number, quoteId: number | null | "auto"): Promise<void> {
   if (quoteId === "auto") {
-    await lrun(`UPDATE events SET quote = NULL, quote_url = NULL WHERE id = ?`, [eventId]);
+    await ltx(async () => {
+      await lrun(`UPDATE events SET quote = NULL, quote_url = NULL WHERE id = ?`, [eventId]);
+      // The quotes stage reads only bodies it has not read (quote_scans);
+      // forgetting this record's makes the next run pick for it again. The
+      // table is the pipeline's, so it may not exist yet on an older jejak.db.
+      const scans = await queryOne<{ n: number }>(
+        `SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'quote_scans'`
+      );
+      if (scans?.n) await lrun(`DELETE FROM quote_scans WHERE event_id = ?`, [eventId]);
+    });
     return;
   }
   if (quoteId === null) {

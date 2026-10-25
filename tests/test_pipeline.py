@@ -626,6 +626,31 @@ class TestQuotes:
         assert conn.execute("SELECT quote FROM events WHERE id = 1").fetchone()[0] == short_q
 
 
+    def test_pending_reads_each_body_once(self, tmp_path, monkeypatch):
+        conn = _fresh(tmp_path)
+        conn.execute("INSERT INTO figures (id, name, aliases) VALUES ('prabowo', ?, ?)",
+                     (self.NAME, '["Prabowo"]'))
+        conn.execute("INSERT INTO events (id, figure_id, kind, title, status, created_at) "
+                     "VALUES (1, 'prabowo', 'record', 't', 'active', 'x')")
+        conn.execute("INSERT INTO articles (id, figure_id, source, url, title, fetched_at, "
+                     "event_id, body, fetch_status) VALUES ('a', 'prabowo', 's', 'u', 't', 'x', 1, "
+                     "'tanpa kutipan', 'ok')")
+        read = []
+        real = quotes.all_quotes
+        monkeypatch.setattr(quotes, "all_quotes", lambda body: read.append(body) or real(body))
+
+        assert quotes.quote_pending(conn)["scanned"] == 1
+        assert quotes.quote_pending(conn)["scanned"] == 0
+        assert len(read) == 1
+        # Moved to another event, the body is read again for it.
+        conn.execute("INSERT INTO events (id, figure_id, kind, title, status, created_at) "
+                     "VALUES (2, 'prabowo', 'record', 't', 'active', 'x')")
+        conn.execute("UPDATE articles SET event_id = 2 WHERE id = 'a'")
+        assert quotes.quote_pending(conn)["scanned"] == 1
+        assert quotes.quote_pending(conn, full=True)["scanned"] == 1
+        assert len(read) == 3
+
+
 class TestNeonSync:
     def test_events_carry_their_id(self):
         """The bug that duplicated the events table on every scheduled run."""
