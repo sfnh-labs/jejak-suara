@@ -15,7 +15,8 @@
     python -m jejak.cli buzzer               # coordinated-engagement detection
     python -m jejak.cli suggest [--auto-hide] # guess curator verdicts from /kurasi labels
     python -m jejak.cli curation-report      # what the /kurasi labels say, for rule-writing
-    python -m jejak.cli points               # open questions per catatan for /kurasi to ask
+    python -m jejak.cli points               # open questions per catatan for /kurasi to ask,
+                                             # and auto-answers for the kinds switched on there
     python -m jejak.cli timeline <figure_id> # approved, publishable events
 
 Taking an event off the public site is not done here — that is `/kurasi` in the

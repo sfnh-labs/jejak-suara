@@ -241,8 +241,10 @@ function KindPanel({ stats }: { stats: KindStats[] }) {
         {stats.map((k, i) => {
           const pct = k.overall.value === null ? null : Math.round(k.overall.value * 100);
           const eligible = k.buckets.filter((b) => b.eligible).map((b) => b.bucket);
+          const off = k.switchedOff;
           const status = k.auto
             ? eligible.length ? `Otomatis untuk pita ${eligible.join(", ")}` : "Otomatis menyala, tapi belum ada pita yang lolos"
+            : off ? `Dimatikan sendiri ${day(off.at)}: cek acak setuju ${off.agreed} dari ${off.checked}`
             : eligible.length ? `Siap otomatis untuk pita ${eligible.join(", ")}`
             : k.overall.answered ? `Belum ada pita dengan ${AUTO_MIN_ANSWERS} jawaban dan ≥${Math.round(AUTO_MIN_AGREEMENT * 100)}% setuju`
             : "Belum ada jawaban";
@@ -261,8 +263,9 @@ function KindPanel({ stats }: { stats: KindStats[] }) {
                 <span style={{ position: "absolute", left: `${AUTO_MIN_AGREEMENT * 100}%`, top: -3, bottom: -3, width: 2, background: INK }} />
               </span>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: eligible.length ? ACCEPT : MUTED }}>
+                <span style={{ fontSize: 12, color: off ? "var(--color-clay)" : eligible.length ? ACCEPT : MUTED }}>
                   {status}
+                  {k.answeredAuto ? ` · ${k.answeredAuto} dijawab otomatis` : ""}
                   {k.buckets.length ? ` · ${k.buckets.map((b) => `${b.bucket} ${b.confidence.agreed}/${b.confidence.answered}`).join(" · ")}` : ""}
                 </span>
                 {k.auto || eligible.length ? (

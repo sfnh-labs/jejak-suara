@@ -27,7 +27,7 @@ import {
   addQuote,
   showQuote,
 } from "@/lib/curation";
-import { answerPoint, isPointAnswer, setAutoKind, undoPoint, KIND_LABEL, type PointKind } from "@/lib/curationPoints";
+import { answerPoint, isPointAnswer, salahPoint, setAutoKind, undoPoint, KIND_LABEL, type PointKind } from "@/lib/curationPoints";
 
 /*
  * Server actions rather than route handlers so the pages work with plain
@@ -328,6 +328,11 @@ export async function answerCurationPoint(formData: FormData): Promise<void> {
 /** "Batalkan": put the record back as it was before the answer, and ask again. */
 export async function undoCurationPoint(formData: FormData): Promise<void> {
   done(await undoPoint(eventId(formData, "point_id")));
+}
+
+/** "Salah" on an auto answer: put it back, rule the other way, and count it against auto. */
+export async function markCurationPointWrong(formData: FormData): Promise<void> {
+  done(await salahPoint(eventId(formData, "point_id")));
 }
 
 /** Switch auto-answering for one kind of point on or off. */

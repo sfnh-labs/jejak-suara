@@ -112,7 +112,7 @@ def quote_pending(conn: sqlite3.Connection, full: bool = False) -> dict[str, int
             aliases = []
         # Quotes the curator said are someone else's words are never picked.
         disowned = {r[0] for r in conn.execute(
-            "SELECT quote FROM event_quotes WHERE event_id = ? AND assigned_by = 'curator' "
+            "SELECT quote FROM event_quotes WHERE event_id = ? AND assigned_by IN ('curator', 'lesson') "
             "AND figure_id IS NOT (SELECT figure_id FROM events WHERE id = ?)",
             (ev["id"], ev["id"]))}
         best: tuple[str, str] | None = None
@@ -156,6 +156,54 @@ def all_quotes(body: str) -> list[tuple[str, str]]:
     return list(out.items())
 
 
+def norm_speaker(speaker: str) -> str:
+    """A speaker as written, compared without case or spacing (speaker_lessons' key)."""
+    return re.sub(r"\s+", " ", speaker.strip().lower())
+
+
+def lesson_scope(owner: str | None, event_id: int) -> str:
+    """Where in the archive an event is, for speaker_lessons: its figure's
+    catatan, or a peristiwa by itself."""
+    return owner or f"e{event_id}"
+
+
+def load_lessons(conn: sqlite3.Connection) -> dict[tuple[str, str], str | None]:
+    """{(speaker, scope): figure id or None} from the curator's answers."""
+    return {(r[0], r[1]): r[2] for r in conn.execute(
+        "SELECT speaker, scope, figure_id FROM speaker_lessons")}
+
+
+def lesson_for(lessons: dict, speaker: str, owner: str | None, event_id: int):
+    """The lesson that covers this speaker here: the scoped one before the
+    everywhere one. (found, figure id or None)."""
+    norm = norm_speaker(speaker)
+    for scope in (lesson_scope(owner, event_id), ""):
+        if (norm, scope) in lessons:
+            return True, lessons[(norm, scope)]
+    return False, None
+
+
+def apply_lessons(conn: sqlite3.Connection) -> int:
+    """Assign the quotes still waiting whose speaker a lesson covers: the ones
+    collected before the answer that taught it. Returns how many."""
+    lessons = load_lessons(conn)
+    if not lessons:
+        return 0
+    done = 0
+    for q in conn.execute(
+        """SELECT q.id, q.event_id, q.speaker, e.figure_id AS owner
+             FROM event_quotes q JOIN events e ON e.id = q.event_id
+            WHERE q.figure_id IS NULL AND COALESCE(q.assigned_by, 'auto') = 'auto'
+              AND q.speaker IS NOT NULL AND q.speaker != ''"""
+    ).fetchall():
+        found, fig = lesson_for(lessons, q["speaker"], q["owner"], q["event_id"])
+        if found:
+            conn.execute("UPDATE event_quotes SET figure_id = ?, assigned_by = 'lesson' WHERE id = ?",
+                         (fig, q["id"]))
+            done += 1
+    return done
+
+
 def match_speaker(speaker: str, figures: list[tuple[str, list[str]]],
                   prefer: str | None = None) -> str | None:
     """The tracked figure a written speaker names, if exactly one fits.
@@ -182,8 +230,9 @@ def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None,
                    full: bool = False) -> dict[str, int]:
     """List every attributed quote of each event in event_quotes. Commits in batches.
 
-    New quotes are matched to a tracked figure; a quote already listed keeps
-    its assignment, a curator's above all. Reads only the bodies quote_scans
+    New quotes are matched to a tracked figure, or to who the curator said a
+    speaker written that way is (speaker_lessons) before any name matching; a
+    quote already listed keeps its assignment, a curator's above all. Reads only the bodies quote_scans
     has no row for, unless `full` or the events are named.
     """
     figures = []
@@ -193,6 +242,7 @@ def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None,
         except (TypeError, ValueError):
             aliases = []
         figures.append((r["id"], _terms(r["name"], aliases)))
+    lessons = load_lessons(conn)
     where = "a.fetch_status = 'ok' AND a.event_id IS NOT NULL"
     params: list = []
     if event_ids is not None:
@@ -214,12 +264,15 @@ def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None,
         if stats["articles"] % 500 == 0:
             conn.commit()
         for quote, speaker in all_quotes(art["body"]):
+            taught, fig = lesson_for(lessons, speaker, art["owner"], art["event_id"])
+            if not taught:
+                fig = match_speaker(speaker, figures, art["owner"])
             cur = conn.execute(
                 """INSERT OR IGNORE INTO event_quotes
                        (event_id, article_id, url, quote, speaker, figure_id, assigned_by, found_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 'auto', ?)""",
-                (art["event_id"], art["id"], art["url"], quote, speaker,
-                 match_speaker(speaker, figures, art["owner"]), now),
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (art["event_id"], art["id"], art["url"], quote, speaker, fig,
+                 "lesson" if taught else "auto", now),
             )
             stats["quotes"] += cur.rowcount
         conn.execute("INSERT OR REPLACE INTO quote_scans (article_id, event_id, scanned_at) "
