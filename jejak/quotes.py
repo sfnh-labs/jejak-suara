@@ -130,6 +130,7 @@ def quote_pending(conn: sqlite3.Connection, full: bool = False) -> dict[str, int
             stats["quoted"] += 1
     # After the records: collect_quotes marks the bodies read.
     stats.update(collect_quotes(conn, full=full))
+    stats["rematched"] = rematch_waiting(conn)
     conn.commit()
     return stats
 
@@ -212,10 +213,15 @@ def match_speaker(speaker: str, figures: list[tuple[str, list[str]]],
     Abdullah" beats a bare "Said"; `prefer` (the record's own figure) wins a
     tie, since a record's quotes are mostly its owner's.
     """
+    return _pick([(fid, max((len(t) for t in terms if _names(speaker, [t])), default=0))
+                  for fid, terms in figures], prefer)
+
+
+def _pick(hits: list[tuple[str, int]], prefer: str | None) -> str | None:
+    """match_speaker's choice from [(figure id, longest matching term)], in roster order."""
     best: tuple[int, str] | None = None
     tied = False
-    for fid, terms in figures:
-        hit = max((len(t) for t in terms if _names(speaker, [t])), default=0)
+    for fid, hit in hits:
         if not hit:
             continue
         if best is None or hit > best[0] or (hit == best[0] and fid == prefer):
@@ -224,6 +230,49 @@ def match_speaker(speaker: str, figures: list[tuple[str, list[str]]],
         elif hit == best[0] and best[1] != prefer:
             tied = True
     return None if best is None or tied else best[1]
+
+
+def _figure_terms(conn: sqlite3.Connection) -> list[tuple[str, list[str]]]:
+    figures = []
+    for r in conn.execute("SELECT id, name, aliases FROM figures WHERE active = 1"):
+        try:
+            aliases = json.loads(r["aliases"]) if r["aliases"] else []
+        except (TypeError, ValueError):
+            aliases = []
+        figures.append((r["id"], _terms(r["name"], aliases)))
+    return figures
+
+
+def rematch_waiting(conn: sqlite3.Connection) -> int:
+    """Match the quotes still waiting for a speaker again, against the roster
+    as it is now: a quote listed while two duplicate figures tied, or before
+    its speaker was tracked, waits otherwise for good, since collection never
+    reassigns a listed quote. Only the stage's own unmatched quotes are
+    touched. Returns how many found their speaker."""
+    # As match_speaker, with each term compiled once and each speaker scored
+    # once: the waiting quotes run to tens of thousands.
+    figures = [(fid, [(len(t), re.compile(rf"\b{re.escape(t)}\b")) for t in terms])
+               for fid, terms in _figure_terms(conn)]
+    hits: dict[str, list[tuple[str, int]]] = {}
+    fits: dict[tuple[str, str | None], str | None] = {}
+    found = 0
+    for q in conn.execute(
+        """SELECT q.id, q.speaker, e.figure_id AS owner
+             FROM event_quotes q JOIN events e ON e.id = q.event_id
+            WHERE q.figure_id IS NULL AND COALESCE(q.assigned_by, 'auto') = 'auto'
+              AND q.speaker IS NOT NULL AND q.speaker != ''"""
+    ).fetchall():
+        speaker = q["speaker"]
+        if speaker not in hits:
+            hits[speaker] = [(fid, max((n for n, pat in pats if pat.search(speaker)), default=0))
+                             for fid, pats in figures]
+        key = (speaker, q["owner"])
+        if key not in fits:
+            fits[key] = _pick(hits[speaker], q["owner"])
+        if fits[key]:
+            conn.execute("UPDATE event_quotes SET figure_id = ? WHERE id = ?", (fits[key], q["id"]))
+            found += 1
+    return found
 
 
 def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None,
@@ -235,13 +284,7 @@ def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None,
     quote already listed keeps its assignment, a curator's above all. Reads only the bodies quote_scans
     has no row for, unless `full` or the events are named.
     """
-    figures = []
-    for r in conn.execute("SELECT id, name, aliases FROM figures WHERE active = 1"):
-        try:
-            aliases = json.loads(r["aliases"]) if r["aliases"] else []
-        except (TypeError, ValueError):
-            aliases = []
-        figures.append((r["id"], _terms(r["name"], aliases)))
+    figures = _figure_terms(conn)
     lessons = load_lessons(conn)
     where = "a.fetch_status = 'ok' AND a.event_id IS NOT NULL"
     params: list = []
