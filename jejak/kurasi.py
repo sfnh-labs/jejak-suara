@@ -18,7 +18,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
-from . import cv_extract, summarize
+from . import cv_extract, failures, summarize
 
 
 class Refused(Exception):
@@ -441,9 +441,20 @@ def auto_cv(conn, limit: int = AUTO_CV_PER_RUN) -> dict[str, int]:
             break
         except (RuntimeError, ValueError) as e:
             # One bad answer (not JSON) or a record with no articles: skip it,
-            # unrecorded, so the next run tries it again.
+            # unrecorded, so the next run tries it again. After
+            # failures.MAX_FAILURES it gets a 'failed' row instead, which takes
+            # it off the candidate list for good.
             stats["failed"] += 1
-            print(f"auto_cv: skipped event {r['id']}: {e}")
+            n = failures.record(conn, "auto_cv", r["id"], str(e))
+            print(f"auto_cv: skipped event {r['id']}: {e} ({n}/{failures.MAX_FAILURES})")
+            if n >= failures.MAX_FAILURES:
+                with conn:
+                    conn.execute(
+                        """INSERT INTO cv_proposals
+                               (event_id, figure_id, status, error, created_at, finished_at, origin)
+                           VALUES (?, ?, 'failed', ?, ?, ?, 'auto')""",
+                        (r["id"], r["figure_id"],
+                         f"auto: gagal {n} kali ({e})", now, now))
             continue
         stats["checked"] += 1
         entries = sum(len(draft[k]) for k in ("positions", "facts", "education")) if draft else 0

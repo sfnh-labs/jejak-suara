@@ -457,6 +457,17 @@ CREATE TABLE IF NOT EXISTS curation_suggestions (
     scored_at  TEXT NOT NULL
 );
 
+-- Events a model stage gave up on after repeated failures (jejak/failures.py).
+-- Local only. Deleting a row lets the stage try that event again.
+CREATE TABLE IF NOT EXISTS stage_failures (
+    stage      TEXT NOT NULL,     -- summarize | auto_cv
+    event_id   INTEGER NOT NULL,
+    failures   INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (stage, event_id)
+);
+
 -- Correction / right-of-reply requests (legal safety valve).
 CREATE TABLE IF NOT EXISTS corrections (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
