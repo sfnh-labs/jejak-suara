@@ -112,7 +112,7 @@ const RECORD_SELECT = `
       SELECT count(*) FILTER (WHERE c.stance = 'positive') AS positive,
              count(*) FILTER (WHERE c.stance = 'neutral')  AS neutral,
              count(*) FILTER (WHERE c.stance = 'negative') AS negative,
-             count(*)                                      AS total,
+             count(c.stance)                               AS total,
              -- Only comments that name the figure: see jejak/figure_stance.py.
              count(*) FILTER (WHERE c.figure_stance = 'positive') AS fig_positive,
              count(*) FILTER (WHERE c.figure_stance = 'neutral')  AS fig_neutral,

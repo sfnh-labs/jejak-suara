@@ -110,8 +110,8 @@ export interface EventRecord {
   stance: StanceCounts;
   /**
    * Stance toward the figure, counted only over comments that name them. The
-   * stance above is toward "the figure or the event" at once, so under a
-   * record of a minister praising a team it mostly measures the team.
+   * stance above is toward the event alone — what was done or decided, not
+   * the people in it (jejak/sentiment.py, jejak/figure_stance.py).
    */
   figure_stance: StanceCounts;
 }

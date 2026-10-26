@@ -144,10 +144,11 @@ export default async function DetailCatatan({
 
         {display !== null ? (
           <section className="rule-heavy" style={{ paddingBottom: 22, marginBottom: 26 }}>
-            {/* Two different questions. The first row counts only comments
-                that name the figure; the second is every comment under the
-                videos, most of which are about the event and the other people
-                in it. See jejak/figure_stance.py. */}
+            {/* Two different questions, asked separately of each comment. The
+                first row counts only comments that name the figure, by their
+                stance toward them; the second is every comment's stance
+                toward the event itself. See jejak/figure_stance.py and
+                jejak/sentiment.py. */}
             {figureDisplay !== null ? (
               <SentimentRow
                 label={`Terhadap ${record.figure_name}`}
@@ -165,16 +166,15 @@ export default async function DetailCatatan({
             )}
             <div style={{ height: 22 }} />
             <SentimentRow
-              label="Semua komentar"
+              label="Terhadap peristiwanya"
               display={display}
               counts={{ positive, neutral, negative, total }}
               countNote={`${formatCount(record.sentiment_sample_size ?? total)} komentar`}
-              muted
             />
             <p style={{ fontSize: 11.5, color: "var(--color-stone-light)", margin: "12px 0 0", lineHeight: 1.5 }}>
-              Komentar YouTube di bawah video berita peristiwa ini. Sikap terhadap {firstName(record.figure_name)} hanya
-              dihitung dari komentar yang menyebut namanya; &ldquo;Semua komentar&rdquo; juga mencakup reaksi terhadap
-              peristiwa dan tokoh lain di dalamnya.
+              Komentar YouTube di bawah video berita peristiwa ini, dinilai dua kali secara terpisah. Sikap terhadap{" "}
+              {firstName(record.figure_name)} hanya dihitung dari komentar yang menyebut namanya; sikap terhadap
+              peristiwanya dari semua komentar, tanpa menghitung pujian atau kecaman kepada orangnya.
             </p>
           </section>
         ) : null}

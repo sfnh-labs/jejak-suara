@@ -41,12 +41,10 @@ export default function RecordCard({
   marker?: "badge" | "dot" | "none";
   bare?: boolean;
 }) {
-  // Stance toward the figure where enough comments name them; otherwise every
-  // comment's stance toward "the figure or the event". The label says which.
+  // Two separate questions: every comment's stance toward the event, and,
+  // where enough comments name the figure, their stance toward the figure.
+  const eventDisplay = toDisplayScore(record.sentiment_score);
   const figureDisplay = figureDisplayScore(record.figure_stance);
-  const aboutFigure = figureDisplay !== null;
-  const display = aboutFigure ? figureDisplay : toDisplayScore(record.sentiment_score);
-  const { positive, neutral, negative, total } = aboutFigure ? record.figure_stance : record.stance;
   // The topic, like a peristiwa's — the highest-level tag — not KATEGORI.
   const topic = topicOf(record);
   const href = `/tokoh/${record.figure_id}/${record.event_id}`;
@@ -199,24 +197,22 @@ export default function RecordCard({
           already names every outlet and counts them, so a strip repeating the
           count added a verdict to a card that had the evidence on it. */}
 
-      {display === null ? null : (
+      {eventDisplay === null ? null : (
         <>
-          <div style={{ marginBottom: 7 }}>
-            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-stone-light)" }}>
-              {aboutFigure ? `Sentimen terhadap ${firstName(record.figure_name)}` : "Sentimen Publik"}
-            </span>
-          </div>
-          <SentimentTrack display={display} />
-          <div style={{ display: "flex", gap: 18, alignItems: "baseline", marginTop: 7, fontSize: 11.5, color: "var(--color-stone)", flexWrap: "wrap" }}>
-            <span>{percent(positive, total)}% positif</span>
-            <span>{percent(neutral, total)}% netral</span>
-            <span>{percent(negative, total)}% negatif</span>
-            <span style={{ marginLeft: "auto", color: "var(--color-stone-light)" }}>
-              {aboutFigure
-                ? `${formatCount(total)} komentar menyebut namanya`
-                : `${formatCount(record.sentiment_sample_size ?? total)} komentar`}
-            </span>
-          </div>
+          {figureDisplay === null ? null : (
+            <StanceLine
+              label={`Terhadap ${firstName(record.figure_name)}`}
+              display={figureDisplay}
+              counts={record.figure_stance}
+              note={`${formatCount(record.figure_stance.total)} komentar menyebut namanya`}
+            />
+          )}
+          <StanceLine
+            label={figureDisplay === null ? "Sentimen terhadap peristiwa" : "Terhadap peristiwanya"}
+            display={eventDisplay}
+            counts={record.stance}
+            note={`${formatCount(record.sentiment_sample_size ?? record.stance.total)} komentar`}
+          />
         </>
       )}
     </article>
@@ -257,5 +253,31 @@ export function Quote({ record, sources }: { record: EventRecord; sources: Event
         </figcaption>
       ) : null}
     </figure>
+  );
+}
+
+
+function StanceLine({ label, display, counts, note }: {
+  label: string;
+  display: number;
+  counts: { positive: number; neutral: number; negative: number; total: number };
+  note: string;
+}) {
+  const { positive, neutral, negative, total } = counts;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 7 }}>
+        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-stone-light)" }}>
+          {label}
+        </span>
+      </div>
+      <SentimentTrack display={display} />
+      <div style={{ display: "flex", gap: 18, alignItems: "baseline", marginTop: 7, fontSize: 11.5, color: "var(--color-stone)", flexWrap: "wrap" }}>
+        <span>{percent(positive, total)}% positif</span>
+        <span>{percent(neutral, total)}% netral</span>
+        <span>{percent(negative, total)}% negatif</span>
+        <span style={{ marginLeft: "auto", color: "var(--color-stone-light)" }}>{note}</span>
+      </div>
+    </div>
   );
 }

@@ -24,14 +24,67 @@ CHANNEL = "social"
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
-_SYSTEM = """You classify the stance of a single social-media comment toward the
-public figure or event it discusses. Output exactly one label per comment:
-- "negative": critical, disapproving, or hostile toward the figure/event
-- "neutral": factual, off-topic, ambiguous, or no clear stance
-- "positive": supportive, approving, or praising
+# Stance toward the event, not the people in it. It used to ask for the stance
+# "toward the figure/event" at once, without saying what the event was, so
+# under a minister praising the national team the players' fans counted as
+# approval of the minister. Stance toward the figure is its own question
+# (jejak/figure_stance.py), asked only of comments that name them.
+_SYSTEM = """Each comment below was posted under a news video about this event:
+{event}
 
-Judge stance toward the figure/event only — not the comment's general mood.
+For each comment, give its stance toward the EVENT itself — what was done,
+decided, announced or happened, and how it was handled — not toward any
+person in it.
+- "positive": approves of, welcomes or supports it
+- "negative": disapproves of, criticises, rejects or mocks it, or is angry
+  about how it was handled
+- "neutral": factual, a question, prayers or condolences, off-topic, or a
+  judgement of a person only (praising or abusing someone is not a stance on
+  the event)
+
 Return labels in the SAME ORDER as the numbered comments."""
+
+# With a figure in the event, one label was not enough: on the first records
+# relabelled, 82% of the comments that judged the figure had that judgement
+# copied into the event label. Asking for both labels side by side brought it
+# to 25%; the person label is only there to take that judgement and is
+# discarded (the figure's own stance comes from jejak/figure_stance.py, which
+# asks only comments that name them).
+_SYSTEM_WITH_FIGURE = """Each comment below was posted under a news video about this event:
+{event}
+
+Give TWO separate labels for each comment:
+- event: its stance toward the event itself — what was done, decided,
+  announced or happened, and how it was handled
+- person: its stance toward {figure} personally
+
+They are independent. Praising or insulting {figure} says nothing about the
+event unless the comment also judges the event; "good president" is
+person=positive, event=neutral. Disliking the policy is event=negative even if
+the comment respects {figure}.
+Labels: positive, neutral, negative.
+
+Answer one line per comment, in order, exactly like:
+1. event=neutral person=positive"""
+
+
+def stance_prompt(event: str = "", figure: str = "") -> str:
+    """The system prompt for the event stance of one event's comments."""
+    if figure:
+        return _SYSTEM_WITH_FIGURE.format(event=event or "(not given)", figure=figure)
+    return _SYSTEM.format(event=event or "(not given)")
+
+
+def event_context(conn: sqlite3.Connection, event_id: int) -> tuple[str, str]:
+    """(what the event is, its figure's name or "") for stance_prompt."""
+    row = conn.execute(
+        "SELECT e.title, f.name FROM events e LEFT JOIN figures f ON f.id = e.figure_id "
+        "WHERE e.id = ?", (event_id,)).fetchone()
+    if not row:
+        return "", ""
+    title, name = row[0] or "", row[1] or ""
+    return (f"{name}: {title}" if name else title), name
+
 
 _SCORE = {"negative": -1.0, "neutral": 0.0, "positive": 1.0}
 
@@ -66,49 +119,60 @@ def _ollama_chat(messages: list[dict], temperature: float | None = None) -> dict
 _BATCH = int(os.environ.get("SENTIMENT_BATCH", "25"))
 
 
-def classify_comments(comments: list[str]) -> list[str | None]:
-    """Return a stance label per comment, aligned by position.
+def classify_comments(comments: list[str], event: str = "",
+                      figure: str = "") -> list[str | None]:
+    """Return each comment's stance toward the event, aligned by position.
 
     An entry is None where the model's output could not be aligned to that
     comment; callers drop those rather than counting them as neutral.
     """
+    system = stance_prompt(event, figure)
     labels: list[str | None] = []
     for i in range(0, len(comments), _BATCH):
-        labels.extend(_classify_batch(comments[i:i + _BATCH]))
+        labels.extend(_classify_batch(comments[i:i + _BATCH], system))
     return labels
 
 
-def _classify_batch(batch: list[str]) -> list[str | None]:
+def _classify_batch(batch: list[str], system: str) -> list[str | None]:
     """Classify one batch, halving it when the model miscounts its output."""
     if not batch:
         return []
     numbered = "\n".join(f"{i+1}. {c}" for i, c in enumerate(batch))
     prompt = f"Classify these {len(batch)} comments:\n\n{numbered}"
     try:
-        return list(_classify_ollama(batch, prompt))
+        return list(_classify_ollama(batch, prompt, system))
     except ValueError:
         if len(batch) == 1:
             return [None]
         mid = len(batch) // 2
-        return _classify_batch(batch[:mid]) + _classify_batch(batch[mid:])
+        return _classify_batch(batch[:mid], system) + _classify_batch(batch[mid:], system)
 
 
-def _classify_ollama(comments: list[str], prompt: str) -> list[str]:
+def _classify_ollama(comments: list[str], prompt: str,
+                     system: str | None = None) -> list[str]:
     """Classify via local Ollama model — parse labels from free-text output."""
+    system = system or stance_prompt()
+    paired = "person=" in system
+    tail = ("" if paired else
+            "\n\nReturn one label per line, numbered (1. negative, 2. neutral, etc).")
     messages = [
-        {"role": "system", "content": _SYSTEM},
-        {"role": "user", "content": prompt +
-         "\n\nReturn one label per line, numbered (1. negative, 2. neutral, etc)."},
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt + tail},
     ]
-    result = _ollama_chat(messages)
+    result = _ollama_chat(messages, temperature=0)
     text = result.get("message", {}).get("content", "")
 
     labels: list[str] = []
     valid = {"negative", "neutral", "positive"}
     for line in text.splitlines():
         line = line.strip().lower()
-        m = re.match(r"\d+[.)]\s*(\w+)", line)
-        word = m.group(1) if m else line.split()[-1] if line else ""
+        if paired:
+            # Only the event label is kept; see _SYSTEM_WITH_FIGURE.
+            m = re.search(r"event\s*=\s*(\w+)", line)
+            word = m.group(1) if m else ""
+        else:
+            m = re.match(r"\d+[.)]\s*\"?(\w+)", line)
+            word = m.group(1) if m else line.split()[-1] if line else ""
         if word in valid:
             labels.append(word)
 
@@ -335,7 +399,8 @@ def _run_sentiment(conn: sqlite3.Connection, event_id: int,
         return {"event_id": event_id, "query": query, "sample_size": 0,
                 "channel": channel, "note": "no comments gathered"}
 
-    raw_labels = classify_comments([c["text"] for c in comments])
+    raw_labels = classify_comments([c["text"] for c in comments],
+                                   *event_context(conn, event_id))
 
     # Drop anything the model could not label rather than counting it as
     # neutral, which would inflate sample_size and pull the score toward zero.
@@ -347,9 +412,30 @@ def _run_sentiment(conn: sqlite3.Connection, event_id: int,
 
     kept = [c for c, _ in pairs]
     labels = [l for _, l in pairs]
-    score, label, dist = _aggregate(labels)
-    samples = _sample_comments([c["text"] for c in kept], labels)
+    score, label, dist, n_samples = store_aggregate(
+        conn, event_id, channel, [c["text"] for c in kept], labels)
+    _store_comments(conn, event_id, kept, labels)
 
+    conn.commit()
+    result = {"event_id": event_id, "query": query, "channel": channel,
+              "sample_size": len(labels), "score": round(score, 3),
+              "label": label, "distribution": dist, "samples": n_samples}
+    if unclassified:
+        result["note"] = f"{unclassified} comment(s) could not be classified"
+    return result
+
+
+def store_aggregate(conn: sqlite3.Connection, event_id: int, channel: str,
+                    texts: list[str], labels: list[str],
+                    collected_at: str | None = None) -> tuple[float, str, dict, int]:
+    """Write the event's sentiment row for one channel from its labelled
+    comments. Returns (score, label, distribution, samples kept).
+
+    `collected_at` defaults to now; relabelling stored comments passes the old
+    value, so the event is not taken for freshly collected and left unrefreshed.
+    """
+    score, label, dist = _aggregate(labels)
+    samples = _sample_comments(texts, labels)
     conn.execute(
         """INSERT INTO sentiment
            (event_id, channel, score, label, sample_size, samples_json, collected_at)
@@ -362,18 +448,9 @@ def _run_sentiment(conn: sqlite3.Connection, event_id: int,
              collected_at=excluded.collected_at""",
         (event_id, channel, score, label, len(labels),
          json.dumps(samples, ensure_ascii=False),
-         datetime.now(timezone.utc).isoformat()),
+         collected_at or datetime.now(timezone.utc).isoformat()),
     )
-
-    _store_comments(conn, event_id, kept, labels)
-
-    conn.commit()
-    result = {"event_id": event_id, "query": query, "channel": channel,
-              "sample_size": len(labels), "score": round(score, 3),
-              "label": label, "distribution": dist, "samples": len(samples)}
-    if unclassified:
-        result["note"] = f"{unclassified} comment(s) could not be classified"
-    return result
+    return score, label, dist, len(samples)
 
 
 def _search_window(conn: sqlite3.Connection, event_id: int) -> tuple[str, str]:
