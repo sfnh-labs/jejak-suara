@@ -479,6 +479,33 @@ CREATE TABLE IF NOT EXISTS stage_failures (
     PRIMARY KEY (stage, event_id)
 );
 
+-- The pipeline's open questions about a catatan, one per row, for /kurasi to
+-- ask one at a time (jejak/curation_points.py). Each is a view onto a row that
+-- already holds the answer (record_links.verdict, followup_links.verdict,
+-- actor_reviews.decision, event_quotes.figure_id): answering writes there,
+-- and the answers here are what confidence per kind is measured on. Local only.
+CREATE TABLE IF NOT EXISTS curation_points (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,     -- peristiwa | lini | pelaku | pembicara
+    key         TEXT NOT NULL UNIQUE,  -- what it asks about: 'peristiwa:<record>:<peristiwa>', ...
+    event_id    INTEGER NOT NULL,  -- the catatan it is listed on
+    group_size  INTEGER NOT NULL DEFAULT 1,  -- rows one answer settles (quotes, for pembicara)
+    proposal    TEXT NOT NULL,     -- JSON: what the pipeline thinks, ids and the claim as worded
+    article_id  TEXT,              -- where the evidence comes from
+    paragraph   TEXT,
+    hl_start    INTEGER,           -- the part of the paragraph the question is about
+    hl_end      INTEGER,
+    score       REAL,              -- the pipeline's own strength for it, not a calibrated confidence
+    bucket      TEXT,              -- the score band confidence is measured per
+    status      TEXT NOT NULL DEFAULT 'open',  -- open | lewati | ya | bukan | koreksi | auto | auto_wrong | settled
+    answer      TEXT,              -- JSON: the correction, and what undoing needs
+    answered_by TEXT,              -- curator | auto
+    answered_at TEXT,
+    spot_check  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    refreshed_at TEXT NOT NULL
+);
+
 -- Correction / right-of-reply requests (legal safety valve).
 CREATE TABLE IF NOT EXISTS corrections (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -586,6 +613,9 @@ _INDEXES = (
        ON comments(event_id, comment_id)""",
     # The feed's sort key.
     "CREATE INDEX IF NOT EXISTS idx_events_last_seen ON events(last_seen)",
+    # /kurasi lists a catatan's points, and counts open ones per catatan and per kind.
+    "CREATE INDEX IF NOT EXISTS idx_curation_points_event ON curation_points(event_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_curation_points_kind ON curation_points(kind, status)",
 )
 
 

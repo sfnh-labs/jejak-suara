@@ -15,6 +15,7 @@
     python -m jejak.cli buzzer               # coordinated-engagement detection
     python -m jejak.cli suggest [--auto-hide] # guess curator verdicts from /kurasi labels
     python -m jejak.cli curation-report      # what the /kurasi labels say, for rule-writing
+    python -m jejak.cli points               # open questions per catatan for /kurasi to ask
     python -m jejak.cli timeline <figure_id> # approved, publishable events
 
 Taking an event off the public site is not done here — that is `/kurasi` in the
@@ -39,7 +40,7 @@ from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
 from . import actors, db, fetch, figure_stance, ingest, link, mentions, participants, quotes, sentiment, summarize, timeline as timeline_mod
 from . import translate
-from . import curation_suggest
+from . import curation_points, curation_suggest
 from . import youtube_ingest
 
 _BULAN = [
@@ -115,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
                       help="let proven suggestions take events off the site "
                            "(same as JEJAK_AUTO_HIDE=1)")
     sub.add_parser("curation-report")
+    sub.add_parser("points")
     # Curation upkeep: draft what /kurasi left undone, learn from the curator.
     sub.add_parser("kurasi")
     sub.add_parser("translate")
@@ -229,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "suggest":
             res = curation_suggest.run(conn, auto_hide=True if args.auto_hide else None)
             print("suggest:", res)
+        if args.cmd == "points":
+            print("points:", curation_points.run(conn))
         if args.cmd == "kurasi":
             from . import kurasi
             print("kurasi:", kurasi.run_stage(conn))
