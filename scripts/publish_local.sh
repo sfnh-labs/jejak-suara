@@ -8,11 +8,14 @@
 # Every stage keeps going on failure: each CLI stage commits its own work, and
 # the final --push always runs, so whatever did succeed reaches Neon.
 
-# Keep the Mac from idle-sleeping until the run ends (the display may still
-# turn off). A sleep mid-run pauses it with jejak.db's write lock held.
+# Keep the Mac awake until the run ends (the display may still turn off). A
+# sleep mid-run pauses it with jejak.db's write lock held: -i alone left runs
+# advancing only in the ~20 s maintenance wakes, so a 75 min run took 8-40 h
+# and swallowed the next slots. -s also holds off system sleep on AC power;
+# closing the lid without an external display still sleeps the Mac.
 if [ -z "$JEJAK_CAFFEINATED" ]; then
     export JEJAK_CAFFEINATED=1
-    exec /usr/bin/caffeinate -i /bin/bash "$0" "$@"
+    exec /usr/bin/caffeinate -is /bin/bash "$0" "$@"
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,11 +32,32 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
 
+# A stage that outlives STAGE_TIMEOUT_MIN is stopped so the rest of the run
+# (and the push) still happen: a sentiment stage once sat on a dead HTTPS read
+# for three days. `sleep` does not count time the Mac spends asleep, so only
+# awake time uses up the allowance. An awake run's longest stage (summarize)
+# takes under an hour.
+STAGE_TIMEOUT_MIN="${STAGE_TIMEOUT_MIN:-180}"
+
 run_stage() {
     local label="$1"; shift
     log "stage: $label"
-    "$PYTHON" "$@" 2>&1 | tee -a "$LOG_FILE"
-    return "${PIPESTATUS[0]}"
+    "$PYTHON" "$@" > >(tee -a "$LOG_FILE") 2>&1 &
+    local pid=$!
+    (
+        sleep $(( STAGE_TIMEOUT_MIN * 60 ))
+        if kill -0 "$pid" 2>/dev/null; then
+            log "stage $label still running after ${STAGE_TIMEOUT_MIN} min - stopping it."
+            kill "$pid"
+        fi
+    ) &
+    local watchdog=$!
+    wait "$pid"
+    local rc=$?
+    pkill -P "$watchdog" 2>/dev/null
+    kill "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null
+    return "$rc"
 }
 
 # An overlapping run would race the same SQLite file. A lock older than 4
@@ -91,29 +115,6 @@ if ! curl -s -m 3 http://localhost:11434/api/tags >/dev/null; then
     log "Ollama is up."
 fi
 
-# Neon gets one push a day, from the evening run: each push wakes Neon's
-# compute, and the free tier's monthly allowance is tight. The 05:00 and 11:00
-# runs only work locally; their rows ride along with the evening push. A run
-# starting at 18:00 or later pushes if none has today (so a run launchd catches
-# up after sleep still counts). PUSH=1 forces a push.
-#
-# If yesterday got no push at all (the Mac was asleep or closed through the
-# evening), the next run catches up whatever the hour. It stamps yesterday,
-# not today, so this evening's push still happens.
-PUSH_STAMP="$REPO_ROOT/scripts/.last_neon_push"
-today=$(date +%F)
-yesterday=$(date -v-1d +%F 2>/dev/null || date -d yesterday +%F)
-last_push=$(cat "$PUSH_STAMP" 2>/dev/null)
-do_push=0
-push_stamp="$today"
-if [ "${PUSH:-0}" = 1 ] || { [ "$(date +%H)" -ge 18 ] && [ "$last_push" != "$today" ]; }; then
-    do_push=1
-elif [ "$last_push" != "$today" ] && [ "$last_push" \< "$yesterday" ]; then
-    do_push=1
-    push_stamp="$yesterday"
-    log "no push since ${last_push:-never} - catching up yesterday's on this run."
-fi
-
 # /kurasi writes its decisions straight into jejak.db, so there is nothing to
 # bring down before the stages: they already follow the curator. That also
 # makes jejak.db the only copy of the curator's work, so it is backed up first
@@ -135,6 +136,32 @@ run_stage "kurasi" -m jejak.cli kurasi
 for stage in cluster link quotes translate summarize sentiment buzzer suggest; do
     run_stage "$stage" -m jejak.cli "$stage"
 done
+# Neon gets one push a day, from the evening run: each push wakes Neon's
+# compute, and the free tier's monthly allowance is tight. The 05:00 and 11:00
+# runs only work locally; their rows ride along with the evening push. A run
+# that reaches this point at 18:00 or later pushes if none has today. It is
+# decided here, after the stages, not when the run starts: a 05:10 run that
+# ran until 21:06 had already decided against pushing, and it had kept
+# launchd from starting the 18:00 one, so that day never reached Neon.
+# PUSH=1 forces a push.
+#
+# If yesterday got no push at all (the Mac was asleep or closed through the
+# evening), the next run catches up whatever the hour. It stamps yesterday,
+# not today, so this evening's push still happens.
+PUSH_STAMP="$REPO_ROOT/scripts/.last_neon_push"
+today=$(date +%F)
+yesterday=$(date -v-1d +%F 2>/dev/null || date -d yesterday +%F)
+last_push=$(cat "$PUSH_STAMP" 2>/dev/null)
+do_push=0
+push_stamp="$today"
+if [ "${PUSH:-0}" = 1 ] || { [ "$(date +%H)" -ge 18 ] && [ "$last_push" != "$today" ]; }; then
+    do_push=1
+elif [ "$last_push" != "$today" ] && [ "$last_push" \< "$yesterday" ]; then
+    do_push=1
+    push_stamp="$yesterday"
+    log "no push since ${last_push:-never} - catching up yesterday's on this run."
+fi
+
 if [ "$do_push" = 1 ]; then
     if run_stage "push to Neon" scripts/sync_to_neon.py --push; then
         echo "$push_stamp" > "$PUSH_STAMP"
@@ -142,7 +169,7 @@ if [ "$do_push" = 1 ]; then
         log "push to Neon failed - the next evening run retries it."
     fi
 else
-    log "push to Neon skipped - pushes run once a day, from the 18:00 run."
+    log "push to Neon skipped - pushes run once a day, from the first run to finish after 18:00."
 fi
 
 log "=== publish_local done ==="
