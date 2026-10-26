@@ -212,6 +212,9 @@ _KATEGORI_RE = re.compile(r"^\s*(?:\*\*)?KATEGORI(?:\*\*)?\s*:\s*(.+?)\s*$", re.
 _SEPARATOR_RE = re.compile(r"^\s*-{3,}\s*$", re.M)
 # Leading list markers and bold wrappers the model adds to the title itself.
 _TITLE_NOISE_RE = re.compile(r'^[\s"“”\'*\-–—]+|[\s"“”\'*.:;]+$')
+# A citation marker copied from the bullets into the heading ("Menyatakan
+# senjata nuklir [Sumber 1]"), with the comma that joins a run of them.
+_TITLE_CITATION_RE = re.compile(r"\s*\[\s*Sumber\s*\d+\s*\]\s*,?", re.I)
 # Sentinel words the model sometimes uses for "no real category" — treated the
 # same as no category at all, so a keyword-inferred fallback isn't replaced by
 # an equally uninformative dynamic one.
@@ -269,6 +272,11 @@ def _format_categories(categories: list[str]) -> str:
     return "Kategori yang sudah dipakai: " + ", ".join(categories) + ".\n\n"
 
 
+def clean_title(title: str) -> str:
+    """A generated heading without citation markers or surrounding punctuation."""
+    return _TITLE_NOISE_RE.sub("", _TITLE_CITATION_RE.sub(" ", title)).strip()
+
+
 def _split_title(text: str) -> tuple[str | None, str]:
     """Separate the generated heading from the bullet body.
 
@@ -282,14 +290,14 @@ def _split_title(text: str) -> tuple[str | None, str]:
     """
     m = _JUDUL_RE.search(text)
     if m:
-        title = _TITLE_NOISE_RE.sub("", m.group(1))
+        title = clean_title(m.group(1))
         body = text[m.end():]
     else:
         head, sep, rest = text.strip().partition("\n")
         head = head.strip()
         if not head or head.startswith(("-", "*", "•")) or len(head) > 120:
             return None, text.strip()
-        title = _TITLE_NOISE_RE.sub("", head)
+        title = clean_title(head)
         body = rest
 
     divider = _SEPARATOR_RE.search(body)
@@ -306,8 +314,9 @@ def _split_title(text: str) -> tuple[str | None, str]:
     # A one- or two-word heading ("Menyatakan:") says nothing; the source
     # headline, teaser voice and all, is at least informative. Reject it and let
     # the caller fall back. Angle brackets mean the model echoed the format
-    # skeleton instead of filling it in.
-    if len(title.split()) < 3 or "<" in title or ">" in title:
+    # skeleton instead of filling it in, and a divider inside the heading means
+    # it ran several lines together ("Pidato--- [Sumber 1], Pidato---").
+    if len(title.split()) < 3 or "<" in title or ">" in title or "---" in title:
         return None, text.strip()
     return (title or None), body.strip()
 
