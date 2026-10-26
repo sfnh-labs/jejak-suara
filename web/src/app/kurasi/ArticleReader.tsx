@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import type { ReadingArticle } from "@/lib/curation";
 import { fetchLiveArticle, type LiveBlock } from "@/lib/liveArticle";
+import { FocusScroll } from "./FocusScroll";
 import { INK, MUTED, RULE, SURFACE, day } from "./ui";
 
 /** A name to mark in the text, and why it is there. */
@@ -55,26 +56,91 @@ function marks(text: string, terms: ReaderTerm[]): { start: number; end: number;
   return kept;
 }
 
-function Paragraph({ text, terms }: { text: string; terms: ReaderTerm[] }) {
+/** The text with its names marked; `offset` keeps keys unique across pieces of one paragraph. */
+function named(text: string, terms: ReaderTerm[], offset = 0): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let at = 0;
   for (const m of marks(text, terms)) {
     if (m.start > at) parts.push(text.slice(at, m.start));
     parts.push(
-      <mark key={m.start} title={`${m.term.label} · ${KIND_LABEL[m.term.kind]}`} style={{ ...MARK[m.term.kind], padding: "0 1px", borderRadius: 2 }}>
+      <mark key={offset + m.start} title={`${m.term.label} · ${KIND_LABEL[m.term.kind]}`} style={{ ...MARK[m.term.kind], padding: "0 1px", borderRadius: 2 }}>
         {text.slice(m.start, m.end)}
       </mark>
     );
     at = m.end;
   }
   if (at < text.length) parts.push(text.slice(at));
+  return parts;
+}
+
+/**
+ * The passage a curation point rests on, opened with "baca beritanya": the
+ * paragraph it quotes gets a bar, and the sentence it turns on a highlight.
+ */
+export interface ReaderFocus {
+  /** The point's paragraph, as stored (trimmed with "…" at either end). */
+  paragraph: string;
+  /** The sentence inside it the point turns on. */
+  highlight: string | null;
+}
+
+function fold(s: string): string {
+  return s.replace(/^…\s*|\s*…$/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * Which of the paragraphs the focus is in. The stored paragraph was cut from
+ * the same text, so its opening words (or its highlighted sentence, which
+ * survives a different paragraph split) are found inside one of them.
+ */
+function focusAt(texts: string[], focus: ReaderFocus | undefined): number {
+  if (!focus) return -1;
+  const folded = texts.map(fold);
+  const needles = [focus.highlight, focus.paragraph.replace(/^…\s*/, "").slice(0, 90), focus.paragraph.replace(/^…\s*/, "").slice(0, 40)]
+    .map((n) => (n ? fold(n) : ""))
+    .filter((n) => n.length >= 20);
+  for (const n of needles) {
+    const i = folded.findIndex((t) => t.includes(n));
+    if (i >= 0) return i;
+  }
+  return -1;
+}
+
+/** Where the highlighted sentence is in the paragraph, whitespace and case aside. */
+function highlightIn(text: string, highlight: string | null): [number, number] | null {
+  const words = highlight?.trim().split(/\s+/).filter(Boolean);
+  if (!words?.length) return null;
+  const m = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "iu").exec(text);
+  return m ? [m.index, m.index + m[0].length] : null;
+}
+
+function Paragraph({ text, terms, focus }: { text: string; terms: ReaderTerm[]; focus?: ReaderFocus }) {
+  let parts: React.ReactNode[];
+  const hl = focus ? highlightIn(text, focus.highlight) : null;
+  if (hl) {
+    parts = [
+      ...named(text.slice(0, hl[0]), terms),
+      <mark key="fokus" style={{ background: "#f3dfa6", color: INK, padding: "1px 2px", borderRadius: 2 }}>
+        {named(text.slice(hl[0], hl[1]), terms, hl[0])}
+      </mark>,
+      ...named(text.slice(hl[1]), terms, hl[1]),
+    ];
+  } else {
+    parts = named(text, terms);
+  }
   // Site furniture the fetcher kept ("Baca juga: …", bylines) reads as noise
   // at body size; it stays, quieter, since it is sometimes the only date.
-  const furniture = text.length < 60 || /^baca (juga|berita)/i.test(text);
+  const furniture = !focus && (text.length < 60 || /^baca (juga|berita)/i.test(text));
   return (
-    <p style={furniture
-      ? { fontSize: 12.5, color: MUTED, margin: "0 0 8px", lineHeight: 1.5 }
-      : { fontSize: 15.5, lineHeight: 1.7, color: INK, margin: "0 0 14px" }}>
+    <p
+      data-reader-focus={focus ? "" : undefined}
+      style={furniture
+        ? { fontSize: 12.5, color: MUTED, margin: "0 0 8px", lineHeight: 1.5 }
+        : {
+            fontSize: 15.5, lineHeight: 1.7, color: INK, margin: "0 0 14px",
+            ...(focus ? { boxShadow: "-12px 0 0 -9px var(--color-clay)", scrollMarginTop: 120 } : {}),
+          }}
+    >
       {parts}
     </p>
   );
@@ -86,10 +152,11 @@ function Paragraph({ text, terms }: { text: string; terms: ReaderTerm[] }) {
  * it needs no client script — /kurasi keeps working when an Access session
  * has lapsed.
  */
-export function ArticleReader({ article, terms, closeHref }: {
+export function ArticleReader({ article, terms, closeHref, focus }: {
   article: ReadingArticle;
   terms: ReaderTerm[];
   closeHref: string;
+  focus?: ReaderFocus;
 }) {
   const kinds = [...new Set(terms.map((t) => t.kind))];
   return (
@@ -119,7 +186,7 @@ export function ArticleReader({ article, terms, closeHref }: {
         </div>
       ) : null}
       <Suspense fallback={<p style={{ fontSize: 13.5, color: MUTED, fontStyle: "italic" }}>Mengambil artikel dari {article.source}…</p>}>
-        <ReaderBody article={article} terms={terms} />
+        <ReaderBody article={article} terms={terms} focus={focus} />
       </Suspense>
     </article>
   );
@@ -133,20 +200,24 @@ const ENOUGH = 1200;
  * a stub, or a paywall's first paragraphs — the page as its site serves it
  * now. Streamed, so a slow outlet holds up the pane and not the forms.
  */
-async function ReaderBody({ article, terms }: { article: ReadingArticle; terms: ReaderTerm[] }) {
+async function ReaderBody({ article, terms, focus }: { article: ReadingArticle; terms: ReaderTerm[]; focus?: ReaderFocus }) {
   const stored = article.paragraphs.join(" ").length;
   const live = article.truncated || stored < ENOUGH ? await fetchLiveArticle(article.url) : null;
   if (live && live.length > stored) {
+    const at = focusAt(live.blocks.map((b) => (b.kind === "img" ? "" : b.text)), focus);
     return (
       <>
         <p style={{ fontSize: 12, color: MUTED, margin: "0 0 14px" }}>
           {stored ? "Teks tersimpan terpotong; ini" : "Pipeline belum mengambil teksnya; ini"} dibaca langsung dari {article.source} barusan.
         </p>
-        {live.blocks.map((b, i) => <LiveBlockView key={i} block={b} terms={terms} />)}
+        <FocusMissing focus={focus} at={at} />
+        {live.blocks.map((b, i) => <LiveBlockView key={i} block={b} terms={terms} focus={i === at ? focus : undefined} />)}
+        {at >= 0 ? <FocusScroll token={`${article.id}:${at}`} /> : null}
       </>
     );
   }
   if (article.paragraphs.length) {
+    const at = focusAt(article.paragraphs, focus);
     return (
       <>
         {article.truncated ? (
@@ -154,7 +225,9 @@ async function ReaderBody({ article, terms }: { article: ReadingArticle; terms: 
             Terpotong paywall {article.source}. Lanjutannya hanya di situs asli.
           </p>
         ) : null}
-        {article.paragraphs.map((p, i) => <Paragraph key={i} text={p} terms={terms} />)}
+        <FocusMissing focus={focus} at={at} />
+        {article.paragraphs.map((p, i) => <Paragraph key={i} text={p} terms={terms} focus={i === at ? focus : undefined} />)}
+        {at >= 0 ? <FocusScroll token={`${article.id}:${at}`} /> : null}
       </>
     );
   }
@@ -168,7 +241,17 @@ async function ReaderBody({ article, terms }: { article: ReadingArticle; terms: 
   );
 }
 
-function LiveBlockView({ block: b, terms }: { block: LiveBlock; terms: ReaderTerm[] }) {
+/** When the point's paragraph is not in this text (the site changed it since), say so rather than mark nothing silently. */
+function FocusMissing({ focus, at }: { focus?: ReaderFocus; at: number }) {
+  if (!focus || at >= 0) return null;
+  return (
+    <p style={{ fontSize: 12.5, color: "var(--color-clay)", margin: "0 0 12px" }}>
+      Paragraf poin kurasi tidak ditemukan di teks ini; mungkin sudah diubah situsnya.
+    </p>
+  );
+}
+
+function LiveBlockView({ block: b, terms, focus }: { block: LiveBlock; terms: ReaderTerm[]; focus?: ReaderFocus }) {
   if (b.kind === "img") {
     return (
       <figure style={{ margin: "4px 0 16px" }}>
@@ -185,9 +268,9 @@ function LiveBlockView({ block: b, terms }: { block: LiveBlock; terms: ReaderTer
   if (b.kind === "quote") {
     return (
       <blockquote style={{ margin: "0 0 14px", padding: "2px 0 2px 14px", borderLeft: `3px solid ${RULE}` }}>
-        <Paragraph text={b.text} terms={terms} />
+        <Paragraph text={b.text} terms={terms} focus={focus} />
       </blockquote>
     );
   }
-  return <Paragraph text={b.text} terms={terms} />;
+  return <Paragraph text={b.text} terms={terms} focus={focus} />;
 }
