@@ -217,7 +217,7 @@ class TestCommentUpserts:
 
 class TestClassification:
     def _reply(self, text: str):
-        return lambda messages: {"message": {"content": text}}
+        return lambda messages, **k: {"message": {"content": text}}
 
     def test_misaligned_output_is_rejected(self, monkeypatch):
         monkeypatch.setattr(
@@ -237,6 +237,32 @@ class TestClassification:
             self._reply("1. positive\n2. negative"),
         )
         assert sentiment.classify_comments(["a", "b"]) == ["positive", "negative"]
+
+    def test_the_model_is_told_the_event(self, monkeypatch):
+        seen = []
+
+        def chat(messages, **k):
+            seen.append(messages[0]["content"])
+            return {"message": {"content": "1. neutral"}}
+
+        monkeypatch.setattr(sentiment, "_ollama_chat", chat)
+        sentiment.classify_comments(["a"], "Peristiwa banjir", "")
+        assert "Peristiwa banjir" in seen[0] and "toward the EVENT itself" in seen[0]
+        assert "person=" not in seen[0]
+
+    def test_with_a_figure_only_the_event_label_is_kept(self, monkeypatch):
+        seen = []
+
+        def chat(messages, **k):
+            seen.append(messages[0]["content"])
+            return {"message": {"content": "1. event=neutral person=positive\n"
+                                           "2. event=negative person=positive"}}
+
+        monkeypatch.setattr(sentiment, "_ollama_chat", chat)
+        labels = sentiment.classify_comments(["Bagus pak", "Kebijakannya salah"],
+                                             "Erick Thohir: Memuji timnas", "Erick Thohir")
+        assert labels == ["neutral", "negative"]
+        assert "Erick Thohir: Memuji timnas" in seen[0] and "person: its stance toward Erick Thohir" in seen[0]
 
     def test_aggregate_ignores_nothing_it_is_given(self):
         score, label, dist = sentiment._aggregate(
@@ -1356,3 +1382,34 @@ class TestPruneCandidates:
         assert [tuple(r) for r in conn.execute("SELECT id, status FROM events")] == [(1, "expired")]
         # Expired is not picked up again on the next run.
         assert cluster.prune_candidates(conn) == 0
+
+
+class TestRelabelEventStance:
+    def test_relabel_rewrites_stances_and_keeps_collected_at(self, tmp_path, monkeypatch):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import reclassify_event_stance as relabel
+
+        conn = _fresh(tmp_path)
+        conn.execute("INSERT INTO figures (id, name) VALUES ('et', 'Erick Thohir')")
+        conn.execute("INSERT INTO events (id, figure_id, title, status, created_at) "
+                     "VALUES (1, 'et', 'Memuji timnas', 'approved', 'x')")
+        for i, (text, stance) in enumerate([("Timnas hebat", "positive"),
+                                            ("Erick mundur saja", "negative")]):
+            conn.execute("INSERT INTO comments (event_id, comment_id, video_id, text, stance, "
+                         "collected_at) VALUES (1, ?, 'v', ?, ?, 'x')", (f"c{i}", text, stance))
+        conn.execute("INSERT INTO sentiment (event_id, channel, score, label, sample_size, "
+                     "collected_at) VALUES (1, 'youtube', 0, 'neutral', 2, '2026-10-01')")
+        seen = {}
+
+        def classify(texts, event, figure):
+            seen.update(event=event, figure=figure)
+            return ["positive", "neutral"]     # the jab at Erick says nothing about the event
+
+        monkeypatch.setattr(sentiment, "classify_comments", classify)
+        stats = relabel.relabel_event(conn, 1)
+
+        assert seen == {"event": "Erick Thohir: Memuji timnas", "figure": "Erick Thohir"}
+        assert stats["changed"] == 1
+        row = conn.execute("SELECT score, sample_size, collected_at FROM sentiment "
+                           "WHERE event_id = 1").fetchone()
+        assert (row["score"], row["sample_size"], row["collected_at"]) == (0.5, 2, "2026-10-01")

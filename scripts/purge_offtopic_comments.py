@@ -128,7 +128,9 @@ def main(argv: list[str] | None = None) -> int:
         print("DATABASE_URL not set", file=sys.stderr)
         return 1
 
-    if (ROOT / "scripts" / ".publish_local.lock").exists():
+    # Beside the real jejak.db: from a worktree, ROOT's scripts/ holds no lock.
+    lock = Path(jejak_db.DEFAULT_DB).resolve().parent / "scripts" / ".publish_local.lock"
+    if lock.exists():
         print("A pipeline run is in progress (lock held). Refusing.",
               file=sys.stderr)
         return 1
