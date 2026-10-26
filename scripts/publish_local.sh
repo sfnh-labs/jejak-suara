@@ -133,7 +133,7 @@ run_stage "mentions" -m jejak.cli mentions --limit 1000
 # Curation upkeep (jejak/kurasi.py): draft any rework or CV request /kurasi
 # left undone, learn from the curator's decisions, rebuild the names queue.
 run_stage "kurasi" -m jejak.cli kurasi
-for stage in cluster link quotes translate summarize sentiment buzzer suggest; do
+for stage in cluster link quotes translate summarize sentiment buzzer suggest points; do
     run_stage "$stage" -m jejak.cli "$stage"
 done
 # Neon gets one push a day, from the evening run: each push wakes Neon's

@@ -123,7 +123,7 @@ try {
     Invoke-Stage "kurasi" @("-m", "jejak.cli", "kurasi")
 
     foreach ($stage in @("cluster", "link", "quotes", "translate", "summarize",
-                         "sentiment", "buzzer", "suggest")) {
+                         "sentiment", "buzzer", "suggest", "points")) {
         Invoke-Stage $stage @("-m", "jejak.cli", $stage)
     }
 
