@@ -1,4 +1,4 @@
-import { lquery as query, lqueryOne as queryOne, lrun, ltx, pipelineOp, pipelineOpInBackground } from "./localDb";
+import { lquery as query, lqueryOne as queryOne, lrun, ltx, pipelineOp, pipelineOpInBackground, tableExists } from "./localDb";
 
 /**
  * Curation, one event at a time.
@@ -86,9 +86,11 @@ export type Kind = "record" | "peristiwa";
  * Which slice of the queue to show. `links` = records with unruled proposals;
  * `followups` = events with an unruled follow-up proposal on either side;
  * `suggested` = unreviewed events the suggester would take down; `auto` =
- * events it did take down, waiting for a curator to confirm or restore.
+ * events it did take down, waiting for a curator to confirm or restore;
+ * `poin` = events with curation points nobody has answered
+ * (curationPoints.ts), the ones whose answers settle most first.
  */
-export type Filter = "unreviewed" | "suggested" | "auto" | "live" | "rejected" | "links" | "followups";
+export type Filter = "unreviewed" | "suggested" | "auto" | "live" | "rejected" | "links" | "followups" | "poin";
 
 const PUBLIC = "e.status IN ('new', 'summarized', 'approved')";
 
@@ -108,7 +110,18 @@ const FILTER_SQL: Record<Filter, string> = {
      WHERE (l.earlier_id = e.id OR l.later_id = e.id) AND l.verdict IS NULL)`,
   links: `EXISTS (
     SELECT 1 FROM record_links l WHERE l.record_id = e.id AND l.verdict IS NULL)`,
+  poin: `EXISTS (
+    SELECT 1 FROM curation_points p WHERE p.event_id = e.id AND p.status = 'open')`,
 };
+
+/** Filters that read a table an older jejak.db may not have yet. */
+const NEEDS_TABLE: Partial<Record<Filter, string>> = { poin: "curation_points" };
+
+async function availableFilters(): Promise<Filter[]> {
+  const keys = Object.keys(FILTER_SQL) as Filter[];
+  const ok = await Promise.all(keys.map((k) => (NEEDS_TABLE[k] ? tableExists(NEEDS_TABLE[k]!) : true)));
+  return keys.filter((_, i) => ok[i]);
+}
 
 export interface QueueRow {
   event_id: number;
@@ -182,6 +195,7 @@ export async function getQueue(
   filter: Filter,
   page = 1
 ): Promise<QueueRow[]> {
+  if (!(await availableFilters()).includes(filter)) return [];
   const rows = await query<Omit<QueueRow, "reasons" | "suggestion"> & SuggestionColumns & { reasons: string | null }>(
     `SELECT e.id AS event_id, e.kind, e.figure_id, f.name AS figure_name,
             e.event_date, e.title, e.curated, cr.reasons, ${SUGGESTION_SELECT},
@@ -207,6 +221,8 @@ export async function getQueue(
        ) lk ON lk.event_id = e.id
       WHERE e.kind = ?1 AND ${PUBLIC} AND ${FILTER_SQL[filter]}
       ORDER BY ${filter === "suggested" ? "cs.confidence DESC NULLS LAST," : ""}
+               ${filter === "poin" ? `(SELECT sum(p.group_size) FROM curation_points p
+                                       WHERE p.event_id = e.id AND p.status = 'open') DESC,` : ""}
                e.event_date DESC NULLS LAST, e.id DESC
       LIMIT ?2 OFFSET ?3`,
     [kind, PAGE_SIZE, (Math.max(page, 1) - 1) * PAGE_SIZE]
@@ -220,14 +236,16 @@ export async function getQueue(
 }
 
 export async function getQueueCounts(kind: Kind): Promise<Record<Filter, number>> {
-  const keys = Object.keys(FILTER_SQL) as Filter[];
+  const keys = await availableFilters();
   const row = await queryOne<Record<Filter, string>>(
     `SELECT ${keys.map((k) => `count(*) FILTER (WHERE ${FILTER_SQL[k]}) AS ${k}`).join(",\n            ")}
        FROM events e
       WHERE e.kind = ? AND ${PUBLIC}`,
     [kind]
   );
-  return Object.fromEntries(keys.map((k) => [k, Number(row?.[k] ?? 0)])) as Record<Filter, number>;
+  return Object.fromEntries(
+    (Object.keys(FILTER_SQL) as Filter[]).map((k) => [k, Number(row?.[k] ?? 0)])
+  ) as Record<Filter, number>;
 }
 
 export async function getKindCounts(): Promise<Record<Kind, number>> {

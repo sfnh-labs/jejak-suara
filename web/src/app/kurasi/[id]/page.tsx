@@ -5,6 +5,8 @@ import { decide } from "../kandidat/actions";
 import { AcceptCandidateForm } from "../AcceptCandidateForm";
 import { FigurePicker, SpeakerEditor } from "../FigurePicker";
 import { ArticleReader, type ReaderTerm } from "../ArticleReader";
+import { PointList } from "../CurationPoints";
+import { getPoints } from "@/lib/curationPoints";
 import { addFollowup, curate, editFigure, mergeFigures, relateFigure, ruleFollowup, ruleLink, rework, decideRework, notAPerson, setQuoteSpeaker, pickQuote, newQuote } from "../actions";
 import { storyImageSource, storylines } from "@/lib/data";
 import { EventBanner } from "../EventImage";
@@ -31,10 +33,12 @@ export default async function KurasiItem({
   if (!Number.isInteger(eventId) || eventId <= 0) notFound();
   const [item, figures, orgs] = await Promise.all([getItem(eventId), getFigureOptions(), getOrganizations()]);
   if (!item) notFound();
-  const [candidates, reading] = await Promise.all([
+  const [candidates, reading, points] = await Promise.all([
     getFollowupCandidates(item, cari.slice(0, 100)),
     baca ? getReading(eventId, baca.slice(0, 128)) : null,
+    getPoints(eventId),
   ]);
+  const openPoints = points.filter((p) => p.status === "open").length;
   // The page's own address with the reading pane set or cleared; the other
   // parameters ride along so opening an article loses nothing.
   const here = (article: string | null) => {
@@ -62,6 +66,7 @@ export default async function KurasiItem({
 
   // Numbered in reading order; the record-only "Pelaku" shifts the rest.
   const sections = [
+    ...(points.length ? [{ id: "poin", title: "Poin kurasi" }] : []),
     { id: "isi", title: "Isi" },
     { id: "nama", title: "Tokoh" },
     { id: "kutipan", title: "Kutipan" },
@@ -128,6 +133,18 @@ export default async function KurasiItem({
         <VerdictBar item={item} sections={sections} missing={perlu} figures={figures} />
         <FigureOptions figures={figures} />
         <OrgOptions orgs={orgs} />
+
+        {points.length ? (
+          <Card
+            n={n("poin")}
+            id="poin"
+            title="Poin kurasi"
+            count={openPoints || undefined}
+            note="Penilaian pipeline yang belum yakin. Jawabanmu langsung mengubah bagian di bawah, dan menambah keyakinan untuk poin sejenis berikutnya."
+          >
+            <PointList points={points} listId={FIGURE_LIST} readHref={(a) => here(a)} />
+          </Card>
+        ) : null}
 
         <Card n={n("isi")} id="isi" title="Isi" note="Ringkasan yang tayang dan artikel yang menjadi sumbernya. Baca ini dulu sebelum memutuskan.">
           {item.summary ? (

@@ -27,6 +27,7 @@ import {
   addQuote,
   showQuote,
 } from "@/lib/curation";
+import { answerPoint, isPointAnswer, setAutoKind, undoPoint, KIND_LABEL, type PointKind } from "@/lib/curationPoints";
 
 /*
  * Server actions rather than route handlers so the pages work with plain
@@ -312,4 +313,27 @@ export async function pickQuote(formData: FormData): Promise<void> {
   const choice = String(formData.get("quote_id") ?? "");
   await showQuote(id, choice === "none" ? null : choice === "auto" ? "auto" : eventId(formData, "quote_id"));
   done(id);
+}
+
+/** Ya / Bukan / Koreksi / Lewati on a curation point; the answer lands on the row it asks about. */
+export async function answerCurationPoint(formData: FormData): Promise<void> {
+  const pointId = eventId(formData, "point_id");
+  const answer = String(formData.get("answer") ?? "");
+  if (!isPointAnswer(answer)) throw new Error(`invalid answer: ${answer}`);
+  const figure = text(formData, "figure_id", 120).toLowerCase() || null;
+  if (figure && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figure)) throw new Error("choose a figure");
+  done(await answerPoint(pointId, answer, figure));
+}
+
+/** "Batalkan": put the record back as it was before the answer, and ask again. */
+export async function undoCurationPoint(formData: FormData): Promise<void> {
+  done(await undoPoint(eventId(formData, "point_id")));
+}
+
+/** Switch auto-answering for one kind of point on or off. */
+export async function toggleAutoKind(formData: FormData): Promise<void> {
+  const kind = String(formData.get("kind") ?? "");
+  if (!(kind in KIND_LABEL)) throw new Error(`invalid kind: ${kind}`);
+  await setAutoKind(kind as PointKind, formData.get("on") === "1");
+  revalidatePath("/kurasi", "layout");
 }
