@@ -66,9 +66,48 @@ export async function lrun(sql: string, params: unknown[] = []): Promise<number>
   return Number(conn.prepare(sql).run(...bind(params)).changes);
 }
 
-/** Several writes that must land together or not at all. */
+const tables = new Set<string>();
+
+/**
+ * Whether jejak.db has a table the pipeline adds in a later version. Once it
+ * does, it stays, so a yes is remembered.
+ */
+export async function tableExists(name: string): Promise<boolean> {
+  if (tables.has(name)) return true;
+  const row = await lqueryOne<{ n: number }>(
+    `SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?`, [name]
+  );
+  if (row?.n) tables.add(name);
+  return Boolean(row?.n);
+}
+
+let txDepth = 0;
+
+/**
+ * Several writes that must land together or not at all. Called inside
+ * another, it joins that one: an answer to a curation point is the existing
+ * writer plus the point's own row, and both commit or neither does.
+ */
 export async function ltx(fn: () => Promise<void>): Promise<void> {
   const conn = await open();
+  if (txDepth > 0) {
+    txDepth++;
+    try {
+      await fn();
+    } finally {
+      txDepth--;
+    }
+    return;
+  }
+  txDepth = 1;
+  try {
+    await runTx(conn, fn);
+  } finally {
+    txDepth = 0;
+  }
+}
+
+async function runTx(conn: DatabaseSync, fn: () => Promise<void>): Promise<void> {
   conn.exec("BEGIN IMMEDIATE");
   try {
     await fn();
