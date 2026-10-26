@@ -186,6 +186,7 @@ _QUERY_VERBS = {
     "menambahkan", "mengingatkan", "mempertanyakan", "menyerahkan",
 }
 _KEYWORDS = 2
+_MENTION_KEYWORDS = 8
 
 
 def _keywords(titles: list[str], skip: set[str]) -> list[str]:
@@ -193,7 +194,9 @@ def _keywords(titles: list[str], skip: set[str]) -> list[str]:
     counts: dict[str, int] = {}
     first: dict[str, tuple[int, str]] = {}
     for title in titles:
-        for word in dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z-]{3,}", title or "")):
+        # Four letters or more, or a capitalised acronym: NTT, KPK and BPN are
+        # often the words a story turns on.
+        for word in dict.fromkeys(re.findall(r"\b[A-Z]{3}\b|[A-Za-z][A-Za-z-]{3,}", title or "")):
             low = word.lower()
             if low in skip or low in _QUERY_STOPWORDS or low in _QUERY_VERBS:
                 continue
@@ -217,15 +220,26 @@ def _office(role: str) -> str:
     return words[0] if words else ""
 
 
+def figure_names(terms: list[str]) -> list[str]:
+    """What a video must mention to be about a figure: the full name or an
+    alias, or any of their words of four letters or more ("airlangga")."""
+    return list(dict.fromkeys(terms + [w for t in terms for w in t.split() if len(w) >= 4]))
+
+
 def _search_terms(conn: sqlite3.Connection, event_id: int) -> tuple[list[str], list[str]]:
-    """(queries, names) for finding videos about the event.
+    """(queries, mentions) for finding videos about the event.
 
     Queries go from specific to broad, for youtube.find_videos to try in turn:
     the figure's name with the two words its headlines share most, with one,
     then with its office (_office). The words come from the source headlines rather than
     the generated title, which paraphrases ("Menyatakan alasan penurunan
-    anggaran...") in words no video title uses. `names` are the strings a
-    video's title or description must contain to count as being about them.
+    anggaran...") in words no video title uses.
+
+    `mentions` are the strings a video's title or description must contain one
+    of to count as being about the event: the figure's names, and the
+    headlines' _MENTION_KEYWORDS top words. The words carry it for a
+    peristiwa, which has no figure, and for coverage that names the office
+    rather than the person ("Upacara Proklamasi" with the President in it).
     """
     row = conn.execute(
         "SELECT e.title, e.figure_id FROM events e WHERE e.id = ?", (event_id,)
@@ -237,23 +251,33 @@ def _search_terms(conn: sqlite3.Connection, event_id: int) -> tuple[list[str], l
     fig = next((f for f in load_figures(conn) if f.id == row["figure_id"]), None)
     name = fig.name if fig else ""
     terms = fig.match_terms() if fig else []
-    names = list(dict.fromkeys(
-        terms + [w for t in terms for w in t.split() if len(w) >= 4]))
+    names = figure_names(terms)
 
     titles = [r[0] for r in conn.execute(
         "SELECT title FROM articles WHERE event_id = ? AND title IS NOT NULL", (event_id,))]
     skip = {w for t in terms for w in t.split()}
     keywords = _keywords(titles or [row["title"] or ""], skip)
 
+    # Generous on purpose: this only has to tell coverage of the event from a
+    # drama clip, and three words left out real coverage worded differently
+    # ("Bandara Soekarno-Hatta Ditutup" under "Beberapa terminal bandara").
+    words = keywords[:_MENTION_KEYWORDS] + _keywords([row["title"] or ""], skip)
+    mentions = list(dict.fromkeys(names + [k.lower() for k in words]))
+
     if not name:
         # No figure to anchor on: the headline words alone, broadest last.
         return ([" ".join(keywords[:n]) for n in (3, 2) if keywords[:n]]
-                or [row["title"] or ""]), []
+                or [row["title"] or ""]), mentions
     office = _office(fig.role)
     queries = [" ".join([name, *keywords[:_KEYWORDS]]),
                " ".join([name, *keywords[:1]]),
                " ".join([name, office]) if office else name]
-    return list(dict.fromkeys(q.strip() for q in queries if q.strip())), names
+    return list(dict.fromkeys(q.strip() for q in queries if q.strip())), mentions
+
+
+def event_mentions(conn: sqlite3.Connection, event_id: int) -> list[str]:
+    """What a video must mention to be about the event (see _search_terms)."""
+    return _search_terms(conn, event_id)[1]
 
 
 def _query_for_event(conn: sqlite3.Connection, event_id: int) -> str:
@@ -389,7 +413,7 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
     about the event, and a thread that is not about the event is not reaction
     to it — see jejak/relevance.py for what that check can and cannot catch.
     """
-    queries, names = _search_terms(conn, event_id)
+    queries, mentions = _search_terms(conn, event_id)
     query = queries[0]
     after, before = _search_window(conn, event_id)
     results: list[dict] = []
@@ -404,7 +428,7 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
 
     try:
         yt_comments = youtube.gather_comments(
-            queries, names=names, cap=cap,
+            queries, names=mentions, cap=cap,
             published_after=after, published_before=before)
         results.append(gated(yt_comments, "youtube"))
     except Exception as e:

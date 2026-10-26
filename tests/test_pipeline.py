@@ -1062,6 +1062,9 @@ class TestSearchTerms:
                            "Airlangga Hartarto Menteri"]
         assert "airlangga" in names
 
+    def test_short_acronyms_count_as_keywords(self):
+        assert sentiment._keywords(["KPK geledah ATR/BPN", "KPK sita koper"], set())[:2] == ["KPK", "geledah"]
+
     def test_the_office_is_its_acronym_when_there_is_one(self):
         assert sentiment._office("Wakil Ketua MPR") == "MPR"
         assert sentiment._office("Wakil Ketua Komisi VI DPR RI") == "DPR"

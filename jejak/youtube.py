@@ -114,6 +114,19 @@ def video_views(ids: list[str]) -> dict[str, int]:
             for item in data.get("items", []) if item.get("id")}
 
 
+def video_snippets(ids: list[str]) -> dict[str, dict]:
+    """{id: {title, description}} for the given videos, 1 unit per 50 ids.
+    A deleted or private video is simply missing from the result."""
+    out: dict[str, dict] = {}
+    for i in range(0, len(ids), 50):
+        data = _get("videos", {"part": "snippet", "id": ",".join(ids[i:i + 50])})
+        for item in data.get("items", []):
+            snip = item.get("snippet", {})
+            out[item["id"]] = {"title": snip.get("title", ""),
+                               "description": snip.get("description", "")}
+    return out
+
+
 # How many of a search's results find_videos considers, in YouTube's relevance
 # order, before picking the most viewed. A search costs 100 units whatever
 # maxResults is, so asking for more candidates is free.
@@ -122,7 +135,9 @@ MOST_RELEVANT = 10
 MAX_SEARCHES = 3
 
 
-def _names_figure(video: dict, names: list[str]) -> bool:
+def names_figure(video: dict, names: list[str]) -> bool:
+    """Whether the video's title or description contains one of `names`
+    (lowercase): the figure's names or the event's headline words."""
     text = f"{video.get('title', '')} {video.get('description', '')}".lower()
     return any(n in text for n in names)
 
@@ -139,8 +154,9 @@ def find_videos(queries: list[str], names: list[str] = (), max_videos: int = 5,
     Soeparno": 0, "Eddy Soeparno MPR": 4,288). At most MAX_SEARCHES are tried.
 
     Of a search's results, only videos whose title or description contains
-    one of `names` count — a search ranks a drama clip that shares one word
-    with the query above nothing. The MOST_RELEVANT left, in YouTube's order,
+    one of `names` (the figure's names, the event's headline words) count — a
+    search ranks a drama clip that shares one word with the query above
+    nothing. The MOST_RELEVANT left, in YouTube's order,
     are then ranked by views and the top `max_videos` returned: the coverage
     most people watched is where most of the reaction is.
 
@@ -152,7 +168,7 @@ def find_videos(queries: list[str], names: list[str] = (), max_videos: int = 5,
                               published_after=published_after,
                               published_before=published_before)
         if names:
-            found = [v for v in found if _names_figure(v, names)]
+            found = [v for v in found if names_figure(v, names)]
         found = found[:MOST_RELEVANT]
         if not found:
             continue
