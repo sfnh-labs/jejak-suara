@@ -161,11 +161,72 @@ def _aggregate(labels: list[str]) -> tuple[float, str, dict]:
 _QUERY_STOPWORDS = {
     "dan", "di", "ke", "dari", "yang", "untuk", "dengan", "pada", "bahas",
     "soal", "hingga", "akan", "bakal", "buka", "suara", "kabar", "kemarin",
+    "ini", "itu", "inilah", "begini", "terkait", "tentang", "atas", "bagi",
+    "para", "kepada", "oleh", "sudah", "telah", "masih", "juga", "lebih",
+    "baru", "bisa", "harus", "tidak", "bukan", "ada", "hari", "tahun", "jadi",
+    "usai", "saat", "agar", "demi", "simak", "video", "berita", "terbaru",
+    "viral", "respons", "kata", "ujar", "sebut", "tegas", "minta", "ungkap",
+    "terima", "beri", "ajak", "dorong", "pastikan", "klaim", "jelaskan",
+    "tanggapi", "soroti", "singgung", "pemerintah", "negara", "indonesia",
+    "nasional", "presiden", "menteri", "ketua", "gubernur", "wakil",
 }
-_QUERY_MAX_WORDS = 7
+# The verbs a generated title or a headline opens with ("Menyatakan ...",
+# "Menghadiri ..."). No video title says them, and YouTube wants nearly every
+# word of a query matched, so one of them is enough to find nothing. A list,
+# not a meN- pattern: that would take "Menteri" and "Digital" with them.
+_QUERY_VERBS = {
+    "menyatakan", "mengatakan", "menyampaikan", "menghadiri", "mengungkapkan",
+    "mengungkap", "menerima", "membahas", "meminta", "menyebut", "menegaskan",
+    "menyoroti", "menanggapi", "menjelaskan", "memberikan", "memberi",
+    "membuka", "mengajak", "mendorong", "memastikan", "mengklaim",
+    "menyinggung", "menyindir", "menekankan", "mengimbau", "menginstruksikan",
+    "memerintahkan", "mengapresiasi", "mengkritik", "menolak", "mendukung",
+    "meninjau", "mengunjungi", "meresmikan", "melantik", "melakukan",
+    "menggelar", "mengumumkan", "berbicara", "berkomentar", "menuturkan",
+    "menambahkan", "mengingatkan", "mempertanyakan", "menyerahkan",
+}
+_KEYWORDS = 2
 
 
-def _query_for_event(conn: sqlite3.Connection, event_id: int) -> str:
+def _keywords(titles: list[str], skip: set[str]) -> list[str]:
+    """The words the headlines share most, first-seen order breaking ties."""
+    counts: dict[str, int] = {}
+    first: dict[str, tuple[int, str]] = {}
+    for title in titles:
+        for word in dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z-]{3,}", title or "")):
+            low = word.lower()
+            if low in skip or low in _QUERY_STOPWORDS or low in _QUERY_VERBS:
+                continue
+            counts[low] = counts.get(low, 0) + 1
+            first.setdefault(low, (len(first), word))
+    ranked = sorted(counts, key=lambda w: (-counts[w], first[w][0]))
+    return [first[w][1] for w in ranked]
+
+
+_NOT_OFFICES = {"RI", "DKI", "DI", "NKRI"}
+
+
+def _office(role: str) -> str:
+    """A short searchable word for the figure's office: the institution's
+    acronym ("Wakil Ketua Komisi VI DPR RI" -> "DPR"), else the title the role
+    opens with ("Wakil Gubernur DKI Jakarta" -> "Gubernur")."""
+    for word in re.findall(r"\b[A-Z]{2,}\b", role or ""):
+        if word not in _NOT_OFFICES and not re.fullmatch(r"[IVXLC]+", word):
+            return word
+    words = [w for w in (role or "").split() if w.lower() != "wakil"]
+    return words[0] if words else ""
+
+
+def _search_terms(conn: sqlite3.Connection, event_id: int) -> tuple[list[str], list[str]]:
+    """(queries, names) for finding videos about the event.
+
+    Queries go from specific to broad, for youtube.find_videos to try in turn:
+    the figure's name with the two words its headlines share most, with one,
+    then with its office (_office). The words come from the source headlines rather than
+    the generated title, which paraphrases ("Menyatakan alasan penurunan
+    anggaran...") in words no video title uses. `names` are the strings a
+    video's title or description must contain to count as being about them.
+    """
     row = conn.execute(
         "SELECT e.title, e.figure_id FROM events e WHERE e.id = ?", (event_id,)
     ).fetchone()
@@ -173,18 +234,31 @@ def _query_for_event(conn: sqlite3.Connection, event_id: int) -> str:
         raise ValueError(f"event {event_id} not found")
 
     from .config import load_figures
-    fig = next((f for f in load_figures() if f.id == row["figure_id"]), None)
+    fig = next((f for f in load_figures(conn) if f.id == row["figure_id"]), None)
     name = fig.name if fig else ""
+    terms = fig.match_terms() if fig else []
+    names = list(dict.fromkeys(
+        terms + [w for t in terms for w in t.split() if len(w) >= 4]))
 
-    title = row["title"] or ""
-    title_l = title.lower()
-    have_name = bool(fig) and any(term in title_l for term in fig.match_terms())
+    titles = [r[0] for r in conn.execute(
+        "SELECT title FROM articles WHERE event_id = ? AND title IS NOT NULL", (event_id,))]
+    skip = {w for t in terms for w in t.split()}
+    keywords = _keywords(titles or [row["title"] or ""], skip)
 
-    keywords = [w for w in title.split() if w.lower() not in _QUERY_STOPWORDS]
-    keywords = keywords[:_QUERY_MAX_WORDS]
+    if not name:
+        # No figure to anchor on: the headline words alone, broadest last.
+        return ([" ".join(keywords[:n]) for n in (3, 2) if keywords[:n]]
+                or [row["title"] or ""]), []
+    office = _office(fig.role)
+    queries = [" ".join([name, *keywords[:_KEYWORDS]]),
+               " ".join([name, *keywords[:1]]),
+               " ".join([name, office]) if office else name]
+    return list(dict.fromkeys(q.strip() for q in queries if q.strip())), names
 
-    parts = ([name] if name and not have_name else []) + keywords
-    return " ".join(parts).strip()
+
+def _query_for_event(conn: sqlite3.Connection, event_id: int) -> str:
+    """The most specific of the event's search queries (Reddit's search)."""
+    return _search_terms(conn, event_id)[0][0]
 
 
 def _store_comments(conn: sqlite3.Connection, event_id: int,
@@ -315,20 +389,23 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
     about the event, and a thread that is not about the event is not reaction
     to it — see jejak/relevance.py for what that check can and cannot catch.
     """
-    query = _query_for_event(conn, event_id)
+    queries, names = _search_terms(conn, event_id)
+    query = queries[0]
     after, before = _search_window(conn, event_id)
     results: list[dict] = []
 
     def gated(comments: list[dict], channel: str) -> dict:
         kept, dropped = relevance.filter_comments(conn, event_id, comments)
-        result = _run_sentiment(conn, event_id, query, kept, channel)
+        used = comments[0].get("query", query) if comments else " | ".join(queries)
+        result = _run_sentiment(conn, event_id, used, kept, channel)
         if dropped:
             result["off_topic"] = dropped
         return result
 
     try:
         yt_comments = youtube.gather_comments(
-            query, cap=cap, published_after=after, published_before=before)
+            queries, names=names, cap=cap,
+            published_after=after, published_before=before)
         results.append(gated(yt_comments, "youtube"))
     except Exception as e:
         results.append({"event_id": event_id, "query": query,
