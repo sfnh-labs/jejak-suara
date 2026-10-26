@@ -966,12 +966,13 @@ class TestCommentChannel:
             ]
         })
         assert youtube.search_videos("prabowo") == [
-            {"id": "v1", "channel": "Kompas TV"}
+            {"id": "v1", "channel": "Kompas TV", "title": "", "description": ""}
         ]
 
     def test_the_channel_reaches_each_comment(self, monkeypatch):
         monkeypatch.setattr(youtube, "search_videos",
                             lambda *a, **k: [{"id": "v1", "channel": "Metro TV"}])
+        monkeypatch.setattr(youtube, "video_views", lambda ids: {})
         monkeypatch.setattr(youtube, "_get", lambda endpoint, params: {
             "items": [{
                 "snippet": {"topLevelComment": {
@@ -982,6 +983,94 @@ class TestCommentChannel:
         })
         [comment] = youtube.gather_comments("prabowo")
         assert comment["channel"] == "Metro TV"
+
+
+class TestVideoSearch:
+    """Which videos an event's reaction is read from."""
+
+    def _search(self, monkeypatch, results: dict[str, list[dict]], views: dict):
+        tried = []
+
+        def search(query, **k):
+            tried.append(query)
+            return [dict(v) for v in results.get(query, [])]
+
+        monkeypatch.setattr(youtube, "search_videos", search)
+        monkeypatch.setattr(youtube, "video_views", lambda ids: views)
+        return tried
+
+    def test_a_query_that_finds_nothing_falls_back_to_a_broader_one(self, monkeypatch):
+        tried = self._search(monkeypatch, {
+            "Eddy Soeparno MPR": [{"id": "v1", "title": "Eddy Soeparno di MPR"}],
+        }, {})
+        videos, query = youtube.find_videos(
+            ["Eddy Soeparno transisi energi", "Eddy Soeparno transisi",
+             "Eddy Soeparno MPR", "Eddy Soeparno"], ["eddy soeparno"])
+        assert query == "Eddy Soeparno MPR" and [v["id"] for v in videos] == ["v1"]
+        assert len(tried) == youtube.MAX_SEARCHES      # the fourth is never sent
+
+    def test_videos_not_naming_the_figure_are_left_out(self, monkeypatch):
+        self._search(monkeypatch, {"q": [
+            {"id": "drama", "title": "Detektif cilik episode 3"},
+            {"id": "news", "title": "Wawancara", "description": "bersama Airlangga"},
+        ]}, {})
+        videos, _ = youtube.find_videos(["q"], ["airlangga"])
+        assert [v["id"] for v in videos] == ["news"]
+
+    def test_the_most_viewed_of_the_most_relevant_win(self, monkeypatch):
+        found = [{"id": f"v{i}", "title": "Airlangga"} for i in range(12)]
+        views = {f"v{i}": i for i in range(12)}   # v11 most viewed, but 12th by relevance
+        self._search(monkeypatch, {"q": found}, views)
+        videos, _ = youtube.find_videos(["q"], ["airlangga"], max_videos=3)
+        assert [v["id"] for v in videos] == ["v9", "v8", "v7"]
+
+
+    def test_a_403_stops_every_later_call(self, monkeypatch):
+        import io
+        import urllib.error
+
+        sent = []
+
+        def refuse(req, timeout):
+            sent.append(req.full_url)
+            raise urllib.error.HTTPError(req.full_url, 403, "quota", {}, io.BytesIO())
+
+        monkeypatch.setenv("YOUTUBE_API_KEY", "k")
+        monkeypatch.setattr(youtube, "_refused", False)
+        monkeypatch.setattr(youtube.urllib.request, "urlopen", refuse)
+        for _ in range(3):
+            with pytest.raises(youtube.YouTubeError):
+                youtube.search_videos("q")
+        assert len(sent) == 1
+
+
+class TestSearchTerms:
+    def test_queries_come_from_the_headlines_not_the_generated_title(self, tmp_path):
+        conn = _fresh(tmp_path)
+        conn.execute("INSERT INTO figures (id, name, role, active) VALUES "
+                     "('ah', 'Airlangga Hartarto', 'Menteri Koordinator Bidang Perekonomian', 1)")
+        conn.execute("INSERT INTO events (id, figure_id, title, event_date, status, created_at) "
+                     "VALUES (1, 'ah', 'Menyatakan alasan penurunan anggaran Program Satu Orang', "
+                     "'2026-10-22', 'approved', 'x')")
+        for i, t in enumerate(["Airlangga ungkap alasan anggaran rekening massal turun",
+                               "Menko Airlangga: anggaran rekening dipangkas"]):
+            conn.execute("INSERT INTO articles (id, figure_id, source, url, title, fetched_at, "
+                         "event_id) VALUES (?, 'ah', 's', ?, ?, 'x', 1)", (f"a{i}", f"u{i}", t))
+        queries, names = sentiment._search_terms(conn, 1)
+        assert queries == ["Airlangga Hartarto anggaran rekening",
+                           "Airlangga Hartarto anggaran",
+                           "Airlangga Hartarto Menteri"]
+        assert "airlangga" in names
+
+    def test_short_acronyms_count_as_keywords(self):
+        assert sentiment._keywords(["KPK geledah ATR/BPN", "KPK sita koper"], set())[:2] == ["KPK", "geledah"]
+
+    def test_the_office_is_its_acronym_when_there_is_one(self):
+        assert sentiment._office("Wakil Ketua MPR") == "MPR"
+        assert sentiment._office("Wakil Ketua Komisi VI DPR RI") == "DPR"
+        assert sentiment._office("Wakil Gubernur DKI Jakarta") == "Gubernur"
+        assert sentiment._office("Presiden Indonesia ke-8") == "Presiden"
+        assert sentiment._office("") == ""
 
 
 class TestRelevanceGate:
@@ -1089,7 +1178,7 @@ class TestRelevanceGate:
         conn = _fresh(tmp_path)
         self._stub_embed(monkeypatch)
         self._event(conn)
-        monkeypatch.setattr(sentiment, "_query_for_event", lambda *a: "q")
+        monkeypatch.setattr(sentiment, "_search_terms", lambda *a: (["q"], []))
         monkeypatch.setattr(youtube, "gather_comments",
                             lambda *a, **k: self._thread("v1", "unrelated", 5))
         monkeypatch.setattr(reddit, "gather_comments", lambda *a, **k: [])

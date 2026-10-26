@@ -204,10 +204,11 @@ def main(argv: list[str] | None = None) -> int:
                 score_str = f"{score:+.2f}" if score is not None else "?"
                 n = res.get("sample_size", 0)
                 flag = f"  ⚠ {note}" if note else ""
+                q = f"  q={res['query']!r}" if res.get("query") and res.get("channel") == "youtube" else ""
                 print(f"sentiment [{res.get('channel','?')}]: "
                       f"{res.get('label','?')} "
                       f"(score={score_str}, "
-                      f"n={n}){flag}")
+                      f"n={n}){flag}{q}")
         if args.cmd == "figure-stance":
             if args.audit:
                 figure_stance.audit(conn)
