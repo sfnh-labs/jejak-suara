@@ -506,6 +506,19 @@ CREATE TABLE IF NOT EXISTS curation_points (
     refreshed_at TEXT NOT NULL
 );
 
+-- The YouTube videos the sentiment stage read for each event
+-- (jejak/sentiment.py). A refresh reads their new comments instead of
+-- searching again (a search is 100 quota units, a comment page 1), and
+-- videos_json = '[]' records a search that found nothing, so the event is
+-- retried once later rather than on every run. Local only.
+CREATE TABLE IF NOT EXISTS sentiment_search (
+    event_id    INTEGER PRIMARY KEY,
+    videos_json TEXT NOT NULL,     -- [{"id", "channel"}], most viewed first
+    query       TEXT,              -- the search that found them
+    attempts    INTEGER NOT NULL DEFAULT 1,
+    searched_at TEXT NOT NULL
+);
+
 -- Correction / right-of-reply requests (legal safety valve).
 CREATE TABLE IF NOT EXISTS corrections (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

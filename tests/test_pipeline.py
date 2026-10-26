@@ -1205,7 +1205,7 @@ class TestRelevanceGate:
         self._stub_embed(monkeypatch)
         self._event(conn)
         monkeypatch.setattr(sentiment, "_search_terms", lambda *a: (["q"], []))
-        monkeypatch.setattr(youtube, "gather_comments",
+        monkeypatch.setattr(sentiment, "_youtube_comments",
                             lambda *a, **k: self._thread("v1", "unrelated", 5))
         monkeypatch.setattr(reddit, "gather_comments", lambda *a, **k: [])
 
@@ -1413,3 +1413,69 @@ class TestRelabelEventStance:
         row = conn.execute("SELECT score, sample_size, collected_at FROM sentiment "
                            "WHERE event_id = 1").fetchone()
         assert (row["score"], row["sample_size"], row["collected_at"]) == (0.5, 2, "2026-10-01")
+
+
+class TestSentimentQueue:
+    """Which events the sentiment stage takes, and what each costs."""
+
+    def _event(self, conn, eid, days_ago, kind="record", articles=1):
+        from datetime import datetime, timedelta, timezone
+        when = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+        conn.execute("INSERT INTO events (id, figure_id, kind, title, event_date, status, "
+                     "created_at) VALUES (?, NULL, ?, 't', ?, 'approved', 'x')", (eid, kind, when))
+        for i in range(articles):
+            conn.execute("INSERT INTO articles (id, figure_id, source, url, title, fetched_at, "
+                         "event_id) VALUES (?, 'p', 's', ?, 't', 'x', ?)",
+                         (f"a{eid}-{i}", f"u{eid}-{i}", eid))
+
+    def test_a_stored_search_is_reused_and_an_empty_one_retried_once(self, tmp_path, monkeypatch):
+        conn = _fresh(tmp_path)
+        self._event(conn, 1, 0)
+        searches = []
+
+        def find(queries, names, **k):
+            searches.append(1)
+            return ([{"id": "v1", "channel": "c"}] if len(searches) > 1 else []), "q"
+
+        monkeypatch.setattr(youtube, "find_videos", find)
+        monkeypatch.setattr(youtube, "comments_from", lambda videos, query, cap: [])
+        args = (conn, 1, ["q"], [], "", "", 100)
+
+        sentiment._youtube_comments(*args)                    # finds nothing
+        sentiment._youtube_comments(*args)                    # not due yet
+        assert len(searches) == 1
+        conn.execute("UPDATE sentiment_search SET searched_at = '2000-01-01'")
+        sentiment._youtube_comments(*args)                    # the one retry finds v1
+        sentiment._youtube_comments(*args)                    # reuses v1
+        assert len(searches) == 2
+        row = conn.execute("SELECT videos_json, attempts FROM sentiment_search").fetchone()
+        assert row[0] == '[{"id": "v1", "channel": "c"}]' and row[1] == 2
+
+    def test_stored_comments_seed_the_videos(self, tmp_path):
+        conn = _fresh(tmp_path)
+        self._event(conn, 1, 30)
+        conn.execute("INSERT INTO comments (event_id, comment_id, video_id, channel, text, "
+                     "collected_at) VALUES (1, 'c1', 'v9', 'Kompas', 'x', 'x')")
+        videos, *_ = sentiment._stored_videos(conn, 1)
+        assert videos == [{"id": "v9", "channel": "Kompas"}]
+
+    def test_order_and_backfill_priority(self, tmp_path):
+        conn = _fresh(tmp_path)
+        self._event(conn, 1, 0)                                 # new
+        self._event(conn, 2, 40, kind="peristiwa", articles=9)  # backfill, peristiwa
+        self._event(conn, 3, 50, articles=2)                    # backfill, record
+        self._event(conn, 4, 45, articles=5)                    # backfill, record, more coverage
+        assert sentiment._pending_ids(conn) == [
+            ("new", 1), ("backfill", 4), ("backfill", 3), ("backfill", 2)]
+
+    def test_searches_stop_at_the_budget_but_stored_reads_go_on(self, tmp_path, monkeypatch):
+        conn = _fresh(tmp_path)
+        self._event(conn, 1, 40, articles=3)                    # needs a search
+        self._event(conn, 2, 41, articles=2)                    # has stored videos
+        conn.execute("INSERT INTO sentiment_search (event_id, videos_json, searched_at) "
+                     "VALUES (2, '[{\"id\": \"v\"}]', '2000-01-01')")
+        ran = []
+        monkeypatch.setattr(sentiment, "_pending_ids", lambda c: [("backfill", 1), ("refresh", 2)])
+        monkeypatch.setattr(sentiment, "sentiment_event", lambda c, eid: ran.append(eid) or [])
+        sentiment.sentiment_pending(conn, units=100)            # less than one search
+        assert ran == [2]

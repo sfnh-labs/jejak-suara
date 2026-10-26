@@ -504,9 +504,8 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
         return result
 
     try:
-        yt_comments = youtube.gather_comments(
-            queries, names=mentions, cap=cap,
-            published_after=after, published_before=before)
+        yt_comments = _youtube_comments(conn, event_id, queries, mentions,
+                                        after, before, cap)
         results.append(gated(yt_comments, "youtube"))
     except Exception as e:
         results.append({"event_id": event_id, "query": query,
@@ -532,49 +531,152 @@ def sentiment_event(conn: sqlite3.Connection, event_id: int,
     return results
 
 
+def _stored_videos(conn: sqlite3.Connection, event_id: int) -> tuple[list[dict] | None, str, int, str]:
+    """(videos, query, attempts, searched_at) from sentiment_search.
+
+    An event with no row whose comments are already stored gets their videos,
+    so the events collected before this table existed are not searched again.
+    videos is None for an event never searched.
+    """
+    row = conn.execute("SELECT videos_json, query, attempts, searched_at FROM sentiment_search "
+                       "WHERE event_id = ?", (event_id,)).fetchone()
+    if row:
+        return json.loads(row[0]), row[1] or "", row[2], row[3]
+    seen = conn.execute(
+        "SELECT video_id, max(channel) FROM comments WHERE event_id = ? AND video_id != '' "
+        "AND video_id NOT LIKE 't3_%' GROUP BY video_id ORDER BY count(*) DESC",
+        (event_id,)).fetchall()
+    if seen:
+        return [{"id": v, "channel": ch or ""} for v, ch in seen], "", 0, ""
+    return None, "", 0, ""
+
+
+def _youtube_comments(conn: sqlite3.Connection, event_id: int, queries: list[str],
+                      mentions: list[str], after: str, before: str, cap: int) -> list[dict]:
+    """The event's YouTube comments: from its stored videos, or a new search.
+
+    A search runs for an event never searched, and once more for one whose
+    search found nothing, RETRY_AFTER_DAYS later (coverage can lag the news).
+    Every search is recorded, empty or not.
+    """
+    videos, query, attempts, _ = _stored_videos(conn, event_id)
+    if videos is None or (not videos and _retry_due(conn, event_id)):
+        found, query = youtube.find_videos(queries, mentions, published_after=after,
+                                           published_before=before)
+        videos = [{"id": v["id"], "channel": v.get("channel", "")} for v in found]
+        conn.execute(
+            """INSERT INTO sentiment_search (event_id, videos_json, query, attempts, searched_at)
+               VALUES (?, ?, ?, 1, ?)
+               ON CONFLICT(event_id) DO UPDATE SET videos_json = excluded.videos_json,
+                   query = excluded.query, attempts = attempts + 1,
+                   searched_at = excluded.searched_at""",
+            (event_id, json.dumps(videos, ensure_ascii=False), query or None,
+             datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+    return youtube.comments_from(videos, query, cap=cap)
+
+
+RETRY_AFTER_DAYS = 3
+MAX_SEARCHES_PER_EVENT = 2
+
+
+def _retry_due(conn: sqlite3.Connection, event_id: int) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sentiment_search WHERE event_id = ? AND videos_json = '[]' "
+        "AND attempts < ? AND searched_at <= datetime('now', ?)",
+        (event_id, MAX_SEARCHES_PER_EVENT, f"-{RETRY_AFTER_DAYS} days")).fetchone() is not None
+
+
 _FRESH_DAYS = int(os.environ.get("SENTIMENT_FRESH_DAYS", "3"))
 # Deliberately longer than the 6-hour pipeline cron: at 6 hours every recent
 # event was re-collected on literally every run, spending YouTube quota to
 # re-classify comments that had barely changed.
 _STALE_HOURS = int(os.environ.get("SENTIMENT_STALE_HOURS", "24"))
 
+# YouTube quota units one run may spend. Three runs a day at 3,000 leave a
+# tenth of the free 10,000 for anything run by hand. An event needing a search
+# costs up to ~300 units (three searches, see youtube.find_videos); one read
+# from stored videos about 5.
+_UNITS_PER_RUN = int(os.environ.get("SENTIMENT_UNITS_PER_RUN", "3000"))
+_SEARCH_WORST_CASE = 3 * 100 + 10
+# Events per run regardless of quota: each is a local-model pass over up to a
+# hundred comments, about a minute.
+_MAX_EVENTS = int(os.environ.get("SENTIMENT_MAX_EVENTS", "40"))
 
-# Events per run. Each can cost up to three searches (100 units each, see
-# youtube.find_videos), so 10 events x 3 runs a day stays under the free
-# 10,000-unit quota even when every event needs all three (~9,100 units).
-_PER_RUN = int(os.environ.get("SENTIMENT_PER_RUN", "10"))
 
+def _pending_ids(conn: sqlite3.Connection) -> list[tuple[str, int]]:
+    """(why, event id) for every approved event due, in the order to take them.
 
-def sentiment_pending(conn: sqlite3.Connection, limit: int | None = None) -> list[dict]:
-    """Run sentiment for events that need it.
-
-    Two categories:
-    1. Approved events with no sentiment rows at all (brand-new).
-    2. Approved events from the last N days whose last sentiment is stale
-       (older than M hours), so we re-fetch fresh comments.
+    refresh   fresh events whose comments are older than _STALE_HOURS
+    new       fresh events never collected
+    retry     events whose one search found nothing, due another try
+    backfill  older events never collected: records first, then the ones the
+              most articles covered, newest first among equals
     """
-    ids = [r["id"] for r in conn.execute(
-        """SELECT e.id FROM events e
-           WHERE e.status = 'approved'
-             AND (
-               NOT EXISTS (SELECT 1 FROM sentiment s WHERE s.event_id = e.id)
-               OR (
-                 e.event_date >= datetime('now', ? || ' days', 'start of day')
-                 AND EXISTS (
-                   SELECT 1 FROM sentiment s
-                   WHERE s.event_id = e.id
-                   GROUP BY s.event_id
-                   HAVING max(s.collected_at) <= datetime('now', ? || ' hours')
-                 )
-               )
-             )
-           ORDER BY e.event_date DESC LIMIT ?""",
-        (str(-_FRESH_DAYS), str(-_STALE_HOURS), _PER_RUN if limit is None else limit),
-    ).fetchall()]
+    fresh = (f"-{_FRESH_DAYS} days",)
+    never = """NOT EXISTS (SELECT 1 FROM sentiment s WHERE s.event_id = e.id)
+               AND NOT EXISTS (SELECT 1 FROM sentiment_search q WHERE q.event_id = e.id)"""
+    out: list[tuple[str, int]] = []
+    for why, sql, params in (
+        # Last collected, or last searched for an event whose videos have had
+        # no comment kept yet; a search that found nothing is retry's.
+        ("refresh", """SELECT e.id FROM events e
+              LEFT JOIN sentiment_search q ON q.event_id = e.id
+              WHERE e.status = 'approved'
+                AND e.event_date >= datetime('now', ?, 'start of day')
+                AND (q.event_id IS NULL OR q.videos_json != '[]')
+                AND coalesce((SELECT max(s.collected_at) FROM sentiment s WHERE s.event_id = e.id),
+                             q.searched_at) <= datetime('now', ?)
+              ORDER BY e.event_date DESC""", fresh + (f"-{_STALE_HOURS} hours",)),
+        ("new", f"""SELECT e.id FROM events e WHERE e.status = 'approved'
+                AND e.event_date >= datetime('now', ?, 'start of day') AND {never}
+              ORDER BY e.event_date DESC""", fresh),
+        ("retry", """SELECT e.id FROM events e JOIN sentiment_search q ON q.event_id = e.id
+              WHERE e.status = 'approved' AND q.videos_json = '[]' AND q.attempts < ?
+                AND q.searched_at <= datetime('now', ?)
+              ORDER BY e.event_date DESC""",
+         (MAX_SEARCHES_PER_EVENT, f"-{RETRY_AFTER_DAYS} days")),
+        ("backfill", """SELECT e.id FROM events e WHERE e.status = 'approved'
+                AND e.event_date < datetime('now', ?, 'start of day')
+                AND NOT EXISTS (SELECT 1 FROM sentiment s WHERE s.event_id = e.id)
+                AND NOT EXISTS (SELECT 1 FROM sentiment_search q WHERE q.event_id = e.id)
+              ORDER BY e.kind = 'record' DESC,
+                       (SELECT count(*) FROM articles a WHERE a.event_id = e.id) DESC,
+                       e.event_date DESC""", fresh),
+    ):
+        out.extend((why, r[0]) for r in conn.execute(sql, params))
+    return out
+
+
+def sentiment_pending(conn: sqlite3.Connection, limit: int | None = None,
+                      units: int | None = None) -> list[dict]:
+    """Run sentiment for the events due (see _pending_ids), within the run's
+    YouTube quota (`units`, default _UNITS_PER_RUN) and event cap (`limit`).
+
+    An event that needs a search is skipped once the worst case would overrun
+    the budget; reads from stored videos, at a few units, carry on. So the
+    budget left after the day's own events goes to the backfill.
+    """
+    limit = _MAX_EVENTS if limit is None else limit
+    budget = youtube.units_used + (_UNITS_PER_RUN if units is None else units)
     results: list[dict] = []
-    for eid in ids:
+    done = 0
+    counts: dict[str, int] = {}
+    for why, eid in _pending_ids(conn):
+        if done >= limit:
+            break
+        videos, *_ = _stored_videos(conn, eid)
+        needs_search = videos is None or (not videos and _retry_due(conn, eid))
+        if needs_search and youtube.units_used + _SEARCH_WORST_CASE > budget:
+            continue
         # No delete pass: sentiment and comments upsert on their natural keys,
         # so re-collection refreshes rows and adds newly-posted comments while
         # keeping the ones that have scrolled out of the platform's response.
-        results.extend(sentiment_event(conn, eid))
+        for res in sentiment_event(conn, eid):
+            res["why"] = why
+            results.append(res)
+        done += 1
+        counts[why] = counts.get(why, 0) + 1
+    print(f"sentiment: {done} events {counts}, "
+          f"{youtube.units_used} YouTube units this run (budget {budget})")
     return results

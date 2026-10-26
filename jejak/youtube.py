@@ -39,10 +39,16 @@ def _key() -> str:
 _refused = False
 
 
+# Quota units spent by this process, for the sentiment stage's per-run budget.
+# search.list costs 100; every other call here costs 1.
+units_used = 0
+
+
 def _get(endpoint: str, params: dict) -> dict:
-    global _refused
+    global _refused, units_used
     if _refused:
         raise YouTubeError(f"quota spent or key refused (HTTP 403) - skipped {endpoint}")
+    units_used += 100 if endpoint == "search" else 1
     params = {**params, "key": _key()}
     url = f"{API}/{endpoint}?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -219,27 +225,33 @@ def video_comments(video_id: str, max_results: int = 50,
     return out
 
 
-def gather_comments(queries: str | list[str], names: list[str] = (),
-                    max_videos: int = 5, per_video: int = 30, cap: int = 100,
-                    published_after: str = "",
-                    published_before: str = "") -> list[dict]:
-    """Collect up to `cap` comments from the videos find_videos picks.
+def comments_from(videos: list[dict], query: str = "", per_video: int = 30,
+                  cap: int = 100) -> list[dict]:
+    """Up to `cap` comments from the given videos, in order.
 
     Each comment dict: {comment_id, video_id, channel, text, author_id,
     author_name, like_count, published_at, query}, `query` being the search
     that found its video.
     """
-    if isinstance(queries, str):
-        queries = [queries]
-    videos, query = find_videos(queries, names, max_videos=max_videos,
-                                published_after=published_after,
-                                published_before=published_before)
     comments: list[dict] = []
     for vid in videos:
         for c in video_comments(vid["id"], max_results=per_video,
-                                channel=vid["channel"]):
+                                channel=vid.get("channel", "")):
             c["query"] = query
             comments.append(c)
         if len(comments) >= cap:
             break
     return comments[:cap]
+
+
+def gather_comments(queries: str | list[str], names: list[str] = (),
+                    max_videos: int = 5, per_video: int = 30, cap: int = 100,
+                    published_after: str = "",
+                    published_before: str = "") -> list[dict]:
+    """Collect up to `cap` comments from the videos find_videos picks."""
+    if isinstance(queries, str):
+        queries = [queries]
+    videos, query = find_videos(queries, names, max_videos=max_videos,
+                                published_after=published_after,
+                                published_before=published_before)
+    return comments_from(videos, query, per_video=per_video, cap=cap)
