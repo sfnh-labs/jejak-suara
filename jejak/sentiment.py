@@ -438,7 +438,13 @@ _FRESH_DAYS = int(os.environ.get("SENTIMENT_FRESH_DAYS", "3"))
 _STALE_HOURS = int(os.environ.get("SENTIMENT_STALE_HOURS", "24"))
 
 
-def sentiment_pending(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
+# Events per run. Each can cost up to three searches (100 units each, see
+# youtube.find_videos), so 10 events x 3 runs a day stays under the free
+# 10,000-unit quota even when every event needs all three (~9,100 units).
+_PER_RUN = int(os.environ.get("SENTIMENT_PER_RUN", "10"))
+
+
+def sentiment_pending(conn: sqlite3.Connection, limit: int | None = None) -> list[dict]:
     """Run sentiment for events that need it.
 
     Two categories:
@@ -462,7 +468,7 @@ def sentiment_pending(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
                )
              )
            ORDER BY e.event_date DESC LIMIT ?""",
-        (str(-_FRESH_DAYS), str(-_STALE_HOURS), limit),
+        (str(-_FRESH_DAYS), str(-_STALE_HOURS), _PER_RUN if limit is None else limit),
     ).fetchall()]
     results: list[dict] = []
     for eid in ids:
