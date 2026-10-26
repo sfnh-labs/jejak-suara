@@ -325,6 +325,17 @@ CREATE TABLE IF NOT EXISTS event_quotes (
 CREATE INDEX IF NOT EXISTS idx_event_quotes_event ON event_quotes(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_quotes_figure ON event_quotes(figure_id);
 
+-- Which article bodies the quotes stage (jejak/quotes.py) has read, and for
+-- which event: an article moved to another event is read again. Local only.
+-- Without it every run reread the whole archive (35k articles, the stage's
+-- cost growing with it). `jejak quotes --full` ignores it.
+CREATE TABLE IF NOT EXISTS quote_scans (
+    article_id TEXT NOT NULL,
+    event_id   INTEGER NOT NULL,
+    scanned_at TEXT NOT NULL,
+    PRIMARY KEY (article_id, event_id)
+);
+
 -- Everyone taking part in a record, not just the figure it is filed under
 -- (jejak/participants.py). events.figure_id stays the record's main actor
 -- for display; this says who else is in it and how:

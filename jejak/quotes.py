@@ -83,20 +83,26 @@ def find_quote(body: str, name: str, aliases: list[str],
     return max(found, key=len) if found else None
 
 
-def quote_pending(conn: sqlite3.Connection) -> dict[str, int]:
+def quote_pending(conn: sqlite3.Connection, full: bool = False) -> dict[str, int]:
     """Attach a quote to every record that has none yet and a fetched article.
 
-    Records without a quote are rescanned each run, since their bodies keep
-    arriving from the fetch queue. A miss writes nothing, so the Neon push,
-    which only sends changed rows, costs nothing for them.
+    Only records with an article body the stage has not read yet (quote_scans)
+    are looked at, since a body that held no quote last run holds none now.
+    A curator sending a record back to the pipeline's pick clears its scans,
+    so it is read again. `full` rereads every record without a quote, as after
+    adding a figure's aliases. A miss writes nothing, so the Neon push, which
+    only sends changed rows, costs nothing for them.
     """
     stats = {"scanned": 0, "quoted": 0}
+    unread = "" if full else """
+              AND NOT EXISTS (SELECT 1 FROM quote_scans s
+                               WHERE s.article_id = a.id AND s.event_id = e.id)"""
     events = conn.execute(
-        """SELECT DISTINCT e.id, f.name, f.aliases
+        f"""SELECT DISTINCT e.id, f.name, f.aliases
              FROM events e
              JOIN figures f ON f.id = e.figure_id
              JOIN articles a ON a.event_id = e.id AND a.fetch_status = 'ok'
-            WHERE e.kind = 'record' AND e.quote IS NULL"""
+            WHERE e.kind = 'record' AND e.quote IS NULL{unread}"""
     ).fetchall()
     for ev in events:
         stats["scanned"] += 1
@@ -122,7 +128,8 @@ def quote_pending(conn: sqlite3.Connection) -> dict[str, int]:
             conn.execute("UPDATE events SET quote = ?, quote_url = ? WHERE id = ?",
                          (*best, ev["id"]))
             stats["quoted"] += 1
-    stats.update(collect_quotes(conn))
+    # After the records: collect_quotes marks the bodies read.
+    stats.update(collect_quotes(conn, full=full))
     conn.commit()
     return stats
 
@@ -171,11 +178,13 @@ def match_speaker(speaker: str, figures: list[tuple[str, list[str]]],
     return None if best is None or tied else best[1]
 
 
-def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None) -> dict[str, int]:
+def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None,
+                   full: bool = False) -> dict[str, int]:
     """List every attributed quote of each event in event_quotes. Commits in batches.
 
     New quotes are matched to a tracked figure; a quote already listed keeps
-    its assignment, a curator's above all.
+    its assignment, a curator's above all. Reads only the bodies quote_scans
+    has no row for, unless `full` or the events are named.
     """
     figures = []
     for r in conn.execute("SELECT id, name, aliases FROM figures WHERE active = 1"):
@@ -189,6 +198,9 @@ def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None)
     if event_ids is not None:
         where += f" AND a.event_id IN ({','.join('?' * len(event_ids)) or 'NULL'})"
         params = list(event_ids)
+    elif not full:
+        where += (" AND NOT EXISTS (SELECT 1 FROM quote_scans s"
+                  " WHERE s.article_id = a.id AND s.event_id = a.event_id)")
     stats = {"articles": 0, "quotes": 0}
     now = datetime.now(timezone.utc).isoformat()
     for art in conn.execute(
@@ -210,4 +222,6 @@ def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None)
                  match_speaker(speaker, figures, art["owner"]), now),
             )
             stats["quotes"] += cur.rowcount
+        conn.execute("INSERT OR REPLACE INTO quote_scans (article_id, event_id, scanned_at) "
+                     "VALUES (?, ?, ?)", (art["id"], art["event_id"], now))
     return stats
