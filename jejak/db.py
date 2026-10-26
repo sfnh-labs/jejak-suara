@@ -318,7 +318,7 @@ CREATE TABLE IF NOT EXISTS event_quotes (
     quote       TEXT NOT NULL,
     speaker     TEXT,              -- as the article names them: "Said", "Ketua Banggar DPR Said Abdullah"
     figure_id   TEXT,              -- whose words, or NULL when unclear
-    assigned_by TEXT,              -- 'auto' | 'curator'
+    assigned_by TEXT,              -- 'auto' | 'curator' | 'lesson' (speaker_lessons) | 'point' (an auto-answered point)
     found_at    TEXT NOT NULL,
     UNIQUE (event_id, quote)
 );
@@ -344,12 +344,13 @@ CREATE TABLE IF NOT EXISTS quote_scans (
 --   'target'   the act is aimed at them; set by a curator only
 --   'quoted'   speaks in the coverage without being the actor
 -- One row per figure per record, the strongest role winning. Rows with
--- assigned_by 'curator' are never touched by the stage.
+-- assigned_by other than 'auto' (a curator's, or an auto-answered point's)
+-- are never touched by the stage.
 CREATE TABLE IF NOT EXISTS record_figures (
     event_id    INTEGER NOT NULL,
     figure_id   TEXT NOT NULL,
     role        TEXT NOT NULL,      -- actor | subject | target | quoted
-    source      TEXT NOT NULL,      -- owner | quote | derived | curator
+    source      TEXT NOT NULL,      -- owner | quote | derived | curator | point
     quotes      INTEGER NOT NULL DEFAULT 0,  -- their quotes in the record's coverage
     assigned_by TEXT NOT NULL DEFAULT 'auto',
     PRIMARY KEY (event_id, figure_id),
@@ -517,6 +518,22 @@ CREATE TABLE IF NOT EXISTS sentiment_search (
     query       TEXT,              -- the search that found them
     attempts    INTEGER NOT NULL DEFAULT 1,
     searched_at TEXT NOT NULL
+);
+
+-- Whose words a speaker, as written, is: learned from answered pembicara
+-- points, so the quotes stage assigns the next "Kabareskrim" itself instead
+-- of asking again. `scope` is where the answer holds, as the point was
+-- grouped: '' everywhere (a full name), a figure id (in that figure's
+-- catatan), or 'e<id>' (that one peristiwa). figure_id NULL: someone not
+-- tracked. Quotes assigned from it have assigned_by 'lesson'. Local only.
+CREATE TABLE IF NOT EXISTS speaker_lessons (
+    speaker    TEXT NOT NULL,      -- lowercased, spaces collapsed (curation_points._norm)
+    scope      TEXT NOT NULL DEFAULT '',
+    figure_id  TEXT,
+    point_id   INTEGER,            -- the answer it came from
+    taught_by  TEXT NOT NULL,      -- curator | auto
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (speaker, scope)
 );
 
 -- Correction / right-of-reply requests (legal safety valve).

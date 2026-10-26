@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { KIND_LABEL, type Confidence, type Point } from "@/lib/curationPoints";
-import { answerCurationPoint, undoCurationPoint } from "./actions";
+import { answerCurationPoint, markCurationPointWrong, undoCurationPoint } from "./actions";
 import { FigurePicker } from "./FigurePicker";
 import { ACCEPT, INK, MUTED, RULE, button, day } from "./ui";
 
 /**
  * A catatan's curation points: each open one as a card with the paragraph
  * that raised it, what the pipeline thinks, and how often the curator agreed
- * with it on points like it; answered ones as a line each, with "Batalkan".
+ * with it on points like it; answered ones as a line each, with "Batalkan",
+ * or "Salah" on an auto answer.
  * Plain forms, as everywhere in /kurasi: no client script needed to answer.
  */
 /** The page with an article open in the reading pane, at the point's paragraph. */
@@ -64,6 +65,11 @@ function PointCard({ point: p, listId, readHref, open, liniPanel }: {
           {KIND_LABEL[p.kind]}
         </span>
         {p.status === "lewati" ? <span style={{ fontSize: 12, color: MUTED }}>dilewati</span> : null}
+        {p.spot_check ? (
+          <span title="Jenis ini dijawab otomatis; yang ini sengaja ditanyakan untuk memeriksanya. Jawaban “Bukan” mematikan otomatisnya." style={{ fontSize: 12, fontWeight: 600, color: "#7a5a12" }}>
+            cek acak
+          </span>
+        ) : null}
         {p.kind === "pembicara" && p.group_size > 1 ? (
           <span style={{ fontSize: 12, fontWeight: 600, color: "#7a5a12" }}>
             {p.group_size} kutipan{p.proposal.events && p.proposal.events > 1 ? ` di ${p.proposal.events} catatan` : ""} · satu jawaban untuk semua
@@ -192,7 +198,12 @@ function PointDone({ point: p }: { point: Point }) {
           {fixAt ? <> · <a href={fixAt} style={{ color: MUTED }}>tautkan yang benar di bawah</a></> : null}
         </span>
       </span>
-      {p.answered_by === "curator" ? (
+      {p.status === "auto" ? (
+        <form action={markCurationPointWrong}>
+          <PointHidden id={p.id} />
+          <button type="submit" title="Kembalikan dan putuskan sebaliknya; dihitung melawan jawaban otomatis jenis ini" style={{ ...button("quiet"), padding: "4px 12px", fontSize: 12.5, color: "var(--color-clay)", borderColor: "var(--color-clay)" }}>Salah</button>
+        </form>
+      ) : p.answered_by === "curator" && p.status !== "auto_wrong" ? (
         <form action={undoCurationPoint}>
           <PointHidden id={p.id} />
           <button type="submit" style={{ border: "none", background: "none", padding: "4px 0", fontSize: 12.5, color: MUTED, textDecoration: "underline", cursor: "pointer" }}>Batalkan</button>
