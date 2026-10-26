@@ -11,23 +11,32 @@ import { ACCEPT, INK, MUTED, RULE, button, day } from "./ui";
  * or "Salah" on an auto answer.
  * Plain forms, as everywhere in /kurasi: no client script needed to answer.
  */
+/** The page with an article open in the reading pane, at the point's paragraph. */
+type ReadHref = (articleId: string, pointId: number) => string;
+/** The page with a side panel open (peristiwa:12, catatan:34, tokoh:slug). */
+type OpenHref = (panel: string) => string;
+
 export function PointList({
   points,
   listId,
   readHref,
+  open,
+  liniPanel,
 }: {
   points: Point[];
   /** The roster <datalist> the figure picker reads. */
   listId: string;
-  /** The page with an article open in the reading pane. */
-  readHref: (articleId: string) => string;
+  readHref: ReadHref;
+  open: OpenHref;
+  /** What the other end of a lini cerita point is: catatan on a record, peristiwa on a peristiwa. */
+  liniPanel: "catatan" | "peristiwa";
 }) {
   return (
     <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
       {points.map((p, i) => (
         <li key={p.id} style={{ borderTop: i ? `1px solid ${RULE}` : "none", padding: i ? "14px 0 0" : 0, marginTop: i ? 14 : 0 }}>
           {p.status === "open" || p.status === "lewati"
-            ? <PointCard point={p} listId={listId} readHref={readHref} />
+            ? <PointCard point={p} listId={listId} readHref={readHref} open={open} liniPanel={liniPanel} />
             : <PointDone point={p} />}
         </li>
       ))}
@@ -44,7 +53,10 @@ function PointHidden({ id, answer }: { id: number; answer?: string }) {
   );
 }
 
-function PointCard({ point: p, listId, readHref }: { point: Point; listId: string; readHref: (articleId: string) => string }) {
+function PointCard({ point: p, listId, readHref, open, liniPanel }: {
+  point: Point; listId: string; readHref: ReadHref; open: OpenHref; liniPanel: "catatan" | "peristiwa";
+}) {
+  const subject = subjectPanel(p, liniPanel);
   const speakerNone = p.kind === "pembicara" && !p.proposal.figure_id;
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -70,7 +82,7 @@ function PointCard({ point: p, listId, readHref }: { point: Point; listId: strin
       {p.paragraph ? (
         <blockquote style={{ margin: 0, padding: "1px 0 1px 14px", borderLeft: `3px solid ${RULE}`, fontFamily: "var(--font-serif)", fontSize: 15, lineHeight: 1.6, color: "var(--color-mud)" }}>
           {p.article_id ? (
-            <Link href={readHref(p.article_id)} scroll={false} style={{ display: "block", fontFamily: "var(--font-sans)", fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 2 }}>
+            <Link href={readHref(p.article_id, p.id)} scroll={false} style={{ display: "block", fontFamily: "var(--font-sans)", fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 2 }}>
               {[p.source, p.published_at ? day(p.published_at) : null].filter(Boolean).join(" · ")}
               {" · "}<span style={{ fontWeight: 400, textDecoration: "underline" }}>baca beritanya</span>
             </Link>
@@ -82,7 +94,17 @@ function PointCard({ point: p, listId, readHref }: { point: Point; listId: strin
       )}
 
       <div style={{ display: "grid", gap: 3 }}>
-        <div style={{ fontFamily: "var(--font-serif)", fontSize: 17, fontWeight: 500, lineHeight: 1.35, color: INK }}>{p.proposal.claim}</div>
+        <div style={{ fontFamily: "var(--font-serif)", fontSize: 17, fontWeight: 500, lineHeight: 1.35, color: INK }}>
+          {p.proposal.claim}
+          {subject ? (
+            <>
+              {" "}
+              <Link href={open(subject.panel)} scroll={false} style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, fontWeight: 400, color: MUTED, whiteSpace: "nowrap" }}>
+                {subject.label} ›
+              </Link>
+            </>
+          ) : null}
+        </div>
         <div style={{ fontSize: 12.5, color: "var(--color-mud)" }}><strong style={{ color: INK }}>Jika Ya:</strong> {p.effect}</div>
         <div style={{ fontSize: 12, color: MUTED }}>{basis(p)}</div>
       </div>
@@ -111,6 +133,18 @@ function PointCard({ point: p, listId, readHref }: { point: Point; listId: strin
       </div>
     </div>
   );
+}
+
+/** What the point is about, to read in the side panel before answering. */
+function subjectPanel(p: Point, liniPanel: "catatan" | "peristiwa"): { panel: string; label: string } | null {
+  const x = p.proposal;
+  if (p.kind === "peristiwa" && x.peristiwa_id) return { panel: `peristiwa:${x.peristiwa_id}`, label: "lihat peristiwanya" };
+  if (p.kind === "lini" && x.earlier_id && x.later_id) {
+    const other = x.later_id === p.event_id ? x.earlier_id : x.later_id;
+    return { panel: `${liniPanel}:${other}`, label: liniPanel === "catatan" ? "lihat catatannya" : "lihat peristiwanya" };
+  }
+  if ((p.kind === "pelaku" || p.kind === "pembicara") && x.figure_id) return { panel: `tokoh:${x.figure_id}`, label: "lihat tokohnya" };
+  return null;
 }
 
 /** Who said it instead: one of the figures that also fit, or any from the roster. */

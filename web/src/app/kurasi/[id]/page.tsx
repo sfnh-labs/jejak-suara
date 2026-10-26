@@ -4,7 +4,9 @@ import { REASONS, getFigureOptions, getOrganizations, type Organization, getFoll
 import { decide } from "../kandidat/actions";
 import { AcceptCandidateForm } from "../AcceptCandidateForm";
 import { FigurePicker, SpeakerEditor } from "../FigurePicker";
-import { ArticleReader, type ReaderTerm } from "../ArticleReader";
+import { ArticleReader, type ReaderFocus, type ReaderTerm } from "../ArticleReader";
+import { EventPanel, FigurePanel, MissingPanel, type Relation } from "../SidePanel";
+import { eventPanel, getEventPeek, getFigurePeek, parsePanel } from "@/lib/panels";
 import { PointList } from "../CurationPoints";
 import { getPoints } from "@/lib/curationPoints";
 import { addFollowup, curate, editFigure, mergeFigures, relateFigure, ruleFollowup, ruleLink, rework, decideRework, notAPerson, setQuoteSpeaker, pickQuote, newQuote } from "../actions";
@@ -25,31 +27,49 @@ export default async function KurasiItem({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ perlu?: string; cari?: string; baca?: string }>;
+  searchParams: Promise<{ perlu?: string; cari?: string; baca?: string; p?: string; panel?: string }>;
 }) {
   const { id } = await params;
-  const { perlu, cari = "", baca } = await searchParams;
+  const { perlu, cari = "", baca, p: pointParam, panel: panelParam } = await searchParams;
   const eventId = Number(id);
   if (!Number.isInteger(eventId) || eventId <= 0) notFound();
   const [item, figures, orgs] = await Promise.all([getItem(eventId), getFigureOptions(), getOrganizations()]);
   if (!item) notFound();
-  const [candidates, reading, points] = await Promise.all([
+  // One side column: an article, or a panel; opening either closes the other.
+  const panelRef = baca ? null : parsePanel(panelParam);
+  const [candidates, reading, points, panel] = await Promise.all([
     getFollowupCandidates(item, cari.slice(0, 100)),
     baca ? getReading(eventId, baca.slice(0, 128)) : null,
     getPoints(eventId),
+    panelRef?.kind === "tokoh" ? getFigurePeek(panelRef.id)
+      : panelRef ? getEventPeek(panelRef.id)
+      : null,
   ]);
   const openPoints = points.filter((p) => p.status === "open").length;
-  // The page's own address with the reading pane set or cleared; the other
-  // parameters ride along so opening an article loses nothing.
-  const here = (article: string | null) => {
+  // The page's own address with the side column set or cleared; the other
+  // parameters ride along so opening an article or a panel loses nothing.
+  const at = (side: { baca?: string; p?: number; panel?: string } = {}) => {
     const q = new URLSearchParams();
     if (perlu) q.set("perlu", perlu);
     if (cari) q.set("cari", cari);
-    if (article) q.set("baca", article);
+    if (side.baca) q.set("baca", side.baca);
+    if (side.baca && side.p) q.set("p", String(side.p));
+    if (side.panel) q.set("panel", side.panel);
     const qs = q.toString();
     return `/kurasi/${eventId}${qs ? `?${qs}` : ""}`;
   };
+  const here = (article: string | null) => at(article ? { baca: article } : {});
+  const open = (panel: string) => at({ panel });
   const terms = readerTerms(item);
+  // "baca beritanya" on a point: the reader opens at the paragraph it quotes.
+  const focused = reading ? points.find((p) => String(p.id) === pointParam && p.article_id === reading.id) : undefined;
+  const focus: ReaderFocus | undefined = focused?.paragraph
+    ? {
+        paragraph: focused.paragraph,
+        highlight: focused.hl_start !== null && focused.hl_end !== null ? focused.paragraph.slice(focused.hl_start, focused.hl_end) : null,
+      }
+    : undefined;
+  const side = reading ? "reading" : panelRef ? "panel" : null;
   // The banner the site would show, borrowed ones included (peristiwa only).
   const image = item.kind === "peristiwa"
     ? storyImageSource(eventId, (await storylines([eventId], { evenHidden: [eventId] })).get(eventId) ?? [], item.title)
@@ -81,13 +101,17 @@ export default async function KurasiItem({
           opens under its own line in the list instead. */}
       <style>{`
         .kurasi-reader-side { display: none; }
+        .kurasi-sheet { position: fixed; inset: 0; z-index: 30; overflow-y: auto; overscroll-behavior: contain; padding: 12px; background: rgba(22, 19, 15, 0.35); }
         @media (min-width: 1180px) {
-          .kurasi-split.reading { display: grid; grid-template-columns: minmax(0, 920px) minmax(0, 1fr); gap: 28px; align-items: start; }
-          .kurasi-split.reading .kurasi-reader-side { display: block; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; padding: 22px 0 40px; overscroll-behavior: contain; }
-          .kurasi-split.reading .kurasi-reader-inline { display: none; }
+          .kurasi-split.side { display: grid; grid-template-columns: minmax(0, 920px) minmax(0, 1fr); gap: 28px; align-items: start; }
+          .kurasi-split.side .kurasi-reader-side, .kurasi-split.side .kurasi-sheet {
+            display: block; position: sticky; top: 0; inset: auto; z-index: auto; background: none;
+            max-height: 100vh; overflow-y: auto; padding: 22px 0 40px; overscroll-behavior: contain;
+          }
+          .kurasi-split.side .kurasi-reader-inline { display: none; }
         }
       `}</style>
-      <div className={`container-page kurasi-split${reading ? " reading" : ""}`} style={{ maxWidth: reading ? 1640 : 920, paddingBottom: 96 }}>
+      <div className={`container-page kurasi-split${side ? " side" : ""}`} style={{ maxWidth: side ? 1640 : 920, paddingBottom: 96 }}>
         <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "22px 0 0", fontSize: 12.5, flexWrap: "wrap" }}>
           <Link href={queue} style={{ color: MUTED }}>← Antrean {isRecord ? "catatan" : "peristiwa"}</Link>
@@ -130,7 +154,7 @@ export default async function KurasiItem({
           ) : null}
         </header>
 
-        <VerdictBar item={item} sections={sections} missing={perlu} figures={figures} />
+        <VerdictBar item={item} sections={sections} missing={perlu} figures={figures} open={open} />
         <FigureOptions figures={figures} />
         <OrgOptions orgs={orgs} />
 
@@ -142,7 +166,13 @@ export default async function KurasiItem({
             count={openPoints || undefined}
             note="Penilaian pipeline yang belum yakin. Jawabanmu langsung mengubah bagian di bawah, dan menambah keyakinan untuk poin sejenis berikutnya."
           >
-            <PointList points={points} listId={FIGURE_LIST} readHref={(a) => here(a)} />
+            <PointList
+              points={points}
+              listId={FIGURE_LIST}
+              readHref={(a, p) => at({ baca: a, p })}
+              open={open}
+              liniPanel={isRecord ? "catatan" : "peristiwa"}
+            />
           </Card>
         ) : null}
 
@@ -194,7 +224,7 @@ export default async function KurasiItem({
                   ) : null}
                   {reading?.id === a.id ? (
                     <div className="kurasi-reader-inline" style={{ marginTop: 12 }}>
-                      <ArticleReader article={reading} terms={terms} closeHref={here(null)} />
+                      <ArticleReader article={reading} terms={terms} closeHref={here(null)} focus={focus} />
                     </div>
                   ) : null}
                 </li>
@@ -210,11 +240,11 @@ export default async function KurasiItem({
           count={item.named.length}
           note={
             isRecord
-              ? "Semua orang di liputan catatan ini, pemilik catatan paling atas. Tokoh yang sudah ada bisa disunting atau digabung; nama baru bisa dijadikan tokoh, disamakan dengan tokoh yang ada, atau ditolak. Perubahan nama, jabatan, dan alias berlaku di seluruh situs dan dipakai pipeline untuk artikel berikutnya."
+              ? "Semua orang di liputan catatan ini, pelakunya paling atas. Tokoh yang sudah ada bisa disunting atau digabung; nama baru bisa dijadikan tokoh, disamakan dengan tokoh yang ada, atau ditolak. Perubahan nama, jabatan, dan alias berlaku di seluruh situs dan dipakai pipeline untuk artikel berikutnya."
               : "Semua orang di liputan peristiwa ini. Coret tokoh yang salah cocok, misalnya karena alias yang juga nama orang lain; nama baru bisa langsung diputuskan."
           }
         >
-          <NamedList item={item} figures={figures} />
+          <NamedList item={item} figures={figures} open={open} />
         </Card>
 
         <Card
@@ -224,11 +254,11 @@ export default async function KurasiItem({
           count={item.quotes.length}
           note={
             isRecord
-              ? "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media dan tokoh yang dicocokkan pipeline. Betulkan pemiliknya bila salah, dan pilih kutipan pemilik catatan yang tampil di situs."
-              : "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media dan tokoh yang dicocokkan pipeline. Betulkan pemiliknya bila salah."
+              ? "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media dan tokoh yang dicocokkan pipeline. Betulkan tokohnya bila salah, dan pilih kutipan pelaku yang tampil di situs."
+              : "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media dan tokoh yang dicocokkan pipeline. Betulkan tokohnya bila salah."
           }
         >
-          <QuoteList item={item} figures={figures} />
+          <QuoteList item={item} figures={figures} open={open} />
         </Card>
 
         <Card
@@ -242,7 +272,7 @@ export default async function KurasiItem({
               : "Catatan tokoh yang diusulkan atau dikonfirmasi sebagai bagian dari peristiwa ini."
           }
         >
-          <LinkList item={item} />
+          <LinkList item={item} open={open} />
           {isRecord ? <AddLink item={item} /> : null}
         </Card>
 
@@ -257,8 +287,8 @@ export default async function KurasiItem({
               : "Peristiwa sebelum dan sesudah ini, bila ini kelanjutannya: RUU diusulkan lalu disahkan, pencarian dimulai lalu dihentikan. Hanya yang kamu konfirmasi yang tampil di situs, dan peristiwa tanpa gambar memakai gambar dari lini ceritanya."
           }
         >
-          <FollowupList item={item} />
-          <AddFollowup item={item} candidates={candidates} search={cari} />
+          <FollowupList item={item} open={open} />
+          <AddFollowup item={item} candidates={candidates} search={cari} open={open} />
         </Card>
 
         <p style={{ fontSize: 12, color: MUTED, margin: "22px 0 0", lineHeight: 1.6, maxWidth: 640 }}>
@@ -268,12 +298,45 @@ export default async function KurasiItem({
         </div>
         {reading ? (
           <aside className="kurasi-reader-side" aria-label="Artikel yang sedang dibaca">
-            <ArticleReader article={reading} terms={terms} closeHref={here(null)} />
+            <ArticleReader article={reading} terms={terms} closeHref={here(null)} focus={focus} />
+          </aside>
+        ) : null}
+        {panelRef ? (
+          <aside className="kurasi-sheet" aria-label="Panel">
+            {!panel ? (
+              <MissingPanel closeHref={at()} />
+            ) : "records" in panel ? (
+              <FigurePanel
+                peek={panel}
+                open={open}
+                closeHref={at()}
+                here={eventId}
+                onPage={item.named.some((x) => x.kind === "figure" && x.id === panel.id) ? `${at()}#nama-${panel.id}` : null}
+              />
+            ) : (
+              <EventPanel peek={panel} open={open} closeHref={at()} here={eventId} relation={relationTo(item, panel.event_id)} />
+            )}
           </aside>
         ) : null}
       </div>
     </div>
   );
+}
+
+/** How another event stands to this one, for ruling it from its panel. */
+function relationTo(item: Item, otherId: number): Relation | null {
+  const link = item.links.find((l) => l.event_id === otherId);
+  if (link) {
+    const pair = item.kind === "record"
+      ? { record_id: item.event_id, peristiwa_id: otherId }
+      : { record_id: otherId, peristiwa_id: item.event_id };
+    return { kind: "link", pair, verdict: link.verdict };
+  }
+  const earlier = item.followups.earlier.find((f) => f.event_id === otherId);
+  if (earlier) return { kind: "lini", pair: { earlier_id: otherId, later_id: item.event_id }, verdict: earlier.verdict };
+  const later = item.followups.later.find((f) => f.event_id === otherId);
+  if (later) return { kind: "lini", pair: { earlier_id: item.event_id, later_id: otherId }, verdict: later.verdict };
+  return null;
 }
 
 /**
@@ -435,11 +498,13 @@ function VerdictBar({
   sections,
   missing,
   figures,
+  open,
 }: {
   item: Item;
   sections: { id: string; title: string }[];
   missing?: string;
   figures: FigureOption[];
+  open: Open;
 }) {
   const next = item.next_id ?? "";
   const s = item.suggestion;
@@ -529,7 +594,7 @@ function VerdictBar({
           {item.ruling.note ? <> · <em>{item.ruling.note}</em></> : null}
         </div>
       ) : null}
-      {!item.curated && s ? <SuggestionLine item={item} /> : null}
+      {!item.curated && s ? <SuggestionLine item={item} open={open} /> : null}
       <CvNote item={item} figures={figures} />
       <nav style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${RULE}` }}>
         {sections.map((x, i) => (
@@ -606,7 +671,7 @@ function Warn({ children }: { children: React.ReactNode }) {
 }
 
 /** "Saran: Remeh / seremonial — mirip 12 yang pernah diturunkan", with the examples. */
-function SuggestionLine({ item }: { item: Item }) {
+function SuggestionLine({ item, open }: { item: Item; open: Open }) {
   const s = item.suggestion!;
   return (
     <div style={{ fontSize: 12.5, color: "#7a5a12", marginTop: 8, display: "grid", gap: 3 }}>
@@ -621,7 +686,7 @@ function SuggestionLine({ item }: { item: Item }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12 }}>
           <span style={{ color: MUTED }}>Contoh:</span>
           {item.examples.map((x) => (
-            <Link key={x.event_id} href={`/kurasi/${x.event_id}`} style={{ color: MUTED, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <Link key={x.event_id} href={open(eventPanel(item.kind, x.event_id))} scroll={false} style={{ color: MUTED, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {x.title ?? `#${x.event_id}`}
             </Link>
           ))}
@@ -862,7 +927,7 @@ function FigureOptions({ figures }: { figures: FigureOption[] }) {
   );
 }
 
-function NamedList({ item, figures }: { item: Item; figures: FigureOption[] }) {
+function NamedList({ item, figures, open }: { item: Item; figures: FigureOption[]; open: Open }) {
   if (item.named.length === 0) {
     return <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Tidak ada nama yang dikenali.</p>;
   }
@@ -875,9 +940,12 @@ function NamedList({ item, figures }: { item: Item; figures: FigureOption[] }) {
         <li key={`${p.kind}-${p.id}`} id={`nama-${p.id}`} style={{ scrollMarginTop: 80, padding: "14px 0", borderTop: i ? `1px solid ${RULE}` : "none" }}>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
             <Pill tone={p.kind === "candidate" ? "pending" : "neutral"}>{p.kind === "candidate" ? "Nama baru" : "Sudah ada"}</Pill>
-            {p.owner ? <Pill tone="ink">pemilik catatan</Pill> : null}
+            {p.owner ? <Pill tone="ink">pelaku</Pill> : null}
             <span style={{ fontSize: 11.5, color: MUTED }}>disebut di {p.articles} artikel</span>
             {p.struck ? <Pill tone="danger">dicoret dari peristiwa</Pill> : null}
+            {p.kind === "figure" ? (
+              <Link href={open(`tokoh:${p.id}`)} scroll={false} style={{ fontSize: 12, color: MUTED }}>catatan lainnya ›</Link>
+            ) : null}
           </div>
           {p.kind === "figure" ? (
             <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap", opacity: p.struck ? 0.6 : 1 }}>
@@ -895,7 +963,7 @@ function NamedList({ item, figures }: { item: Item; figures: FigureOption[] }) {
                 <SubPanel title="Data tokoh">
                   <FigureForm figure={p} eventId={item.event_id} />
                 </SubPanel>
-                {p.active !== false ? <SamePerson person={p} eventId={item.event_id} figures={figures} /> : null}
+                {p.active !== false ? <SamePerson person={p} eventId={item.event_id} figures={figures} open={open} /> : null}
                 {p.active !== false ? (
                   // Its button sits beside "Simpan tokoh"; forms cannot nest,
                   // so it submits this one by id.
@@ -912,7 +980,7 @@ function NamedList({ item, figures }: { item: Item; figures: FigureOption[] }) {
               ) : null}
             </div>
           ) : (
-            <CandidateRow person={p} figures={figures} />
+            <CandidateRow person={p} figures={figures} open={open} />
           )}
         </li>
       ))}
@@ -925,7 +993,7 @@ function NamedList({ item, figures }: { item: Item; figures: FigureOption[] }) {
  *
  * The form itself is shared with the queue (AcceptCandidateForm).
  */
-function CandidateRow({ person: p, figures }: { person: NamedPerson; figures: FigureOption[] }) {
+function CandidateRow({ person: p, figures, open }: { person: NamedPerson; figures: FigureOption[]; open: Open }) {
   if (p.verdict) {
     const [tone, text]: [PillTone, string] =
       p.verdict === "promote" ? ["accept", "dijadikan tokoh"] :
@@ -949,7 +1017,7 @@ function CandidateRow({ person: p, figures }: { person: NamedPerson; figures: Fi
         <span style={{ fontFamily: "var(--font-serif)", fontSize: 17, fontWeight: 600 }}>{p.name}</span>
         {p.role ? <span style={{ fontSize: 12.5, color: MUTED }}>liputan menyebutnya “{p.role}”</span> : null}
       </div>
-      <SamePerson person={p} eventId={0} figures={figures} />
+      <SamePerson person={p} eventId={0} figures={figures} open={open} />
       <SubPanel title="Atau: jadikan tokoh baru" note="Isian ini yang disimpan, apa adanya.">
         <AcceptCandidateForm slug={p.id} name={p.name} role={p.role} />
       </SubPanel>
@@ -966,7 +1034,7 @@ function CandidateRow({ person: p, figures }: { person: NamedPerson; figures: Fi
  * the tick; the suggested direction folds the figure with fewer records into
  * the one with more, and the record's own figure stays put.
  */
-function SamePerson({ person: p, eventId, figures }: { person: NamedPerson; eventId: number; figures: FigureOption[] }) {
+function SamePerson({ person: p, eventId, figures, open }: { person: NamedPerson; eventId: number; figures: FigureOption[]; open: Open }) {
   const hints = likelyDuplicates(p, figures);
   const isName = p.kind === "candidate";
   const own = figures.find((f) => f.id === p.id)?.records ?? 0;
@@ -993,7 +1061,7 @@ function SamePerson({ person: p, eventId, figures }: { person: NamedPerson; even
             <span style={{ flex: "1 1 260px", minWidth: 0, fontSize: 13.5 }}>
               <strong style={{ fontFamily: "var(--font-serif)", fontSize: 15 }}>{f.name}</strong>
               <span style={{ color: MUTED }}>{f.role ? ` · ${f.role}` : ""} · {f.records} catatan · </span>
-              <Link href={`/tokoh/${f.id}`} target="_blank" style={{ color: MUTED, fontSize: 12 }}>/tokoh/{f.id} ↗</Link>
+              <Link href={open(`tokoh:${f.id}`)} scroll={false} style={{ color: MUTED, fontSize: 12 }}>lihat ›</Link>
               <span style={{ display: "block", fontSize: 12, color: MUTED }}>{why}</span>
             </span>
             <SameAction person={p} eventId={eventId} into={f.id} intoName={f.name}
@@ -1249,7 +1317,10 @@ function ReworkItem({ rework: r, item, figures }: { rework: Rework; item: Item; 
   );
 }
 
-function LinkList({ item }: { item: Item }) {
+/** The page with a side panel open: every "open" on this page stays on it. */
+type Open = (panel: string) => string;
+
+function LinkList({ item, open }: { item: Item; open: Open }) {
   if (item.links.length === 0) {
     return (
       <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>
@@ -1260,13 +1331,13 @@ function LinkList({ item }: { item: Item }) {
   return (
     <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
       {item.links.map((l, i) => (
-        <LinkItem key={l.event_id} link={l} item={item} first={i === 0} />
+        <LinkItem key={l.event_id} link={l} item={item} first={i === 0} open={open} />
       ))}
     </ul>
   );
 }
 
-function LinkItem({ link: l, item, first }: { link: LinkRow; item: Item; first: boolean }) {
+function LinkItem({ link: l, item, first, open }: { link: LinkRow; item: Item; first: boolean; open: Open }) {
   const pair = item.kind === "record"
     ? { record_id: item.event_id, peristiwa_id: l.event_id }
     : { record_id: l.event_id, peristiwa_id: item.event_id };
@@ -1285,7 +1356,7 @@ function LinkItem({ link: l, item, first }: { link: LinkRow; item: Item; first: 
             {l.score !== null ? ` · skor ${l.score.toFixed(2)}` : ""}
           </span>
         </div>
-        <Link href={`/kurasi/${l.event_id}`} style={{ fontFamily: "var(--font-serif)", fontSize: 16, color: INK, lineHeight: 1.4 }}>
+        <Link href={open(eventPanel(item.kind === "record" ? "peristiwa" : "record", l.event_id))} scroll={false} style={{ fontFamily: "var(--font-serif)", fontSize: 16, color: INK, lineHeight: 1.4 }}>
           {l.title ?? `#${l.event_id}`}
         </Link>
         {l.evidence.length > 0 ? (
@@ -1344,7 +1415,7 @@ function AddLink({ item }: { item: Item }) {
  * say which came first, so there are no "before"/"after" headings. Each row
  * still carries its pair the right way round for the verdict.
  */
-function FollowupList({ item }: { item: Item }) {
+function FollowupList({ item, open }: { item: Item; open: Open }) {
   const { earlier, later } = item.followups;
   if (earlier.length + later.length === 0) {
     return <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Pipeline belum mengusulkan kelanjutan untuk ini.</p>;
@@ -1360,7 +1431,7 @@ function FollowupList({ item }: { item: Item }) {
     <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
       {rows.map((r, i) =>
         r.pair ? (
-          <FollowupItem key={r.f.event_id} row={r.f} pair={r.pair} first={i === 0} />
+          <FollowupItem key={r.f.event_id} row={r.f} pair={r.pair} first={i === 0} href={open(eventPanel(item.kind, r.f.event_id))} />
         ) : (
           <li key="ini" style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "10px 0", borderTop: i === 0 ? "none" : `1px solid ${RULE}` }}>
             <span style={{ fontSize: 11.5, color: MUTED, minWidth: 70 }}>{day(item.event_date)}</span>
@@ -1374,7 +1445,7 @@ function FollowupList({ item }: { item: Item }) {
   );
 }
 
-function FollowupItem({ row: f, pair, first }: { row: FollowupRow; pair: { earlier_id: number; later_id: number }; first: boolean }) {
+function FollowupItem({ row: f, pair, first, href }: { row: FollowupRow; pair: { earlier_id: number; later_id: number }; first: boolean; href: string }) {
   const [tone, text]: [PillTone, string] =
     f.verdict === "confirmed" ? ["accept", "Dikonfirmasi · tampil di situs"] :
     f.verdict === "rejected" ? ["danger", "Ditolak"] :
@@ -1389,7 +1460,7 @@ function FollowupItem({ row: f, pair, first }: { row: FollowupRow; pair: { earli
             {f.score !== null ? ` · skor ${f.score.toFixed(2)}` : ""}
           </span>
         </div>
-        <Link href={`/kurasi/${f.event_id}`} style={{ fontFamily: "var(--font-serif)", fontSize: 16, color: INK, lineHeight: 1.4 }}>
+        <Link href={href} scroll={false} style={{ fontFamily: "var(--font-serif)", fontSize: 16, color: INK, lineHeight: 1.4 }}>
           {f.title ?? `#${f.event_id}`}
         </Link>
         {f.evidence.length > 0 ? (
@@ -1425,7 +1496,7 @@ function FollowupItem({ row: f, pair, first }: { row: FollowupRow; pair: { earli
  * that share distinctive words, or any found by title. The dates decide which
  * one came first, so there is no direction to choose.
  */
-function AddFollowup({ item, candidates, search }: { item: Item; candidates: FollowupCandidate[]; search: string }) {
+function AddFollowup({ item, candidates, search, open }: { item: Item; candidates: FollowupCandidate[]; search: string; open: Open }) {
   const what = item.kind === "record" ? "catatan tokoh ini" : "peristiwa";
   return (
     <SubPanel
@@ -1447,7 +1518,7 @@ function AddFollowup({ item, candidates, search }: { item: Item; candidates: Fol
                   {day(c.event_date)} · <strong style={{ color: INK, fontWeight: 600 }}>{c.before ? "sebelum ini" : "sesudah ini"}</strong>
                   {c.shared.length > 0 ? ` · ${c.shared.join(", ")}` : ""}
                 </div>
-                <Link href={`/kurasi/${c.event_id}`} style={{ fontFamily: "var(--font-serif)", fontSize: 15, color: INK, lineHeight: 1.4 }}>
+                <Link href={open(eventPanel(item.kind, c.event_id))} scroll={false} style={{ fontFamily: "var(--font-serif)", fontSize: 15, color: INK, lineHeight: 1.4 }}>
                   {c.title ?? `#${c.event_id}`}
                 </Link>
               </div>
@@ -1486,7 +1557,7 @@ function ShownQuote({ item }: { item: Item }) {
     <div style={{ ...box, fontSize: 12.5, color: MUTED }}>
       {item.quote === ""
         ? "Tanpa kutipan: kamu memilih tidak menampilkannya."
-        : "Belum ada kutipan dari pemilik catatan."}{" "}
+        : "Belum ada kutipan dari pelakunya."}{" "}
       <a href="#kutipan" style={{ color: MUTED }}>Lihat kutipan ↓</a>
     </div>
   );
@@ -1501,7 +1572,7 @@ function figureLabel(figures: FigureOption[], id: string | null): string | null 
   return f ? (f.role ? `${f.name} · ${f.role}` : f.name) : null;
 }
 
-function QuoteList({ item, figures }: { item: Item; figures: FigureOption[] }) {
+function QuoteList({ item, figures, open }: { item: Item; figures: FigureOption[]; open: Open }) {
   const isRecord = item.kind === "record";
   const footer = (
     <>
@@ -1525,7 +1596,7 @@ function QuoteList({ item, figures }: { item: Item; figures: FigureOption[] }) {
   const rest = item.quotes.slice(QUOTES_OPEN);
   const list = (rows: QuoteRow[], offset: number) => (
     <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-      {rows.map((q, i) => <QuoteItem key={q.id} quote={q} item={item} figures={figures} first={offset + i === 0} />)}
+      {rows.map((q, i) => <QuoteItem key={q.id} quote={q} item={item} figures={figures} first={offset + i === 0} open={open} />)}
     </ul>
   );
   return (
@@ -1603,7 +1674,7 @@ function AddQuote({ item, figures }: { item: Item; figures: FigureOption[] }) {
           {item.kind === "record" && item.figure_id ? (
             <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}>
               <input type="checkbox" name="show" value="1" defaultChecked={!item.quote} />
-              Tampilkan di catatan (bila tokohnya pemilik catatan)
+              Tampilkan di catatan (bila tokohnya pelaku catatan ini)
             </label>
           ) : null}
           <button type="submit" style={button("ink")}>Tambah</button>
@@ -1613,7 +1684,7 @@ function AddQuote({ item, figures }: { item: Item; figures: FigureOption[] }) {
   );
 }
 
-function QuoteItem({ quote: q, item, figures, first }: { quote: QuoteRow; item: Item; figures: FigureOption[]; first: boolean }) {
+function QuoteItem({ quote: q, item, figures, first, open }: { quote: QuoteRow; item: Item; figures: FigureOption[]; first: boolean; open: Open }) {
   const own = Boolean(item.figure_id) && q.figure_id === item.figure_id;
   const shown = Boolean(item.quote) && item.quote === q.quote;
   const title = q.figure_id ? figures.find((f) => f.id === q.figure_id)?.role : null;
@@ -1627,9 +1698,11 @@ function QuoteItem({ quote: q, item, figures, first }: { quote: QuoteRow; item: 
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {q.figure_id ? (
-          <Pill tone={own ? "ink" : "neutral"} title={q.assigned_by === "curator" ? "Dipilih kurator" : "Dicocokkan otomatis dari nama pembicara"}>
-            {q.figure_name ?? q.figure_id}{q.assigned_by === "curator" ? " ✓" : ""}
-          </Pill>
+          <Link href={open(`tokoh:${q.figure_id}`)} scroll={false} style={{ textDecoration: "none" }}>
+            <Pill tone={own ? "ink" : "neutral"} title={q.assigned_by === "curator" ? "Dipilih kurator" : "Dicocokkan otomatis dari nama pembicara"}>
+              {q.figure_name ?? q.figure_id}{q.assigned_by === "curator" ? " ✓" : ""}
+            </Pill>
+          </Link>
         ) : (
           <Pill tone="pending" title={q.assigned_by === "curator" ? "Kamu menandainya bukan tokoh yang dilacak" : "Pembicaranya tidak cocok dengan satu tokoh pun"}>
             {q.assigned_by === "curator" ? "bukan tokoh yang dilacak" : "belum ada tokoh"}
@@ -1637,7 +1710,7 @@ function QuoteItem({ quote: q, item, figures, first }: { quote: QuoteRow; item: 
         )}
         {q.figure_id ? (
           <span style={{ fontSize: 12, color: MUTED }}>
-            {[title, own ? "pemilik catatan" : null, q.assigned_by === "curator" ? null : "dicocokkan otomatis"].filter(Boolean).join(" · ")}
+            {[title, own ? "pelaku" : null, q.assigned_by === "curator" ? null : "dicocokkan otomatis"].filter(Boolean).join(" · ")}
           </span>
         ) : null}
         {shown ? <Pill tone="accept">tampil di catatan</Pill> : null}
