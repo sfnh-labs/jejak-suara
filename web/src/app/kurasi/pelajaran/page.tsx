@@ -20,12 +20,9 @@ export default async function Pelajaran() {
   const [lessons, report] = await Promise.all([getLessons(), getLatestReport()]);
   return (
     <div style={{ minHeight: "100vh" }}>
-      <div className="container-page" style={{ maxWidth: 880, paddingBottom: 80 }}>
-        <header className="rule-heavy" style={{ padding: "clamp(24px, 4vw, 40px) 0 22px" }}>
-          <div className="eyebrow" style={{ marginBottom: 12 }}>
-            Internal · <Link href="/kurasi" style={{ color: MUTED }}>Kurasi</Link>
-          </div>
-          <h1 style={{ fontFamily: "var(--font-serif)", fontWeight: 500, fontSize: "clamp(26px, 4.5vw, 36px)", margin: "0 0 12px" }}>
+      <div className="container-page" style={{ maxWidth: 1180, paddingBottom: 80 }}>
+        <header style={{ padding: "28px 0 18px" }}>
+          <h1 style={{ fontFamily: "var(--font-serif)", fontWeight: 500, fontSize: "clamp(26px, 4vw, 32px)", margin: "0 0 12px" }}>
             Pelajaran model
           </h1>
           <p style={{ fontSize: 14.5, lineHeight: 1.6, color: "var(--color-mud)", margin: 0, maxWidth: 640 }}>

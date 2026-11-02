@@ -66,16 +66,13 @@ export default async function KandidatTokoh({
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <div className="container-page" style={{ maxWidth: 860 }}>
-        <header className="rule-heavy" style={{ padding: "clamp(24px, 4vw, 40px) 0 22px" }}>
-          <div className="eyebrow" style={{ marginBottom: 12 }}>
-            Internal · <Link href="/kurasi" style={{ color: MUTED }}>Kurasi catatan</Link>
-          </div>
+      <div className="container-page" style={{ maxWidth: 1180 }}>
+        <header style={{ padding: "28px 0 18px" }}>
           <h1
             style={{
               fontFamily: "var(--font-serif)",
               fontWeight: 500,
-              fontSize: "clamp(26px, 4.5vw, 36px)",
+              fontSize: "clamp(26px, 4vw, 32px)",
               margin: "0 0 12px",
               letterSpacing: "-0.02em",
             }}

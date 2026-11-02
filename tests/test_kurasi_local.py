@@ -85,6 +85,21 @@ def test_reject_then_withdraw(conn):
     assert conn.execute(status).fetchone()[0] == "candidate"
 
 
+def test_new_figure_from_a_speaker(conn):
+    fid = kurasi_ops.new_figure(conn, "  Taufik   Hidayat ", "Wakil Ketua MPR")
+    row = conn.execute("SELECT name, role, positions, aliases, active FROM figures WHERE id = ?",
+                       (fid,)).fetchone()
+    assert fid == "taufik-hidayat"
+    assert (row["name"], row["role"], row["active"]) == ("Taufik Hidayat", "Wakil Ketua MPR", 1)
+    assert json.loads(row["positions"])[0]["role"] == "Wakil Ketua MPR"
+    assert "Taufik Hidayat" in json.loads(row["aliases"])
+
+
+def test_new_figure_refuses_one_already_tracked(conn):
+    with pytest.raises(kurasi_ops.Refused):
+        kurasi_ops.new_figure(conn, "Ahmad Muzani")
+
+
 def test_merge_moves_records_and_retires_the_duplicate(conn):
     kurasi_ops.merge(conn, "ahmad-muzani-tutup", "ahmad-muzani")
     assert conn.execute("SELECT figure_id FROM events WHERE id = 7").fetchone()[0] == "ahmad-muzani"

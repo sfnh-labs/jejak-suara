@@ -16,6 +16,7 @@ import {
   setFollowupVerdict,
   setLinkVerdict,
   setRelatedFigure,
+  setActor,
   requestRework,
   removeNotAPerson,
   setLessonActive,
@@ -27,7 +28,8 @@ import {
   addQuote,
   showQuote,
 } from "@/lib/curation";
-import { answerPoint, isPointAnswer, salahPoint, setAutoKind, undoPoint, KIND_LABEL, type PointKind } from "@/lib/curationPoints";
+import { answerPoint, isPointAnswer, salahPoint, setAutoKind, undoPoint, KIND_LABEL, NOT_TRACKED, type PointKind } from "@/lib/curationPoints";
+import { pipelineOp } from "@/lib/localDb";
 
 /*
  * Server actions rather than route handlers so the pages work with plain
@@ -57,11 +59,16 @@ function optional(formData: FormData, field: string): string | null {
   return raw === null || raw === "" ? null : String(raw);
 }
 
-function done(id: number) {
+function done(id: number | null) {
   // The public pages are force-dynamic and pick changes up on their own; this
   // keeps the queue and the item from showing a stale decision.
   revalidatePath("/kurasi", "layout");
-  revalidatePath(`/kurasi/${id}`);
+  if (id) revalidatePath(`/kurasi/${id}`);
+}
+
+/** The record a figure form was sent from; none from the Tokoh pages. */
+function fromEvent(formData: FormData): number | null {
+  return formData.get("event_id") ? eventId(formData) : null;
 }
 
 /**
@@ -204,7 +211,7 @@ export async function editFigure(formData: FormData): Promise<void> {
   }
 
   await saveFigureEdit(figureId, name, role, aliases, formData.get("active") === "1", positions, profile);
-  done(eventId(formData));
+  done(fromEvent(formData));
 }
 
 /** Strike a related figure from a peristiwa, or restore one. */
@@ -213,6 +220,15 @@ export async function relateFigure(formData: FormData): Promise<void> {
   const figureId = text(formData, "figure_id", 120);
   if (!figureId) throw new Error("missing figure_id");
   await setRelatedFigure(id, figureId, formData.get("struck") === "1");
+  done(id);
+}
+
+/** Add a Pelaku to a record ("on"), or move one back to Disebut. */
+export async function setRecordActor(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  const figureId = text(formData, "figure_id", 120).toLowerCase();
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
+  await setActor(id, figureId, formData.get("on") === "1");
   done(id);
 }
 
@@ -227,7 +243,7 @@ export async function mergeFigures(formData: FormData): Promise<void> {
   // "here" folds the other into this one.
   if (formData.get("direction") === "here") await mergeFigure(intoId, fromId);
   else await mergeFigure(fromId, intoId);
-  done(eventId(formData));
+  done(fromEvent(formData));
 }
 
 /**
@@ -259,7 +275,7 @@ export async function notAPerson(formData: FormData): Promise<void> {
   if (!figureId) throw new Error("figure_id is required");
   if (formData.get("confirm") !== "1") throw new Error("not confirmed");
   await removeNotAPerson(figureId);
-  done(eventId(formData));
+  done(fromEvent(formData));
 }
 
 export async function toggleLesson(formData: FormData): Promise<void> {
@@ -315,13 +331,32 @@ export async function pickQuote(formData: FormData): Promise<void> {
   done(id);
 }
 
-/** Ya / Bukan / Koreksi / Lewati on a curation point; the answer lands on the row it asks about. */
+/**
+ * Ya / Bukan / Koreksi / Lewati on a curation point; the answer lands on the
+ * row it asks about. A peristiwa or lini point is corrected to another event
+ * (`event_target`), a Pelaku point to another figure. A speaker can be corrected to a figure from the roster,
+ * to "not a tracked figure" (figure_id "-"), or to a figure created right
+ * here from `new_name` — through the pipeline's own promote, as the names
+ * queue does.
+ */
 export async function answerCurationPoint(formData: FormData): Promise<void> {
   const pointId = eventId(formData, "point_id");
   const answer = String(formData.get("answer") ?? "");
   if (!isPointAnswer(answer)) throw new Error(`invalid answer: ${answer}`);
-  const figure = text(formData, "figure_id", 120).toLowerCase() || null;
-  if (figure && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figure)) throw new Error("choose a figure");
+  let figure = text(formData, "figure_id", 120).toLowerCase() || null;
+  const newName = text(formData, "new_name", 200);
+  if (answer === "koreksi" && newName) {
+    const role = text(formData, "new_role", 300);
+    figure = (await pipelineOp("new-figure", newName, ...(role ? ["--role", role] : []))).split("\n").pop()!.trim();
+  }
+  // A peristiwa or lini point corrected to another event names it by id.
+  const event = text(formData, "event_target", 20);
+  if (answer === "koreksi" && event) {
+    if (!/^[1-9][0-9]*$/.test(event)) throw new Error("choose an event");
+    done(await answerPoint(pointId, answer, event));
+    return;
+  }
+  if (figure && figure !== NOT_TRACKED && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figure)) throw new Error("choose a figure");
   done(await answerPoint(pointId, answer, figure));
 }
 

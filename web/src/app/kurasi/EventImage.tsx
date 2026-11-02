@@ -16,16 +16,17 @@ export function EventBanner({ eventId, image }: {
 }) {
   const borrowed = image && image.from !== null && image.from !== eventId;
   return (
-    <figure style={{ margin: "0 0 16px" }}>
+    <figure style={{ margin: 0 }}>
       {image ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={image.src}
           alt=""
-          style={{ width: "100%", maxHeight: 300, aspectRatio: "16 / 11", objectFit: "cover", display: "block", border: "1px solid var(--color-parchment)" }}
+          // The whole picture at its own proportions; the column sets its size.
+          style={{ width: "100%", height: "auto", display: "block", border: "1px solid var(--color-parchment)" }}
         />
       ) : (
-        <Placeholder style={{ width: "100%", height: 120 }} label="Belum ada gambar" />
+        <Placeholder style={{ width: "100%", aspectRatio: "16 / 11" }} label="Belum ada gambar" />
       )}
       <figcaption style={{ fontSize: 11.5, color: MUTED, marginTop: 5 }}>
         {!image

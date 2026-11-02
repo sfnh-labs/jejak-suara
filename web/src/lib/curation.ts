@@ -140,6 +140,8 @@ export interface QueueRow {
   /** Takedown reasons, for a rejected row. */
   reasons: ReasonCode[];
   suggestion: Suggestion | null;
+  /** Records: the Pelaku (record_figures actors), comma-separated; else the filed figure. */
+  actor_names: string | null;
 }
 
 interface SuggestionColumns {
@@ -196,8 +198,12 @@ export async function getQueue(
   page = 1
 ): Promise<QueueRow[]> {
   if (!(await availableFilters()).includes(filter)) return [];
+  const actors = (await tableExists("record_figures"))
+    ? `(SELECT group_concat(af.name, ', ') FROM record_figures rf JOIN figures af ON af.id = rf.figure_id
+          WHERE rf.event_id = e.id AND rf.role = 'actor')`
+    : "NULL";
   const rows = await query<Omit<QueueRow, "reasons" | "suggestion"> & SuggestionColumns & { reasons: string | null }>(
-    `SELECT e.id AS event_id, e.kind, e.figure_id, f.name AS figure_name,
+    `SELECT e.id AS event_id, e.kind, e.figure_id, f.name AS figure_name, ${actors} AS actor_names,
             e.event_date, e.title, e.curated, cr.reasons, ${SUGGESTION_SELECT},
             COALESCE(src.outlet_count, 0)  AS outlet_count,
             COALESCE(src.article_count, 0) AS article_count,
@@ -1500,6 +1506,85 @@ export async function setRelatedFigure(
       await lrun(`DELETE FROM event_figure_rejections WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]);
       await lrun(`INSERT OR IGNORE INTO event_figures (event_id, figure_id) VALUES (?, ?)`, [eventId, figureId]);
     }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Pelaku: who acts in a record
+
+/**
+ * A record's actors: one or more figures, none of them "the" owner
+ * (record_figures, jejak/participants.py). events.figure_id stays as the
+ * record's address on the site and is never moved from here.
+ */
+export interface Actor {
+  id: string;
+  name: string;
+  role: string | null;
+  positions: Position[];
+  /** How many quotes of theirs the coverage holds. */
+  quotes: number;
+  /** The figure the record is filed under (its address on the site). */
+  filed: boolean;
+  /** 'curator' when a curator made them an actor. */
+  assigned_by: string;
+}
+
+export async function getActors(eventId: number, filedId: string | null): Promise<Actor[]> {
+  const rows = (await tableExists("record_figures"))
+    ? await query<Omit<Actor, "positions" | "filed"> & { positions: string | null }>(
+        `SELECT f.id, f.name, f.role, f.positions, rf.quotes, rf.assigned_by
+           FROM record_figures rf JOIN figures f ON f.id = rf.figure_id
+          WHERE rf.event_id = ? AND rf.role = 'actor'
+          ORDER BY rf.figure_id IS ? DESC, rf.quotes DESC, f.name`,
+        [eventId, filedId]
+      )
+    : [];
+  const actors = rows.map((r) => ({ ...r, positions: parsePositions(r.positions), filed: r.id === filedId }));
+  // A record the participants stage has not reached yet: its filed figure is
+  // its one actor until then.
+  if (actors.length === 0 && filedId) {
+    const f = await queryOne<{ id: string; name: string; role: string | null; positions: string | null }>(
+      `SELECT id, name, role, positions FROM figures WHERE id = ?`, [filedId]
+    );
+    if (f) actors.push({ ...f, positions: parsePositions(f.positions), quotes: 0, filed: true, assigned_by: "auto" });
+  }
+  return actors;
+}
+
+/**
+ * Make a figure an actor of a record, or move them back to Disebut. Either
+ * way the row becomes the curator's, so the participants stage (which
+ * rebuilds only its own rows) keeps it. The last actor cannot be removed.
+ */
+export async function setActor(eventId: number, figureId: string, actor: boolean): Promise<void> {
+  const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ?`, [figureId]);
+  if (!fig) throw new Error(`unknown figure: ${figureId}`);
+  const ev = await queryOne<{ kind: string; figure_id: string | null }>(`SELECT kind, figure_id FROM events WHERE id = ?`, [eventId]);
+  if (ev?.kind !== "record") throw new Error("only a record has actors");
+  if (!actor) {
+    const others = (await getActors(eventId, ev.figure_id)).filter((a) => a.id !== figureId);
+    if (others.length === 0) throw new Error("a record keeps at least one actor");
+  }
+  const quotes = await queryOne<{ n: number }>(
+    `SELECT count(*) AS n FROM event_quotes WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]
+  );
+  await ltx(async () => {
+    // Writing the filed figure's own row first keeps it an actor when another
+    // is added to a record the participants stage has not reached.
+    if (actor && ev.figure_id && ev.figure_id !== figureId) {
+      await lrun(
+        `INSERT OR IGNORE INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
+         VALUES (?, ?, 'actor', 'owner', 0, 'auto')`,
+        [eventId, ev.figure_id]
+      );
+    }
+    await lrun(
+      `INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
+       VALUES (?, ?, ?, 'curator', ?, 'curator')
+       ON CONFLICT (event_id, figure_id) DO UPDATE SET role = excluded.role, source = 'curator', assigned_by = 'curator'`,
+      [eventId, figureId, actor ? "actor" : "quoted", Number(quotes?.n ?? 0)]
+    );
   });
 }
 

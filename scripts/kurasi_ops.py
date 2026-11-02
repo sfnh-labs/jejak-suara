@@ -7,6 +7,7 @@ page calls this script the moment the curator decides:
     python scripts/kurasi_ops.py candidate <slug>        # apply the queued verdict
     python scripts/kurasi_ops.py merge <from-id> <into-id>
     python scripts/kurasi_ops.py not-a-person <figure-id>
+    python scripts/kurasi_ops.py new-figure <name> [--role R]   # prints the new id
     python scripts/kurasi_ops.py refresh                 # rebuild the names queue
     python scripts/kurasi_ops.py rework <request-id>     # draft a rework (Ollama)
     python scripts/kurasi_ops.py rework-accept <request-id>
@@ -90,6 +91,26 @@ def add_alias(conn, slug: str, name: str, figure_id: str | None) -> str:
     return f"alias {slug} -> {figure_id}: {name!r} added"
 
 
+def new_figure(conn, name: str, role: str | None = None) -> str:
+    """A tracked figure created on the spot, from a curation point that asks
+    who a speaker is when the answer is someone not tracked yet. The same
+    promote as a discovered name's, so the id, aliases and positions come out
+    as they would from the names queue. Returns the new figure's id alone,
+    for the page to answer the point with.
+    """
+    name = " ".join(name.split())
+    if not name:
+        raise Refused("a new figure needs a name")
+    figure_id = verdicts.slugify(name)
+    if not figure_id:
+        raise Refused(f"no page address can be made from {name!r}")
+    positions = json.dumps([{"role": role.strip(), "org": "", "period": ""}]) if role and role.strip() else None
+    line = verdicts._promote(conn, figure_id, name, name, None, None, None, positions)
+    if line.startswith("already a figure"):
+        raise Refused(f"{name} sudah dilacak sebagai {figure_id}; pilih dari daftar tokoh")
+    return figure_id
+
+
 def not_a_person(conn, figure_id: str) -> str:
     """A tracked "figure" that is no one — a place, an office, a headline
     fragment ("Istana Merdeka"). Retired, so attribution stops matching it and
@@ -152,6 +173,9 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("from_id")
     m.add_argument("into_id")
     sub.add_parser("not-a-person").add_argument("figure_id")
+    nf = sub.add_parser("new-figure")
+    nf.add_argument("name")
+    nf.add_argument("--role")
     sub.add_parser("refresh")
     sub.add_parser("rework").add_argument("request_id", type=int)
     sub.add_parser("rework-accept").add_argument("request_id", type=int)
@@ -165,6 +189,8 @@ def main(argv: list[str] | None = None) -> int:
             line = apply_candidate(conn, args.slug)
         elif args.cmd == "merge":
             line = merge(conn, args.from_id, args.into_id)
+        elif args.cmd == "new-figure":
+            line = new_figure(conn, args.name, args.role)
         elif args.cmd == "not-a-person":
             line = not_a_person(conn, args.figure_id)
         elif args.cmd == "rework":
