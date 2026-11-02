@@ -205,6 +205,22 @@ export function dayBadge(iso: string | null | undefined): string {
   return p ? `${p.day} ${BULAN_SHORT[p.month]}` : "—";
 }
 
+/**
+ * "kemarin", "12 hari lalu": how long ago, in whole WIB days. Past two
+ * months it gives the date instead, where a count of days stops meaning much.
+ */
+export function daysAgoLabel(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "—";
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "—";
+  const wibDay = (d: Date) => Math.floor((d.getTime() + 7 * 3600_000) / 86_400_000);
+  const days = wibDay(now) - wibDay(then);
+  if (days <= 0) return "hari ini";
+  if (days === 1) return "kemarin";
+  if (days <= 60) return `${days} hari lalu`;
+  return formatDateShort(iso);
+}
+
 export function monthGroupLabel(iso: string | null | undefined): string {
   const p = parts(iso);
   return p ? `${BULAN[p.month]} ${p.year}` : "Tanpa tanggal";
