@@ -4,6 +4,7 @@ import { editionParts } from "@/lib/design";
 
 const LINKS = [
   { href: "/", label: "Beranda" },
+  { href: "/tokoh", label: "Tokoh" },
   { href: "/linimasa", label: "Linimasa" },
   { href: "/tentang", label: "Dukung Kami" },
 ];

@@ -138,12 +138,19 @@ export async function getFigures(): Promise<FigureSummary[]> {
             f.name,
             COALESCE(f.role, '')      AS role,
             COALESCE(f.aliases, '[]') AS aliases,
+            f.positions,
             COALESCE(st.event_count, 0)  AS event_count,
             COALESCE(st.outlet_count, 0) AS outlet_count,
             COALESCE(st.comment_count, 0) AS comment_count,
             st.avg_sentiment,
             st.last_record_at,
-            COALESCE(st.recent_count, 0) AS recent_count
+            st.first_record_at,
+            COALESCE(st.recent_count, 0) AS recent_count,
+            json_build_object(
+              'positive', COALESCE(st.fig_positive, 0),
+              'negative', COALESCE(st.fig_negative, 0),
+              'total',    COALESCE(st.fig_total, 0)
+            ) AS figure_stance
        FROM figures f
        LEFT JOIN LATERAL (
          SELECT count(DISTINCT e.id)     AS event_count,
@@ -153,9 +160,15 @@ export async function getFigures(): Promise<FigureSummary[]> {
                 -- last_seen, the newest article, is what the feed sorts by, so
                 -- the homepage's story row orders figures the same way.
                 max(e.last_seen)         AS last_record_at,
+                min(e.event_date)        AS first_record_at,
                 count(DISTINCT e.id) FILTER (
                   WHERE e.last_seen::timestamptz > now() - interval '24 hours'
-                )                        AS recent_count
+                )                        AS recent_count,
+                -- DISTINCT: the articles join repeats each comment once per
+                -- source. Only comments that name the figure, as on a card.
+                count(DISTINCT c.id) FILTER (WHERE c.figure_stance = 'positive') AS fig_positive,
+                count(DISTINCT c.id) FILTER (WHERE c.figure_stance = 'negative') AS fig_negative,
+                count(DISTINCT c.id) FILTER (WHERE c.figure_stance IS NOT NULL)  AS fig_total
            FROM events e
            LEFT JOIN articles a  ON a.event_id = e.id
            LEFT JOIN comments c  ON c.event_id = e.id
@@ -172,6 +185,40 @@ export async function getFigures(): Promise<FigureSummary[]> {
 export async function getFigure(figureId: string): Promise<FigureSummary | null> {
   const rows = await getFigures();
   return rows.find((f) => f.id === figureId) ?? null;
+}
+
+/**
+ * Each figure's live records per week, for the /tokoh board: `weeks` counts,
+ * oldest first, the last one the seven days up to today.
+ *
+ * Weeks are counted back from today in WIB rather than by calendar week, so
+ * the newest cell is always a full seven days and "this week" never resets
+ * to nothing on a Monday morning. Figures with no records in the span are
+ * absent from the map.
+ */
+export async function getFigureWeeks(weeks = 12): Promise<Map<string, number[]>> {
+  const rows = await query<{ figure_id: string; ago: number; n: number }>(
+    `SELECT e.figure_id,
+            ((now() AT TIME ZONE 'Asia/Jakarta')::date
+              - (e.event_date::timestamptz AT TIME ZONE 'Asia/Jakarta')::date) / 7 AS ago,
+            count(*)::int AS n
+       FROM events e
+      WHERE e.kind = 'record'
+        AND e.figure_id IS NOT NULL
+        AND e.event_date IS NOT NULL
+        AND e.event_date::timestamptz > now() - make_interval(days => $1 * 7 + 1)
+        AND ${LIVE("e")}
+      GROUP BY 1, 2`,
+    [weeks]
+  );
+  const out = new Map<string, number[]>();
+  for (const r of rows) {
+    const ago = Number(r.ago);
+    if (ago < 0 || ago >= weeks) continue;
+    if (!out.has(r.figure_id)) out.set(r.figure_id, Array(weeks).fill(0));
+    out.get(r.figure_id)![weeks - 1 - ago] += Number(r.n);
+  }
+  return out;
 }
 
 /** Records per page on a figure's Rekam Jejak. */

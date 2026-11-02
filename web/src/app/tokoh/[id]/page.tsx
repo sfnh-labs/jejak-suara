@@ -45,7 +45,10 @@ export default async function HalamanTokoh({
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <Nav crumbs={[{ label: "Beranda", href: "/" }, { label: figure.name }]} />
+      <Nav
+        active="/tokoh"
+        crumbs={[{ label: "Beranda", href: "/" }, { label: "Tokoh", href: "/tokoh" }, { label: figure.name }]}
+      />
       <div className="container-page" style={{ maxWidth: 1184 }}>
         <div className="tokoh-grid">
           <aside className="tokoh-profile">

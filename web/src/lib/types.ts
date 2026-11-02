@@ -125,6 +125,12 @@ export interface FigureSummary extends Figure {
   last_record_at: string | null;
   /** Live records with coverage in the last 24 hours. */
   recent_count: number;
+  /** event_date of the figure's oldest live record. */
+  first_record_at: string | null;
+  /** The CV's career list, JSON [{role, org, period}]. */
+  positions: string | null;
+  /** Comments across all their records that name the figure. */
+  figure_stance: { positive: number; negative: number; total: number };
 }
 
 /**
