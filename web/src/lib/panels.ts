@@ -2,26 +2,39 @@ import { lquery as query, lqueryOne as queryOne } from "./localDb";
 import { parsePositions, type Kind, type LinkVerdict, type Position } from "./curation";
 
 /**
- * What the record page's side panel shows: another event or a figure, read
- * where the curator already is instead of on a page of its own. The panel is
- * named in the URL (?panel=peristiwa:12, catatan:34, tokoh:<slug>), so like
- * the reading pane it is server-rendered and needs no client script.
+ * What the record page's drawer shows: another event or a figure, read where
+ * the curator already is instead of on a page of its own, or one of the
+ * record's own forms. The panel is named in the URL (?panel=peristiwa:12,
+ * catatan:34, tokoh:<slug>, nama:<slug>, pelaku, disebut, tautkan, lini, isi,
+ * sumber, kutipan, saran), so
+ * like the reading pane it is server-rendered and needs no client script.
  */
 
 export type PanelRef =
   | { kind: "peristiwa" | "catatan"; id: number }
-  | { kind: "tokoh"; id: string };
+  | { kind: "tokoh" | "nama"; id: string }
+  /**
+   * The record's own forms and long reads: add a Pelaku, everyone named,
+   * peristiwa links, lini cerita, the full summary, every source, every
+   * quote, and the examples behind a takedown suggestion.
+   */
+  | { kind: OwnPanel };
+
+const OWN_PANELS = ["pelaku", "disebut", "tautkan", "lini", "isi", "sumber", "kutipan", "saran"] as const;
+export type OwnPanel = (typeof OWN_PANELS)[number];
 
 export function parsePanel(raw: string | undefined): PanelRef | null {
-  const m = /^(peristiwa|catatan|tokoh):([a-z0-9-]{1,128})$/.exec(raw ?? "");
+  const own = OWN_PANELS.find((k) => k === raw);
+  if (own) return { kind: own };
+  const m = /^(peristiwa|catatan|tokoh|nama):([a-z0-9-]{1,128})$/.exec(raw ?? "");
   if (!m) return null;
-  if (m[1] === "tokoh") return { kind: "tokoh", id: m[2] };
+  if (m[1] === "tokoh" || m[1] === "nama") return { kind: m[1], id: m[2] };
   const id = Number(m[2]);
   return Number.isInteger(id) && id > 0 ? { kind: m[1] as "peristiwa" | "catatan", id } : null;
 }
 
 export function panelKey(ref: PanelRef): string {
-  return `${ref.kind}:${ref.id}`;
+  return "id" in ref ? `${ref.kind}:${ref.id}` : ref.kind;
 }
 
 /** The URL name of an event's panel, from its kind. */

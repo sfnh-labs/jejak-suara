@@ -1,18 +1,22 @@
 import Link from "next/link";
+import FigurePortrait from "@/components/FigurePortrait";
 import { notFound } from "next/navigation";
-import { REASONS, getFigureOptions, getOrganizations, type Organization, getFollowupCandidates, getItem, getReading, likelyDuplicates, positionTitle, reasonLabel, type FigureOption, type FigureRef, type FollowupCandidate, type FollowupRow, type Position, type Profile, type Item, type Rework, type ReworkSnapshot, type CvProposal, type LinkRow, type NamedPerson, type QuoteRow } from "@/lib/curation";
+import { REASONS, getActors, getFigureOptions, getOrganizations, getFollowupCandidates, getItem, getReading, reasonLabel, type Actor, type FigureOption, type FollowupCandidate, type FollowupRow, type Item, type Rework, type ReworkSnapshot, type LinkRow, type NamedPerson, type QuoteRow } from "@/lib/curation";
 import { decide } from "../kandidat/actions";
-import { AcceptCandidateForm } from "../AcceptCandidateForm";
 import { FigurePicker, SpeakerEditor } from "../FigurePicker";
 import { ArticleReader, type ReaderFocus, type ReaderTerm } from "../ArticleReader";
-import { EventPanel, FigurePanel, MissingPanel, type Relation } from "../SidePanel";
-import { eventPanel, getEventPeek, getFigurePeek, parsePanel } from "@/lib/panels";
+import { EventPanel, FigurePanel, type Relation } from "../SidePanel";
+import { eventPanel, getEventPeek, getFigurePeek, parsePanel, type EventPeek, type FigurePeek, type PanelRef } from "@/lib/panels";
 import { PointList } from "../CurationPoints";
 import { getPoints } from "@/lib/curationPoints";
-import { addFollowup, curate, editFigure, mergeFigures, relateFigure, ruleFollowup, ruleLink, rework, decideRework, notAPerson, setQuoteSpeaker, pickQuote, newQuote } from "../actions";
+import { addFollowup, curate, relateFigure, ruleFollowup, ruleLink, rework, decideRework, setQuoteSpeaker, pickQuote, newQuote, setRecordActor } from "../actions";
 import { storyImageSource, storylines } from "@/lib/data";
 import { EventBanner } from "../EventImage";
 import { placeGroups, provinceLabel, provincesIn } from "@/lib/places";
+import { CandidateRow, FIGURE_LIST, FigureForm, FigureOptions, NotAPersonForm, OrgOptions, SamePerson, SubPanel, type Open } from "../FigureEdit";
+import { Card, Chip, Columns, Drawer, Group, Hidden, Page, Pill, TextLink, eyebrow, groupLabel, headline, type PillTone } from "../kit";
+import OutletTile from "@/components/OutletTile";
+import SummaryList from "@/components/SummaryList";
 import { ACCEPT, INK, MUTED, RULE, SURFACE, button, day, input, label } from "../ui";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +26,23 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
+/**
+ * The page is a summary; anything long is read in the drawer. Disebut shows
+ * this many names, Relasi this many peristiwa or lini rows, Isi this many
+ * sources and Kutipan this many quotes; each drawer has the rest.
+ */
+const MENTIONS_SHOWN = 8;
+const RELATIONS_SHOWN = 3;
+const SOURCES_SHOWN = 3;
+const QUOTES_SHOWN = 3;
+
+/**
+ * One catatan or peristiwa, as in the Kurasi Workflow prototype: the decision
+ * on top; curation points, its content and its quotes in the main column;
+ * everything it relates to summarised on the right. Changing a relation opens
+ * that data's own form in a drawer (?panel=), and an article opens there too
+ * (?baca=), so the curator never leaves the page.
+ */
 export default async function KurasiItem({
   params,
   searchParams,
@@ -35,31 +56,39 @@ export default async function KurasiItem({
   if (!Number.isInteger(eventId) || eventId <= 0) notFound();
   const [item, figures, orgs] = await Promise.all([getItem(eventId), getFigureOptions(), getOrganizations()]);
   if (!item) notFound();
-  // One side column: an article, or a panel; opening either closes the other.
+  const isRecord = item.kind === "record";
+  // One drawer at a time: an article, or a panel; opening either closes the other.
   const panelRef = baca ? null : parsePanel(panelParam);
-  const [candidates, reading, points, panel] = await Promise.all([
-    getFollowupCandidates(item, cari.slice(0, 100)),
+  const [candidates, reading, points, peek, actors] = await Promise.all([
+    panelRef?.kind === "lini" ? getFollowupCandidates(item, cari.slice(0, 100)) : Promise.resolve([] as FollowupCandidate[]),
     baca ? getReading(eventId, baca.slice(0, 128)) : null,
     getPoints(eventId),
     panelRef?.kind === "tokoh" ? getFigurePeek(panelRef.id)
-      : panelRef ? getEventPeek(panelRef.id)
+      : panelRef?.kind === "peristiwa" || panelRef?.kind === "catatan" ? getEventPeek(panelRef.id)
       : null,
+    isRecord ? getActors(eventId, item.figure_id) : Promise.resolve([] as Actor[]),
   ]);
-  const openPoints = points.filter((p) => p.status === "open").length;
-  // The page's own address with the side column set or cleared; the other
+  const openPoints = points.filter((p) => p.status === "open" || p.status === "lewati").length;
+  // A lini point can be corrected to another suggestion; read them only when one waits.
+  const liniChoices = panelRef?.kind === "lini" && !cari
+    ? candidates
+    : points.some((p) => p.kind === "lini" && (p.status === "open" || p.status === "lewati"))
+      ? await getFollowupCandidates(item, "")
+      : [];
+  // The page's own address with the drawer set or cleared; the other
   // parameters ride along so opening an article or a panel loses nothing.
   const at = (side: { baca?: string; p?: number; panel?: string } = {}) => {
     const q = new URLSearchParams();
     if (perlu) q.set("perlu", perlu);
-    if (cari) q.set("cari", cari);
     if (side.baca) q.set("baca", side.baca);
     if (side.baca && side.p) q.set("p", String(side.p));
     if (side.panel) q.set("panel", side.panel);
+    if (side.panel === "lini" && cari) q.set("cari", cari);
     const qs = q.toString();
     return `/kurasi/${eventId}${qs ? `?${qs}` : ""}`;
   };
-  const here = (article: string | null) => at(article ? { baca: article } : {});
-  const open = (panel: string) => at({ panel });
+  const read = (article: string) => at({ baca: article });
+  const open: Open = (panel) => at({ panel });
   const terms = readerTerms(item);
   // "baca beritanya" on a point: the reader opens at the paragraph it quotes.
   const focused = reading ? points.find((p) => String(p.id) === pointParam && p.article_id === reading.id) : undefined;
@@ -69,13 +98,11 @@ export default async function KurasiItem({
         highlight: focused.hl_start !== null && focused.hl_end !== null ? focused.paragraph.slice(focused.hl_start, focused.hl_end) : null,
       }
     : undefined;
-  const side = reading ? "reading" : panelRef ? "panel" : null;
   // The banner the site would show, borrowed ones included (peristiwa only).
-  const image = item.kind === "peristiwa"
-    ? storyImageSource(eventId, (await storylines([eventId], { evenHidden: [eventId] })).get(eventId) ?? [], item.title)
-    : null;
+  const image = isRecord
+    ? null
+    : storyImageSource(eventId, (await storylines([eventId], { evenHidden: [eventId] })).get(eventId) ?? [], item.title);
 
-  const isRecord = item.kind === "record";
   const outlets = new Set(item.sources.map((s) => s.source)).size;
   const queue = `/kurasi?kind=${item.kind}`;
   // Headlines set in provinces nothing connects: the commonest sign that
@@ -83,245 +110,135 @@ export default async function KurasiItem({
   // fire). Peristiwa only; a record follows one person around the country.
   const places = isRecord ? [] : placeGroups(item.sources.map((s) => s.title));
   const scattered = places.length > 1;
-
-  // Numbered in reading order; the record-only "Pelaku" shifts the rest.
-  const sections = [
-    ...(points.length ? [{ id: "poin", title: "Poin kurasi" }] : []),
-    { id: "isi", title: "Isi" },
-    { id: "nama", title: "Tokoh" },
-    { id: "kutipan", title: "Kutipan" },
-    { id: "tautan", title: isRecord ? "Bagian dari peristiwa" : "Catatan di dalamnya" },
-    { id: "lini", title: "Lini cerita" },
-  ];
-  const n = (key: string) => sections.findIndex((x) => x.id === key) + 1;
+  const what = isRecord ? "Catatan" : "Peristiwa";
 
   return (
-    <div style={{ minHeight: "100vh" }}>
-      {/* Side by side only when wide enough for both; narrower, the article
-          opens under its own line in the list instead. */}
-      <style>{`
-        .kurasi-reader-side { display: none; }
-        .kurasi-sheet { position: fixed; inset: 0; z-index: 30; overflow-y: auto; overscroll-behavior: contain; padding: 12px; background: rgba(22, 19, 15, 0.35); }
-        @media (min-width: 1180px) {
-          .kurasi-split.side { display: grid; grid-template-columns: minmax(0, 920px) minmax(0, 1fr); gap: 28px; align-items: start; }
-          .kurasi-split.side .kurasi-reader-side, .kurasi-split.side .kurasi-sheet {
-            display: block; position: sticky; top: 0; inset: auto; z-index: auto; background: none;
-            max-height: 100vh; overflow-y: auto; padding: 22px 0 40px; overscroll-behavior: contain;
-          }
-          .kurasi-split.side .kurasi-reader-inline { display: none; }
-        }
-      `}</style>
-      <div className={`container-page kurasi-split${side ? " side" : ""}`} style={{ maxWidth: side ? 1640 : 920, paddingBottom: 96 }}>
-        <div style={{ minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "22px 0 0", fontSize: 12.5, flexWrap: "wrap" }}>
-          <Link href={queue} style={{ color: MUTED }}>← Antrean {isRecord ? "catatan" : "peristiwa"}</Link>
-          {item.next_id ? (
-            <Link href={`/kurasi/${item.next_id}`} style={{ color: MUTED }}>Lewati, ke berikutnya →</Link>
-          ) : null}
+    <Page>
+      <header className="rule-heavy" style={{ display: "flex", flexDirection: "column", gap: 10, paddingBottom: 20 }}>
+        <div style={{ display: "flex", gap: 12, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={eyebrow}>
+            <Link href={queue} className="link-subtle">Antrean</Link>
+            {" · "}{what} #{item.event_id}
+            {item.event_type && item.event_type !== "other" ? ` · ${item.event_type}` : ""}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {isRecord && item.figure_id && item.curated !== "rejected" ? (
+              <Link href={`/tokoh/${item.figure_id}/${item.event_id}`} target="_blank" className="pill-link" style={pillNav}>Lihat di situs ↗</Link>
+            ) : null}
+            {item.next_id ? <Link href={`/kurasi/${item.next_id}`} className="pill-link is-primary" style={pillNav}>Lewati →</Link> : null}
+          </div>
         </div>
-
-        <header style={{ padding: "18px 0 18px" }}>
-          {isRecord ? null : <EventBanner eventId={item.event_id} image={image} />}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-            <Pill tone="ink">{isRecord ? "Catatan" : "Peristiwa"} #{item.event_id}</Pill>
-            <Pill>
-              {day(item.event_date)}
-              {item.last_seen && day(item.last_seen) !== day(item.event_date) ? ` – ${day(item.last_seen)}` : ""}
-            </Pill>
-            <Pill>{outlets} media · {item.sources.length} artikel</Pill>
+        <h1 style={{ ...headline, fontSize: "clamp(28px, 5vw, 40px)" }}>
+          {item.title ?? "(tanpa judul)"}
+        </h1>
+        <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>
+          {day(item.event_date)}
+          {item.last_seen && day(item.last_seen) !== day(item.event_date) ? ` – ${day(item.last_seen)}` : ""}
+          {isRecord && item.owner ? <> · tentang <Link href={open(`tokoh:${item.owner.id}`)} scroll={false} className="link-subtle" style={{ color: INK, fontWeight: 600 }}>{item.owner.name}</Link></> : null}
+          {` · ${outlets} media · ${item.sources.length} artikel`}
+        </p>
+        {outlets <= 1 || scattered ? (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {outlets <= 1 ? (
-              <Pill tone="danger" title="Semua artikelnya dari satu media. Belum ada redaksi lain yang ikut melaporkan, jadi periksa lebih teliti.">
-                ⚠ hanya 1 media
-              </Pill>
+              <Pill tone="danger" title="Semua artikelnya dari satu media. Belum ada redaksi lain yang ikut melaporkan, jadi periksa lebih teliti.">⚠ hanya 1 media</Pill>
             ) : null}
             {scattered ? <Pill tone="danger">⚠ beda provinsi</Pill> : null}
-            {item.event_type && item.event_type !== "other" ? <Pill>{item.event_type}</Pill> : null}
           </div>
-          <h1 style={{ fontFamily: "var(--font-serif)", fontWeight: 500, fontSize: "clamp(24px, 4vw, 32px)", lineHeight: 1.2, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
-            {item.title ?? "(tanpa judul)"}
-          </h1>
-          {scattered ? (
-            <p style={{ fontSize: 13, color: "var(--color-clay)", margin: "0 0 8px", lineHeight: 1.5 }}>
-              Judul artikelnya menyebut tempat yang berbeda:{" "}
-              {places.map((g) => `${g.provinces.map(provinceLabel).join(" / ")} (${g.count})`).join(" · ")}.
-              {" "}Bisa jadi beberapa kejadian yang tergabung; periksa artikel sumbernya. Bila ya, turunkan dengan alasan “Campuran beberapa kejadian”.
-            </p>
-          ) : null}
-          {isRecord && item.figure_id && item.curated !== "rejected" ? (
-            <Link href={`/tokoh/${item.figure_id}/${item.event_id}`} target="_blank" style={{ fontSize: 12.5, color: MUTED }}>
-              Lihat di situs ↗
-            </Link>
-          ) : null}
-        </header>
-
-        <VerdictBar item={item} sections={sections} missing={perlu} figures={figures} open={open} />
-        <FigureOptions figures={figures} />
-        <OrgOptions orgs={orgs} />
-
-        {points.length ? (
-          <Card
-            n={n("poin")}
-            id="poin"
-            title="Poin kurasi"
-            count={openPoints || undefined}
-            note="Penilaian pipeline yang belum yakin. Jawabanmu langsung mengubah bagian di bawah, dan menambah keyakinan untuk poin sejenis berikutnya."
-          >
-            <PointList
-              points={points}
-              listId={FIGURE_LIST}
-              readHref={(a, p) => at({ baca: a, p })}
-              open={open}
-              liniPanel={isRecord ? "catatan" : "peristiwa"}
-            />
-          </Card>
         ) : null}
-
-        <Card n={n("isi")} id="isi" title="Isi" note="Ringkasan yang tayang dan artikel yang menjadi sumbernya. Baca ini dulu sebelum memutuskan.">
-          {item.summary ? (
-            <p style={{ fontSize: 14.5, lineHeight: 1.65, color: "var(--color-mud)", margin: 0, whiteSpace: "pre-line" }}>
-              {item.summary}
-            </p>
-          ) : (
-            <p style={{ fontSize: 13.5, color: MUTED, margin: 0, fontStyle: "italic" }}>
-              Belum dirangkum. Yang tayang adalah judul dari hasil klaster.
-            </p>
-          )}
-          {isRecord ? <ShownQuote item={item} /> : null}
-          <SubPanel
-            title={`Artikel sumber (${item.sources.length})`}
-            note="Klik judul untuk membacanya di sini; ↗ membuka situs aslinya."
-            collapsible
-            open={!item.summary || scattered || Boolean(reading)}
-          >
-            <ol style={{ margin: 0, padding: 0, listStyle: "none" }}>
-              {item.sources.map((a, i) => (
-                <li
-                  key={`${a.url}-${i}`}
-                  style={{
-                    padding: "10px 0", borderTop: i ? `1px solid ${RULE}` : "none",
-                    ...(reading?.id === a.id ? { boxShadow: "inset 3px 0 0 var(--color-clay)", paddingLeft: 12 } : {}),
-                  }}
-                >
-                  <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 2 }}>
-                    {a.source} · {day(a.published_at)}
-                    {scattered && provincesIn(a.title).size > 0
-                      ? <span style={{ color: "var(--color-clay)" }}> · {[...provincesIn(a.title)].map(provinceLabel).join(", ")}</span>
-                      : null}
-                  </div>
-                  <Link
-                    href={here(reading?.id === a.id ? null : a.id)}
-                    scroll={false}
-                    style={{ color: INK, fontSize: 14, lineHeight: 1.45, fontWeight: reading?.id === a.id ? 600 : 400 }}
-                  >
-                    {a.title ?? a.url}
-                  </Link>
-                  {a.has_body ? null : <span style={{ fontSize: 11.5, color: MUTED }}> · hanya ringkasan</span>}{" "}
-                  <a href={a.url} target="_blank" rel="noreferrer" aria-label="Buka di situs asli" style={{ color: MUTED, fontSize: 12.5, textDecoration: "none" }}>↗</a>
-                  {a.lead ? (
-                    <div style={{ fontSize: 12.5, color: MUTED, marginTop: 3, lineHeight: 1.5 }}>
-                      {a.lead.slice(0, 240)}{a.lead.length > 240 ? "…" : ""}
-                    </div>
-                  ) : null}
-                  {reading?.id === a.id ? (
-                    <div className="kurasi-reader-inline" style={{ marginTop: 12 }}>
-                      <ArticleReader article={reading} terms={terms} closeHref={here(null)} focus={focus} />
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-            </ol>
-          </SubPanel>
-        </Card>
-
-        <Card
-          n={n("nama")}
-          id="nama"
-          title="Tokoh"
-          count={item.named.length}
-          note={
-            isRecord
-              ? "Semua orang di liputan catatan ini, pelakunya paling atas. Tokoh yang sudah ada bisa disunting atau digabung; nama baru bisa dijadikan tokoh, disamakan dengan tokoh yang ada, atau ditolak. Perubahan nama, jabatan, dan alias berlaku di seluruh situs dan dipakai pipeline untuk artikel berikutnya."
-              : "Semua orang di liputan peristiwa ini. Coret tokoh yang salah cocok, misalnya karena alias yang juga nama orang lain; nama baru bisa langsung diputuskan."
-          }
-        >
-          <NamedList item={item} figures={figures} open={open} />
-        </Card>
-
-        <Card
-          n={n("kutipan")}
-          id="kutipan"
-          title="Kutipan"
-          count={item.quotes.length}
-          note={
-            isRecord
-              ? "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media dan tokoh yang dicocokkan pipeline. Betulkan tokohnya bila salah, dan pilih kutipan pelaku yang tampil di situs."
-              : "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media dan tokoh yang dicocokkan pipeline. Betulkan tokohnya bila salah."
-          }
-        >
-          <QuoteList item={item} figures={figures} open={open} />
-        </Card>
-
-        <Card
-          n={n("tautan")}
-          id="tautan"
-          title={isRecord ? "Bagian dari peristiwa" : "Catatan di dalamnya"}
-          count={item.links.length}
-          note={
-            isRecord
-              ? "Peristiwa yang menaungi catatan ini. Pipeline mengusulkan berdasar kata khas yang sama; hanya yang kamu konfirmasi yang tampil di situs."
-              : "Catatan tokoh yang diusulkan atau dikonfirmasi sebagai bagian dari peristiwa ini."
-          }
-        >
-          <LinkList item={item} open={open} />
-          {isRecord ? <AddLink item={item} /> : null}
-        </Card>
-
-        <Card
-          n={n("lini")}
-          id="lini"
-          title="Lini cerita"
-          count={item.followups.earlier.length + item.followups.later.length}
-          note={
-            isRecord
-              ? "Catatan tokoh yang sama sebelum dan sesudah ini, bila ini kelanjutannya: diumumkan lalu direvisi, dijanjikan lalu ditepati. Hanya yang kamu konfirmasi yang tampil sebagai lini cerita di situs."
-              : "Peristiwa sebelum dan sesudah ini, bila ini kelanjutannya: RUU diusulkan lalu disahkan, pencarian dimulai lalu dihentikan. Hanya yang kamu konfirmasi yang tampil di situs, dan peristiwa tanpa gambar memakai gambar dari lini ceritanya."
-          }
-        >
-          <FollowupList item={item} open={open} />
-          <AddFollowup item={item} candidates={candidates} search={cari} open={open} />
-        </Card>
-
-        <p style={{ fontSize: 12, color: MUTED, margin: "22px 0 0", lineHeight: 1.6, maxWidth: 640 }}>
-          Keputusan di sini langsung tersimpan di <code>jejak.db</code> dan dipakai pipeline pada putaran
-          berikutnya. Situs publik mengikutinya setelah push ke Neon.
-        </p>
-        </div>
-        {reading ? (
-          <aside className="kurasi-reader-side" aria-label="Artikel yang sedang dibaca">
-            <ArticleReader article={reading} terms={terms} closeHref={here(null)} focus={focus} />
-          </aside>
+        {scattered ? (
+          <p style={{ fontSize: 13, color: "var(--color-clay)", margin: 0, lineHeight: 1.5 }}>
+            Judul artikelnya menyebut tempat yang berbeda:{" "}
+            {places.map((g) => `${g.provinces.map(provinceLabel).join(" / ")} (${g.count})`).join(" · ")}.
+            {" "}Bisa jadi beberapa kejadian yang tergabung; periksa artikel sumbernya. Bila ya, turunkan dengan alasan “Campuran beberapa kejadian”.
+          </p>
         ) : null}
-        {panelRef ? (
-          <aside className="kurasi-sheet" aria-label="Panel">
-            {!panel ? (
-              <MissingPanel closeHref={at()} />
-            ) : "records" in panel ? (
-              <FigurePanel
-                peek={panel}
-                open={open}
-                closeHref={at()}
-                here={eventId}
-                onPage={item.named.some((x) => x.kind === "figure" && x.id === panel.id) ? `${at()}#nama-${panel.id}` : null}
-              />
-            ) : (
-              <EventPanel peek={panel} open={open} closeHref={at()} here={eventId} relation={relationTo(item, panel.event_id)} />
+      </header>
+
+      <VerdictBar item={item} missing={perlu} figures={figures} open={open} openPoints={openPoints} />
+      <FigureOptions figures={figures} />
+      <OrgOptions orgs={orgs} />
+
+      <Columns
+        main={
+          <>
+            <Card
+              id="poin"
+              title="Poin kurasi"
+              count={points.length ? `${openPoints} terbuka · ${points.length - openPoints} terjawab` : undefined}
+              note="Penilaian pipeline yang belum yakin. Jawabanmu langsung mengubah isi dan relasi catatan ini, dan menambah keyakinan untuk poin sejenis."
+            >
+              {points.length ? (
+                <PointList
+                  points={points}
+                  figures={figures}
+                  nearby={item.nearby}
+                  liniChoices={liniChoices}
+                  listId={FIGURE_LIST}
+                  readHref={(a, p) => at({ baca: a, p })}
+                  open={open}
+                  liniPanel={isRecord ? "catatan" : "peristiwa"}
+                />
+              ) : (
+                <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Tidak ada. Pipeline yakin dengan semua isi {isRecord ? "catatan" : "peristiwa"} ini.</p>
+              )}
+            </Card>
+
+            <Card id="isi" title="Isi">
+              <Isi item={item} read={read} open={open} scattered={scattered} />
+            </Card>
+
+            <Card
+              id="kutipan"
+              title="Kutipan"
+              count={item.quotes.length}
+              action={<Link href={open("kutipan")} scroll={false} style={{ ...button("quiet"), minHeight: 32, padding: "6px 12px", fontSize: 12.5, textDecoration: "none", display: "inline-flex", alignItems: "center" }}>+ Tambah kutipan</Link>}
+            >
+              <QuotePreview item={item} actors={actors} figures={figures} open={open} />
+            </Card>
+          </>
+        }
+        side={
+          <>
+            {isRecord ? null : (
+              <Card title="Gambar">
+                <EventBanner eventId={item.event_id} image={image} />
+              </Card>
             )}
-          </aside>
-        ) : null}
-      </div>
-    </div>
+            <Relasi item={item} actors={actors} open={open} />
+          </>
+        }
+      />
+
+      <p style={{ fontSize: 12, color: MUTED, margin: 0, lineHeight: 1.6, maxWidth: 640 }}>
+        Keputusan di sini langsung tersimpan di <code>jejak.db</code> dan dipakai pipeline pada putaran
+        berikutnya. Situs publik mengikutinya setelah push ke Neon.
+      </p>
+
+      {reading ? (
+        <Drawer crumb={<>{what} #{item.event_id} › Artikel</>} title={reading.source} closeHref={at()} width={760}>
+          <ArticleReader article={reading} terms={terms} closeHref={at()} focus={focus} bare />
+        </Drawer>
+      ) : panelRef ? (
+        <PanelDrawer
+          panel={panelRef}
+          item={item}
+          actors={actors}
+          figures={figures}
+          peek={peek}
+          candidates={candidates}
+          search={cari}
+          open={open}
+          read={read}
+          scattered={scattered}
+          closeHref={at()}
+        />
+      ) : null}
+    </Page>
   );
 }
+
+/** The site's prev/next pills: small tracked capitals in an outline pill. */
+const pillNav = { fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", padding: "5px 12px" } as const;
 
 /** How another event stands to this one, for ruling it from its panel. */
 function relationTo(item: Item, otherId: number): Relation | null {
@@ -359,128 +276,453 @@ function readerTerms(item: Item): ReaderTerm[] {
   return out;
 }
 
-/** A numbered block with its own header, so where a section starts and ends is never in doubt. */
-function Card({
-  n,
-  id,
-  title,
-  note,
-  count,
-  children,
-}: {
-  n: number;
-  id: string;
-  title: string;
-  note?: string;
-  count?: number;
-  children: React.ReactNode;
-}) {
+/** One source article as the site lists it: outlet mark, headline, date; Baca opens it in the drawer. */
+function SourceRow({ a, read, scattered, first }: { a: Item["sources"][number]; read: (article: string) => string; scattered: boolean; first?: boolean }) {
   return (
-    <section
-      id={id}
-      style={{ background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8, marginTop: 18, scrollMarginTop: 96 }}
-    >
-      <header style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "14px 18px", background: "var(--color-cream-dark)", borderBottom: `1px solid ${RULE}`, borderRadius: "7px 7px 0 0" }}>
-        <span
-          aria-hidden
-          style={{
-            flex: "none", width: 24, height: 24, borderRadius: "50%", background: INK, color: "var(--color-cream)",
-            fontSize: 12, fontWeight: 700, display: "grid", placeItems: "center", marginTop: 1,
-          }}
-        >
-          {n}
+    <li style={{ borderTop: first ? "none" : "1px solid #e4dcc9" }}>
+      <Link href={read(a.id)} scroll={false} className="source-row">
+        <span style={{ flex: "none", display: "flex", paddingLeft: 5 }}><OutletTile source={a.source} /></span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span className="source-row-title" style={{ display: "block", fontSize: 13.5, fontWeight: 600, lineHeight: 1.35 }}>{a.title ?? a.url}</span>
+          {!a.has_body || (scattered && provincesIn(a.title).size > 0) ? (
+            <span style={{ display: "block", fontSize: 11.5, color: MUTED }}>
+              {a.has_body ? null : "hanya ringkasan"}
+              {scattered && provincesIn(a.title).size > 0
+                ? <span style={{ color: "var(--color-clay)" }}>{a.has_body ? "" : " · "}{[...provincesIn(a.title)].map(provinceLabel).join(", ")}</span>
+                : null}
+            </span>
+          ) : null}
         </span>
-        <div style={{ minWidth: 0 }}>
-          <h2 style={{ fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 600, margin: 0, lineHeight: 1.3, color: INK }}>
-            {title}
-            {count !== undefined ? <span style={{ fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 400, color: MUTED, marginLeft: 8 }}>{count}</span> : null}
-          </h2>
-          {note ? <p style={{ fontSize: 12.5, color: MUTED, margin: "3px 0 0", lineHeight: 1.5, maxWidth: 660 }}>{note}</p> : null}
-        </div>
-      </header>
-      <div style={{ padding: "16px 18px 18px" }}>{children}</div>
-    </section>
+        <span style={{ flex: "none", fontSize: 11.5, color: MUTED, whiteSpace: "nowrap" }}>{day(a.published_at)}</span>
+      </Link>
+    </li>
   );
 }
 
-/** A group inside a card: a labelled, tinted box, optionally folded away. */
-function SubPanel({
-  title,
-  note,
-  tone,
-  collapsible,
-  open,
-  children,
-}: {
-  title: string;
-  note?: string;
-  tone?: "danger";
-  collapsible?: boolean;
-  open?: boolean;
-  children: React.ReactNode;
-}) {
-  const box = {
-    marginTop: 14,
-    border: `1px solid ${tone === "danger" ? "var(--color-warn-border)" : RULE}`,
-    background: tone === "danger" ? "var(--color-warn-bg)" : "var(--color-cream)",
-    borderRadius: 6,
-    padding: "12px 14px",
-  } as const;
-  const heading = (
-    <span style={{ fontSize: 12.5, fontWeight: 700, color: tone === "danger" ? "var(--color-clay)" : INK }}>{title}</span>
-  );
-  const body = (
-    <>
-      {note ? <p style={{ fontSize: 12, color: MUTED, margin: "2px 0 10px", lineHeight: 1.5 }}>{note}</p> : <div style={{ height: 8 }} />}
-      {children}
-    </>
-  );
-  if (collapsible) {
-    return (
-      <details open={open} style={box}>
-        <summary style={{ cursor: "pointer" }}>{heading}</summary>
-        {body}
-      </details>
-    );
-  }
+/**
+ * The summary, cut to a few lines, and the first sources. The whole summary
+ * and every source are read in the drawer.
+ */
+function Isi({ item, read, open, scattered }: { item: Item; read: (article: string) => string; open: Open; scattered: boolean }) {
+  const long = (item.summary ?? "").length > 360 || (item.summary ?? "").split("\n").length > 3;
   return (
-    <div style={box}>
-      {heading}
-      {body}
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {item.summary ? (
+        <div>
+          <div style={long ? { maxHeight: "7.6em", overflow: "hidden", WebkitMaskImage: "linear-gradient(#000 60%, transparent)", maskImage: "linear-gradient(#000 60%, transparent)" } : undefined}>
+            <SummaryList summary={item.summary} sources={siteSources(item)} figureId={item.figure_id} />
+          </div>
+          {long ? <TextLink href={open("isi")} tone="muted">Baca ringkasan lengkap</TextLink> : null}
+        </div>
+      ) : (
+        <p style={{ fontSize: 13.5, color: MUTED, margin: 0, fontStyle: "italic" }}>Belum dirangkum. Yang tayang adalah judul dari hasil klaster.</p>
+      )}
+      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        {item.sources.slice(0, SOURCES_SHOWN).map((a, i) => <SourceRow key={`${a.url}-${i}`} a={a} read={read} scattered={scattered} first={i === 0} />)}
+      </ul>
+      {item.sources.length > SOURCES_SHOWN ? (
+        <TextLink href={open("sumber")} tone="muted">Semua {item.sources.length} artikel →</TextLink>
+      ) : null}
     </div>
   );
 }
 
-type PillTone = "neutral" | "ink" | "accept" | "danger" | "pending";
+/** The sources in the shape the site's summary takes, for its [n] citations. */
+function siteSources(item: Item) {
+  return item.sources.map((a) => ({ source: a.source, url: a.url, title: a.title ?? "", published_at: a.published_at }));
+}
 
-function Pill({ tone = "neutral", title, children }: { tone?: PillTone; title?: string; children: React.ReactNode }) {
-  const look = {
-    neutral: { color: "var(--color-mud)", background: "var(--color-cream-dark)", border: RULE },
-    ink: { color: "var(--color-cream)", background: INK, border: INK },
-    accept: { color: ACCEPT, background: "var(--color-sage-bg)", border: "var(--color-sage-border)" },
-    danger: { color: "var(--color-clay)", background: "var(--color-warn-bg)", border: "var(--color-warn-border)" },
-    pending: { color: "#7a5a12", background: "#fbf1d9", border: "#e6cf96" },
-  }[tone];
+/** Named figures that are not actors, most mentioned first; then new names. */
+function mentions(item: Item, actors: Actor[]): NamedPerson[] {
+  const actorIds = new Set(actors.map((a) => a.id));
+  return item.named
+    .filter((p) => !(p.kind === "figure" && actorIds.has(p.id)) && !(p.kind === "candidate" && p.verdict))
+    // Tracked figures first, then the names still waiting for a verdict.
+    .sort((a, b) => Number(a.kind === "candidate") - Number(b.kind === "candidate") || b.articles - a.articles);
+}
+
+/**
+ * Everything the record relates to, as a summary: who acts in it, who else
+ * is named, the peristiwa it belongs to and its lini cerita. Each heading's
+ * action opens that data's own form in the drawer.
+ */
+function Relasi({ item, actors, open }: { item: Item; actors: Actor[]; open: Open }) {
+  const isRecord = item.kind === "record";
+  const named = mentions(item, actors);
+  const shown = named.slice(0, MENTIONS_SHOWN);
+  const links = item.links.filter((l) => l.verdict !== "rejected");
+  const lini = [...item.followups.earlier, ...item.followups.later]
+    .filter((f) => f.verdict !== "rejected")
+    .sort((a, b) => (a.event_date ?? "").localeCompare(b.event_date ?? ""));
   return (
-    <span
-      title={title}
-      style={{
-        display: "inline-block", fontSize: 11, fontWeight: 700, lineHeight: 1.5, padding: "1px 8px",
-        borderRadius: 999, whiteSpace: "nowrap", color: look.color, background: look.background,
-        border: `1px solid ${look.border}`,
-      }}
-    >
-      {children}
-    </span>
+    <Card as="aside" title="Relasi" note="Ringkasan saja. Mengubahnya membuka form milik datanya." flush>
+      {isRecord ? (
+        <Group label={`Pelaku · ${actors.length}`} action={<TextLink href={open("pelaku")}>+ Tambah pelaku</TextLink>}>
+          {actors.length === 0 ? <div style={{ fontSize: 13, color: MUTED }}>Belum ada.</div> : null}
+          {actors.map((a) => (
+            <div key={a.id} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <FigurePortrait figureId={a.id} name={a.name} width={36} round fontSize={12} hatchStep={4} />
+              <Link href={open(`tokoh:${a.id}`)} scroll={false} style={{ flex: 1, minWidth: 0, color: INK, textDecoration: "none" }}>
+                <span style={{ display: "block", fontSize: 14, fontWeight: 600 }}>{a.name}</span>
+                <span style={{ display: "block", fontSize: 12, color: MUTED }}>
+                  {a.positions[0] ? [a.positions[0].role, a.positions[0].org].filter(Boolean).join(" ") : a.role ?? ""}
+                  {a.quotes ? ` · ${a.quotes} kutipan` : ""}
+                </span>
+              </Link>
+              {actors.length > 1 ? (
+                <form action={setRecordActor}>
+                  <Hidden fields={{ event_id: item.event_id, figure_id: a.id, on: "0" }} />
+                  <button type="submit" aria-label={`Pindahkan ${a.name} ke Disebut`} style={{ fontSize: 12, background: "none", border: "none", padding: "6px 0", cursor: "pointer", color: "var(--color-mud)", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                    ke Disebut
+                  </button>
+                </form>
+              ) : null}
+            </div>
+          ))}
+        </Group>
+      ) : null}
+
+      <Group
+        label={`${isRecord ? "Disebut" : "Tokoh terkait"} · ${named.length}`}
+        action={named.length > shown.length ? <TextLink href={open("disebut")} tone="muted">semua</TextLink> : undefined}
+      >
+        {named.length === 0 ? <div style={{ fontSize: 13, color: MUTED }}>Tidak ada nama lain yang dikenali.</div> : (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {shown.map((p) =>
+              p.kind === "candidate" ? (
+                <Chip key={`c-${p.id}`} href={open(`nama:${p.id}`)} tone="pending" title={`disebut di ${p.articles} artikel`}>{p.name} · nama baru</Chip>
+              ) : (
+                <Chip key={p.id} href={open(`tokoh:${p.id}`)} title={`disebut di ${p.articles} artikel`}>
+                  <span style={p.struck ? { textDecoration: "line-through", color: MUTED } : undefined}>{p.name}</span>
+                </Chip>
+              )
+            )}
+            {named.length > shown.length ? <Chip href={open("disebut")} tone="outline">+{named.length - shown.length} lainnya</Chip> : null}
+          </div>
+        )}
+      </Group>
+
+      <Group
+        label={isRecord ? "Bagian dari peristiwa" : `Catatan di dalamnya · ${links.length}`}
+        action={<TextLink href={open("tautkan")}>{isRecord ? "Tautkan" : "Kelola"}</TextLink>}
+      >
+        {links.length === 0 ? <div style={{ fontSize: 13, color: MUTED }}>Belum ada.</div> : null}
+        {links.slice(0, RELATIONS_SHOWN).map((l) => (
+          <RelationRow
+            key={l.event_id}
+            title={l.title ?? `#${l.event_id}`}
+            sub={[day(l.event_date), isRecord ? null : l.figure_name].filter(Boolean).join(" · ")}
+            href={open(eventPanel(isRecord ? "peristiwa" : "record", l.event_id))}
+            verdict={l.verdict}
+            action={ruleLink}
+            pair={isRecord ? { record_id: item.event_id, peristiwa_id: l.event_id } : { record_id: l.event_id, peristiwa_id: item.event_id }}
+          />
+        ))}
+        {links.length > RELATIONS_SHOWN ? <TextLink href={open("tautkan")} tone="muted">dan {links.length - RELATIONS_SHOWN} lainnya</TextLink> : null}
+      </Group>
+
+      <Group label="Lini cerita" action={<TextLink href={open("lini")}>Sambungkan</TextLink>} last>
+        {lini.length === 0 ? <div style={{ fontSize: 13, color: MUTED }}>Belum tersambung.</div> : null}
+        {lini.slice(0, RELATIONS_SHOWN).map((f) => {
+          const earlier = item.followups.earlier.includes(f);
+          return (
+            <RelationRow
+              key={f.event_id}
+              title={f.title ?? `#${f.event_id}`}
+              sub={`${day(f.event_date)} · ${earlier ? "sebelum ini" : "sesudah ini"}`}
+              href={open(eventPanel(item.kind, f.event_id))}
+              verdict={f.verdict}
+              action={ruleFollowup}
+              pair={earlier ? { earlier_id: f.event_id, later_id: item.event_id } : { earlier_id: item.event_id, later_id: f.event_id }}
+            />
+          );
+        })}
+        {lini.length > RELATIONS_SHOWN ? <TextLink href={open("lini")} tone="muted">dan {lini.length - RELATIONS_SHOWN} lainnya</TextLink> : null}
+      </Group>
+    </Card>
   );
 }
 
-function Hidden({ fields }: { fields: Record<string, string | number> }) {
+/** A linked event in Relasi: confirmed with ✓, or a proposal to rule on right there. */
+function RelationRow({ title, sub, href, verdict, action, pair }: {
+  title: string;
+  sub: string;
+  href: string;
+  verdict: "confirmed" | "rejected" | null;
+  action: (formData: FormData) => Promise<void>;
+  pair: Record<string, number>;
+}) {
+  const small = { ...button("accept"), minHeight: 30, padding: "4px 10px", fontSize: 12 };
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <Link href={href} scroll={false} style={{ color: INK, textDecorationColor: "#b9ad94" }}>{title}</Link>
+        {verdict === "confirmed" ? <span style={{ color: ACCEPT, fontWeight: 700 }}> ✓</span> : null}
+        <span style={{ display: "block", fontSize: 12, color: verdict ? MUTED : "#7a5a12" }}>{sub}{verdict ? "" : " · usulan pipeline"}</span>
+      </span>
+      {verdict === null ? (
+        <span style={{ display: "flex", gap: 6 }}>
+          <form action={action}>
+            <Hidden fields={{ ...pair, verdict: "confirmed" }} />
+            <button type="submit" style={small}>Ya</button>
+          </form>
+          <form action={action}>
+            <Hidden fields={{ ...pair, verdict: "rejected" }} />
+            <button type="submit" style={{ ...small, ...button("quiet"), minHeight: 30, padding: "4px 10px", fontSize: 12 }}>Bukan</button>
+          </form>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** The drawer's content for each ?panel=. */
+function PanelDrawer({ panel, item, actors, figures, peek, candidates, search, open, read, scattered, closeHref }: {
+  panel: PanelRef;
+  read: (article: string) => string;
+  scattered: boolean;
+  item: Item;
+  actors: Actor[];
+  figures: FigureOption[];
+  peek: EventPeek | FigurePeek | null;
+  candidates: FollowupCandidate[];
+  search: string;
+  open: Open;
+  closeHref: string;
+}) {
+  const isRecord = item.kind === "record";
+  const here = `${isRecord ? "Catatan" : "Peristiwa"} #${item.event_id}`;
+  const missing = (
+    <Drawer crumb={here} title="Tidak ditemukan" closeHref={closeHref}>
+      <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Mungkin sudah digabung, diputuskan, atau dihapus.</p>
+    </Drawer>
+  );
+
+  switch (panel.kind) {
+    case "catatan":
+    case "peristiwa": {
+      const e = peek as EventPeek | null;
+      if (!e) return missing;
+      return (
+        <Drawer crumb={<>{here} › {e.kind === "record" ? "Catatan" : "Peristiwa"} #{e.event_id}</>} title={e.title ?? "(tanpa judul)"} closeHref={closeHref}>
+          <EventPanel peek={e} open={open} here={item.event_id} relation={relationTo(item, e.event_id)} />
+        </Drawer>
+      );
+    }
+    case "tokoh": {
+      const f = peek as FigurePeek | null;
+      if (!f) return missing;
+      return (
+        <Drawer crumb={<>{here} › Tokoh</>} title={f.name} closeHref={closeHref} width={640}
+          aside={<Link href={`/kurasi/tokoh/${f.id}`} style={{ fontSize: 12.5, color: "var(--color-mud)", whiteSpace: "nowrap" }}>Buka halaman tokoh</Link>}>
+          <FigureDrawer item={item} actors={actors} figures={figures} peek={f} open={open} />
+        </Drawer>
+      );
+    }
+    case "nama": {
+      const p = item.named.find((x) => x.kind === "candidate" && x.id === panel.id);
+      if (!p) return missing;
+      return (
+        <Drawer crumb={<>{here} › Nama baru</>} title={p.name} closeHref={closeHref}>
+          <p style={{ fontSize: 13.5, color: "var(--color-mud)", margin: 0, lineHeight: 1.55 }}>
+            Ditemukan pipeline di {p.articles} artikel {isRecord ? "catatan" : "peristiwa"} ini. Jadikan tokoh, samakan dengan tokoh yang ada, atau tolak.
+          </p>
+          <CandidateRow person={p} figures={figures} open={open} />
+          {p.verdict ? null : (
+            <form action={decide}>
+              <Hidden fields={{ slug: p.id, verdict: "reject" }} />
+              <button type="submit" style={{ ...button("quiet"), color: "var(--color-clay)" }}>Tolak, bukan tokoh</button>
+            </form>
+          )}
+        </Drawer>
+      );
+    }
+    case "pelaku":
+      return (
+        <Drawer crumb={<>{here} › Pelaku</>} title="Tambah pelaku" closeHref={closeHref}>
+          <AddActor item={item} actors={actors} figures={figures} />
+        </Drawer>
+      );
+    case "disebut": {
+      const named = mentions(item, actors);
+      return (
+        <Drawer crumb={<>{here} › {isRecord ? "Disebut" : "Tokoh terkait"}</>} title={`${named.length} nama di liputan ini`} closeHref={closeHref}>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {named.map((p, i) => (
+              <li key={`${p.kind}-${p.id}`} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "9px 0", borderTop: i ? `1px solid ${RULE}` : "none" }}>
+                <Link href={open(`${p.kind === "candidate" ? "nama" : "tokoh"}:${p.id}`)} scroll={false} style={{ flex: 1, minWidth: 0, color: INK, textDecoration: "none" }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, ...(p.struck ? { textDecoration: "line-through", color: MUTED } : {}) }}>{p.name}</span>
+                  {p.role ? <span style={{ fontSize: 12, color: MUTED }}> · {p.role}</span> : null}
+                </Link>
+                {p.kind === "candidate" ? <Pill tone="pending">nama baru</Pill> : null}
+                <span style={{ fontSize: 12, color: MUTED, whiteSpace: "nowrap" }}>{p.articles} artikel</span>
+              </li>
+            ))}
+          </ul>
+        </Drawer>
+      );
+    }
+    case "tautkan":
+      return (
+        <Drawer crumb={<>{here} › {isRecord ? "Bagian dari peristiwa" : "Catatan di dalamnya"}</>} title={isRecord ? "Peristiwa catatan ini" : "Catatan di peristiwa ini"} closeHref={closeHref} width={640}>
+          <p style={{ fontSize: 12.5, color: MUTED, margin: 0, lineHeight: 1.5 }}>
+            {isRecord
+              ? "Pipeline mengusulkan berdasar kata khas yang sama; hanya yang kamu konfirmasi yang tampil di situs."
+              : "Catatan tokoh yang diusulkan atau dikonfirmasi sebagai bagian dari peristiwa ini."}
+          </p>
+          <LinkList item={item} open={open} />
+          {isRecord ? <AddLink item={item} /> : null}
+        </Drawer>
+      );
+    case "isi":
+      return (
+        <Drawer crumb={<>{here} › Isi</>} title={item.title ?? "Ringkasan"} closeHref={closeHref} width={640}>
+          {item.summary ? (
+            <SummaryList summary={item.summary} sources={siteSources(item)} figureId={item.figure_id} />
+          ) : (
+            <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Belum dirangkum.</p>
+          )}
+        </Drawer>
+      );
+    case "sumber":
+      return (
+        <Drawer crumb={<>{here} › Artikel sumber</>} title={`${item.sources.length} artikel`} closeHref={closeHref} width={640}>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {item.sources.map((a, i) => <SourceRow key={`${a.url}-${i}`} a={a} read={read} scattered={scattered} first={i === 0} />)}
+          </ul>
+        </Drawer>
+      );
+    case "kutipan":
+      return (
+        <Drawer crumb={<>{here} › Kutipan</>} title={`${item.quotes.length} kutipan`} closeHref={closeHref} width={680}>
+          <p style={{ fontSize: 12.5, color: MUTED, margin: 0, lineHeight: 1.5 }}>
+            {isRecord
+              ? "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media. Betulkan tokohnya bila salah, dan pilih kutipan yang tampil di situs."
+              : "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media. Betulkan tokohnya bila salah."}
+          </p>
+          <AddQuote item={item} figures={figures} />
+          <QuoteList item={item} actors={actors} figures={figures} open={open} />
+        </Drawer>
+      );
+    case "saran":
+      return (
+        <Drawer crumb={<>{here} › Saran</>} title="Saran turunkan" closeHref={closeHref}>
+          <SuggestionDrawer item={item} open={open} />
+        </Drawer>
+      );
+    case "lini":
+      return (
+        <Drawer crumb={<>{here} › Lini cerita</>} title="Lini cerita" closeHref={closeHref} width={640}>
+          <p style={{ fontSize: 12.5, color: MUTED, margin: 0, lineHeight: 1.5 }}>
+            {isRecord
+              ? "Catatan tokoh yang sama sebelum dan sesudah ini, bila ini kelanjutannya: diumumkan lalu direvisi, dijanjikan lalu ditepati. Hanya yang kamu konfirmasi yang tampil di situs."
+              : "Peristiwa sebelum dan sesudah ini, bila ini kelanjutannya. Hanya yang kamu konfirmasi yang tampil di situs."}
+          </p>
+          <FollowupList item={item} open={open} />
+          <AddFollowup item={item} candidates={candidates} search={search} open={open} />
+        </Drawer>
+      );
+  }
+}
+
+/**
+ * A figure seen from this record: its part here (Pelaku or Disebut, or struck
+ * from a peristiwa), its own form when the coverage names it, and where else
+ * it appears.
+ */
+function FigureDrawer({ item, actors, figures, peek: f, open }: { item: Item; actors: Actor[]; figures: FigureOption[]; peek: FigurePeek; open: Open }) {
+  const isRecord = item.kind === "record";
+  const person = item.named.find((p) => p.kind === "figure" && p.id === f.id);
+  const isActor = actors.some((a) => a.id === f.id);
   return (
     <>
-      {Object.entries(fields).map(([k, v]) => (
-        <input key={k} type="hidden" name={k} value={v} />
-      ))}
+      {isRecord ? (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "10px 12px", borderRadius: 6, background: "var(--color-cream)", border: `1px solid ${RULE}` }}>
+          <span style={{ flex: "1 1 220px", fontSize: 13, color: "var(--color-mud)" }}>
+            Di catatan ini: <strong style={{ color: INK }}>{isActor ? "pelaku" : person ? "disebut" : "tidak disebut"}</strong>
+          </span>
+          {isActor && actors.length < 2 ? (
+            <span style={{ fontSize: 12, color: MUTED }}>Satu-satunya pelaku</span>
+          ) : (
+            <form action={setRecordActor}>
+              <Hidden fields={{ event_id: item.event_id, figure_id: f.id, on: isActor ? "0" : "1" }} />
+              <button type="submit" style={button(isActor ? "quiet" : "ink")}>{isActor ? "Pindahkan ke Disebut" : "Jadikan pelaku"}</button>
+            </form>
+          )}
+        </div>
+      ) : person ? (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "10px 12px", borderRadius: 6, background: "var(--color-cream)", border: `1px solid ${RULE}` }}>
+          <span style={{ flex: "1 1 220px", fontSize: 13, color: "var(--color-mud)" }}>
+            {person.struck ? "Dicoret dari peristiwa ini." : "Terkait dengan peristiwa ini. Coret bila salah cocok, misalnya karena alias yang juga nama orang lain."}
+          </span>
+          <form action={relateFigure}>
+            <Hidden fields={{ event_id: item.event_id, figure_id: f.id, struck: person.struck ? "0" : "1" }} />
+            <button type="submit" style={button("quiet")}>{person.struck ? "Pulihkan" : "Coret dari peristiwa"}</button>
+          </form>
+        </div>
+      ) : null}
+
+      {person && person.active !== false ? (
+        <>
+          <div style={groupLabel}>Identitas &amp; jabatan</div>
+          <FigureForm figure={person} eventId={item.event_id} />
+          <NotAPersonForm figureId={person.id} eventId={item.event_id} />
+          <SamePerson person={person} eventId={item.event_id} figures={figures} open={open} />
+        </>
+      ) : (
+        <p style={{ fontSize: 12.5, color: MUTED, margin: 0 }}>
+          Ubah identitas dan jabatannya di <Link href={`/kurasi/tokoh/${f.id}`} style={{ color: INK }}>halaman tokoh</Link>.
+        </p>
+      )}
+
+      <div style={{ ...groupLabel, marginTop: 6, paddingTop: 14, borderTop: `1px solid ${RULE}` }}>Di seluruh kurasi</div>
+      <FigurePanel peek={f} open={open} here={item.event_id} />
+    </>
+  );
+}
+
+/**
+ * "+ Tambah pelaku": who in this coverage could be an actor, then anyone on
+ * the roster. A Pelaku is who does or says the act; the rest stay Disebut.
+ */
+function AddActor({ item, actors, figures }: { item: Item; actors: Actor[]; figures: FigureOption[] }) {
+  const actorIds = new Set(actors.map((a) => a.id));
+  const quoted = new Map<string, number>();
+  for (const q of item.quotes) if (q.figure_id) quoted.set(q.figure_id, (quoted.get(q.figure_id) ?? 0) + 1);
+  const fromCoverage = item.named
+    .filter((p) => p.kind === "figure" && !actorIds.has(p.id) && p.active !== false)
+    .sort((a, b) => (quoted.get(b.id) ?? 0) - (quoted.get(a.id) ?? 0) || b.articles - a.articles)
+    .slice(0, 24);
+  const chip = { fontSize: 12.5, padding: "6px 11px", borderRadius: 99, background: "var(--color-cream)", border: `1px solid ${INK}`, cursor: "pointer", color: INK } as const;
+  return (
+    <>
+      <p style={{ fontSize: 13, color: "var(--color-mud)", lineHeight: 1.55, margin: 0 }}>
+        Pelaku adalah yang melakukan atau mengucapkan tindakannya. Yang hanya disebut atau dikutip tetap di Disebut.
+        Catatan tetap beralamat di tokoh {item.owner?.name ?? "aslinya"}; menambah pelaku tidak memindahkannya.
+      </p>
+      {fromCoverage.length ? (
+        <>
+          <div style={groupLabel}>Dari liputan ini</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {fromCoverage.map((p) => (
+              <form key={p.id} action={setRecordActor}>
+                <Hidden fields={{ event_id: item.event_id, figure_id: p.id, on: "1" }} />
+                <button type="submit" style={chip} title={`disebut di ${p.articles} artikel${quoted.get(p.id) ? `, ${quoted.get(p.id)} kutipan` : ""}`}>
+                  + {p.name}
+                  {quoted.get(p.id) ? <span style={{ color: MUTED }}> · {quoted.get(p.id)} kutipan</span> : null}
+                </button>
+              </form>
+            ))}
+          </div>
+        </>
+      ) : null}
+      <div style={groupLabel}>Tokoh lain</div>
+      <form action={setRecordActor} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <Hidden fields={{ event_id: item.event_id, on: "1" }} />
+        <FigurePicker listId={FIGURE_LIST} required />
+        <button type="submit" style={button("ink")}>Tambahkan</button>
+      </form>
+      <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>{figures.length} tokoh aktif. Ketik nama, alias, atau jabatan.</p>
     </>
   );
 }
@@ -495,56 +737,60 @@ function Hidden({ fields }: { fields: Record<string, string | number> }) {
  */
 function VerdictBar({
   item,
-  sections,
   missing,
   figures,
   open,
+  openPoints,
 }: {
   item: Item;
-  sections: { id: string; title: string }[];
   missing?: string;
   figures: FigureOption[];
   open: Open;
+  openPoints: number;
 }) {
   const next = item.next_id ?? "";
   const s = item.suggestion;
   const autoHidden = !item.curated && s?.auto_hide;
   const [tone, status]: [PillTone, string] =
-    item.curated === "rejected" ? ["danger", "Diturunkan dari situs"] :
-    item.curated === "kept" ? ["accept", "Sudah diperiksa · tayang"] :
-    autoHidden ? ["pending", "Disembunyikan otomatis · belum ditinjau"] :
-    ["neutral", "Tayang · belum ditinjau"];
+    item.curated === "rejected" ? ["danger", "diturunkan"] :
+    item.curated === "kept" ? ["accept", "sudah diperiksa · tayang"] :
+    autoHidden ? ["pending", "disembunyikan otomatis"] :
+    ["pending", "tayang · belum diperiksa"];
   const suggested = !item.curated && s?.reason ? s.reason : "";
   const ticked = new Set<string>(item.curated === "rejected" ? item.ruling?.reasons ?? [] : suggested ? [suggested] : []);
   return (
     <div
       id="keputusan"
       style={{
-        position: "sticky", top: 0, zIndex: 5, background: SURFACE, border: `1px solid ${RULE}`,
-        borderRadius: 8, padding: "10px 14px", boxShadow: "0 2px 10px rgba(22, 19, 15, 0.06)",
+        position: "sticky", top: "var(--strip-h)", zIndex: 15, background: "var(--color-callout)", border: `1px solid ${RULE}`,
+        borderLeft: "3px solid var(--color-clay)", padding: "10px 14px", margin: "-8px 0 0",
       }}
     >
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: MUTED }}>Keputusan</span>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={groupLabel}>Keputusan</span>
         <Pill tone={tone}>{status}</Pill>
-        <span style={{ flex: "1 1 auto" }} />
-        {item.curated !== "kept" ? (
+        {item.curated ? (
           <form action={curate}>
-            <Hidden fields={{ event_id: item.event_id, verdict: "kept", next, suggested }} />
-            <button type="submit" style={button("accept")}>
-              {autoHidden || item.curated === "rejected" ? "Tayangkan, lanjut →" : "Tayang, lanjut →"}
+            <Hidden fields={{ event_id: item.event_id, verdict: "" }} />
+            <button type="submit" style={{ fontSize: 12.5, background: "none", border: "none", color: MUTED, textDecoration: "underline", cursor: "pointer", padding: 0 }}>
+              {item.curated === "rejected" ? "Tayangkan lagi" : "Batalkan"}
             </button>
           </form>
         ) : null}
+        {openPoints ? (
+          <a href="#poin" style={{ fontSize: 12.5, fontWeight: 600, color: "#7a5a12", textDecoration: "none" }}>{openPoints} poin kurasi belum dijawab</a>
+        ) : null}
+        <span style={{ flex: "1 1 auto" }} />
+        <ReworkMenu item={item} figures={figures} />
         <details open={Boolean(missing)} style={{ position: "static" }}>
-          <summary style={{ ...button(item.curated === "rejected" ? "quiet" : "danger"), listStyle: "none", display: "inline-block" }}>
+          <summary style={{ ...button(item.curated === "rejected" ? "quiet" : "danger"), listStyle: "none", display: "inline-flex", alignItems: "center" }}>
             {item.curated === "rejected" ? "Ubah alasan…" : "Turunkan…"}
           </summary>
           <form
             action={curate}
             style={{
               position: "absolute", left: 0, right: 0, top: "calc(100% + 4px)", zIndex: 6,
-              background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8, padding: "14px 16px",
+              background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 2, padding: "14px 16px",
               boxShadow: "0 8px 24px rgba(22, 19, 15, 0.14)", display: "grid", gap: 10,
             }}
           >
@@ -577,12 +823,11 @@ function VerdictBar({
             </div>
           </form>
         </details>
-        <ReworkMenu item={item} figures={figures} />
-        {item.curated ? (
+        {item.curated !== "kept" ? (
           <form action={curate}>
-            <Hidden fields={{ event_id: item.event_id, verdict: "" }} />
-            <button type="submit" style={button("quiet")}>
-              {item.curated === "rejected" ? "Tayangkan lagi" : "Batalkan"}
+            <Hidden fields={{ event_id: item.event_id, verdict: "kept", next, suggested }} />
+            <button type="submit" style={button("accept")}>
+              {autoHidden || item.curated === "rejected" ? "Tayangkan, lanjut →" : "Selesai diperiksa, lanjut →"}
             </button>
           </form>
         ) : null}
@@ -596,13 +841,6 @@ function VerdictBar({
       ) : null}
       {!item.curated && s ? <SuggestionLine item={item} open={open} /> : null}
       <CvNote item={item} figures={figures} />
-      <nav style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${RULE}` }}>
-        {sections.map((x, i) => (
-          <a key={x.id} href={`#${x.id}`} style={{ color: MUTED, textDecoration: "none" }}>
-            <strong style={{ color: INK }}>{i + 1}</strong> {x.title}
-          </a>
-        ))}
-      </nav>
     </div>
   );
 }
@@ -623,7 +861,7 @@ function ReworkMenu({ item, figures }: { item: Item; figures: FigureOption[] }) 
       <div
         style={{
           position: "absolute", left: 0, right: 0, top: "calc(100% + 4px)", zIndex: 6,
-          background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8, padding: "14px 16px",
+          background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 2, padding: "14px 16px",
           boxShadow: "0 8px 24px rgba(22, 19, 15, 0.14)", maxHeight: "70vh", overflowY: "auto",
         }}
       >
@@ -670,501 +908,45 @@ function Warn({ children }: { children: React.ReactNode }) {
   return <div style={{ fontSize: 12.5, color: "var(--color-clay)", fontWeight: 600 }}>{children}</div>;
 }
 
-/** "Saran: Remeh / seremonial — mirip 12 yang pernah diturunkan", with the examples. */
+/** "Saran: Remeh / seremonial · 85% · mirip 12 …", one line; the examples open in the drawer. */
 function SuggestionLine({ item, open }: { item: Item; open: Open }) {
   const s = item.suggestion!;
   return (
-    <div style={{ fontSize: 12.5, color: "#7a5a12", marginTop: 8, display: "grid", gap: 3 }}>
-      <div>
-        <strong>{s.auto_hide ? "Disembunyikan otomatis:" : "Saran:"}</strong>{" "}
-        {s.reason ? reasonLabel(s.reason) : "turunkan"}
-        {s.confidence !== null ? ` · ${Math.round(s.confidence * 100)}%` : ""}
-        {s.support > 0 ? ` · mirip ${s.support} yang pernah kamu turunkan dengan alasan ini` : ""}
-        {s.auto_hide ? ". Tayangkan bila keliru; keputusanmu selalu menang." : ""}
-      </div>
+    <div style={{ fontSize: 12.5, color: "#7a5a12", marginTop: 8 }}>
+      <strong>{s.auto_hide ? "Disembunyikan otomatis:" : "Saran:"}</strong>{" "}
+      {s.reason ? reasonLabel(s.reason) : "turunkan"}
+      {s.confidence !== null ? ` · ${Math.round(s.confidence * 100)}%` : ""}
+      {s.support > 0 ? ` · mirip ${s.support} yang pernah kamu turunkan` : ""}
+      {item.examples.length > 0 ? <> · <Link href={open("saran")} scroll={false} style={{ color: "#7a5a12" }}>lihat contohnya</Link></> : null}
+    </div>
+  );
+}
+
+/** The takedown suggestion in full: why, and the past rulings it resembles. */
+function SuggestionDrawer({ item, open }: { item: Item; open: Open }) {
+  const s = item.suggestion;
+  if (!s) return <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Tidak ada saran untuk {item.kind === "record" ? "catatan" : "peristiwa"} ini.</p>;
+  return (
+    <>
+      <p style={{ fontSize: 13.5, color: "var(--color-mud)", margin: 0, lineHeight: 1.55 }}>
+        {s.auto_hide ? "Disembunyikan otomatis" : "Pipeline menyarankan turunkan"} dengan alasan <strong style={{ color: INK }}>{s.reason ? reasonLabel(s.reason) : "—"}</strong>
+        {s.confidence !== null ? `, yakin ${Math.round(s.confidence * 100)}%` : ""}
+        {s.support > 0 ? `, karena mirip ${s.support} yang pernah kamu turunkan dengan alasan ini` : ""}.
+        {s.auto_hide ? " Tayangkan bila keliru; keputusanmu selalu menang." : " Saran ini tidak mengubah apa pun sampai kamu memutuskan."}
+      </p>
       {item.examples.length > 0 ? (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12 }}>
-          <span style={{ color: MUTED }}>Contoh:</span>
-          {item.examples.map((x) => (
-            <Link key={x.event_id} href={open(eventPanel(item.kind, x.event_id))} scroll={false} style={{ color: MUTED, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {x.title ?? `#${x.event_id}`}
-            </Link>
-          ))}
+        <div>
+          <div style={{ ...groupLabel, paddingBottom: 6 }}>Contoh yang mirip</div>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {item.examples.map((x, i) => (
+              <li key={x.event_id} style={{ padding: "9px 0", borderTop: i ? `1px solid ${RULE}` : "none" }}>
+                <Link href={open(eventPanel(item.kind, x.event_id))} scroll={false} style={{ fontSize: 13.5, color: INK }}>{x.title ?? `#${x.event_id}`}</Link>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function FigureHeading({ figure }: { figure: FigureRef | NamedPerson }) {
-  const active = figure.active ?? true;
-  return (
-    <span style={{ display: "inline-flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-      <span style={{ fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 600, color: INK }}>{figure.name}</span>
-      {figure.positions.length > 0 ? (
-        <span style={{ fontSize: 13, color: "var(--color-mud)" }}>
-          {figure.positions.map((p) => positionTitle(p) + (p.period ? ` (${p.period})` : "")).join(" · ")}
-        </span>
-      ) : figure.role ? (
-        <span style={{ fontSize: 13, color: "var(--color-mud)" }}>{figure.role}</span>
-      ) : null}
-      <code style={{ fontSize: 11.5, color: MUTED }}>/tokoh/{figure.id}</code>
-      {!active ? <Pill tone="danger">nonaktif</Pill> : null}
-    </span>
-  );
-}
-
-/**
- * The fields every figure editor shares: name, offices, aliases, active. The
- * record owner's form also carries the rest of the CV, since offices and CV
- * are one list: what is typed here is what the CV tab shows.
- */
-function FigureForm({ figure, eventId }: { figure: FigureRef | NamedPerson; eventId: number }) {
-  const profile = figure.profile ?? null;
-  const active = figure.active ?? true;
-  return (
-    <form action={editFigure} style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", alignItems: "end" }}>
-      <Hidden fields={{ event_id: eventId, figure_id: figure.id }} />
-      <label style={label}>
-        Nama tampil
-        <input name="name" defaultValue={figure.name} required style={input} />
-      </label>
-      <Positions figure={figure} />
-      {profile ? <CvFields profile={profile} checkedAt={figure.cv_checked_at ?? null} figureId={figure.id} /> : null}
-      <label style={{ ...label, gridColumn: "1 / -1" }}>
-        Alias, satu per baris
-        <span style={{ fontSize: 11.5 }}>
-          Nama tampil selalu dicocokkan. Alias dicocokkan ke judul artikel, jadi hindari satu kata umum.
-        </span>
-        <textarea
-          name="aliases"
-          rows={Math.min(8, Math.max(3, figure.aliases.length + 1))}
-          defaultValue={figure.aliases.join("\n")}
-          style={{ ...input, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
-        />
-      </label>
-      {/* Retiring is "Bukan orang…" or a merge; saving keeps a figure as it
-          is. Only a retired figure (an owner whose record is still open) gets
-          the way back. */}
-      {active ? (
-        <input type="hidden" name="active" value="1" />
-      ) : (
-        <label style={{ ...label, display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--color-mud)" }}>
-          <input type="checkbox" name="active" value="1" />
-          Tokoh ini nonaktif. Centang untuk mengaktifkannya lagi saat disimpan.
-        </label>
-      )}
-      <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "flex-start", flexWrap: "wrap" }}>
-        {active ? (
-          // The existing-figure twin of rejecting a new name. Its confirm
-          // button belongs to the separate form `bukan-orang-<id>`.
-          <details style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-            <summary style={{ ...button("quiet"), listStyle: "none", display: "inline-block" }}>Bukan orang…</summary>
-            <div style={{ ...CONFIRM_PANEL, textAlign: "left" }}>
-              <span style={{ fontSize: 12.5, color: "var(--color-mud)", lineHeight: 1.5 }}>
-                Untuk tempat, jabatan, atau potongan judul yang terlanjur jadi tokoh. {figure.name} dinonaktifkan,
-                dicabut dari semua peristiwa, artikelnya dilepas, dan catatannya diturunkan.
-              </span>
-              <button type="submit" form={`bukan-orang-${figure.id}`} formNoValidate style={button("danger")}>
-                Ya, hapus {figure.name}
-              </button>
-            </div>
-          </details>
-        ) : null}
-        <button type="submit" style={button("ink")}>Simpan tokoh</button>
-      </div>
-    </form>
-  );
-}
-
-/**
- * Offices as rows of role, organisation and period. Plain inputs with no
- * script, so there are always two blank rows to add to; clearing a row
- * deletes it. A figure with no curated offices yet starts from its one-line
- * title in the role column, to be split into role and organisation.
- */
-function Positions({ figure }: { figure: FigureRef | NamedPerson }) {
-  const rows: Position[] = figure.positions.length > 0
-    ? figure.positions
-    : figure.role ? [{ role: figure.role, org: "", period: "" }] : [];
-  const blank = { role: "", org: "", period: "" };
-  const all = [...rows, blank, blank];
-  return (
-    <fieldset style={{ gridColumn: "1 / -1", border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-      <legend style={{ ...label, padding: 0, marginBottom: 6 }}>
-        Jabatan dan lembaga. Baris pertama adalah jabatan utama, tampil di bawah nama di seluruh situs. Kosongkan baris untuk menghapus.
-      </legend>
-      <div style={{ display: "grid", gap: 6, gridTemplateColumns: "minmax(120px, 1.2fr) minmax(120px, 1.2fr) minmax(100px, 0.8fr)" }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>Jabatan</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>Lembaga / organisasi</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>Periode</span>
-        {all.map((p, i) => (
-          <PositionRow key={i} position={p} main={i === 0} />
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-/** Bio, facts, education and sources: the CV beyond its list of offices. */
-function CvFields({ profile, checkedAt, figureId }: { profile: Profile; checkedAt: string | null; figureId: string }) {
-  const head = { fontSize: 11, fontWeight: 700, color: MUTED } as const;
-  const two = { display: "grid", gap: 6, gridTemplateColumns: "minmax(110px, 0.6fr) minmax(160px, 1.4fr)" } as const;
-  const cell = { ...input, width: "100%" };
-  const facts = [...profile.facts, { label: "", value: "" }, { label: "", value: "" }];
-  const education = [...profile.education, { year: "", detail: "" }, { year: "", detail: "" }];
-  const sources = [...profile.sources, { label: "", url: "" }];
-  return (
-    <fieldset style={{ gridColumn: "1 / -1", border: 0, borderTop: `1px solid ${RULE}`, padding: "12px 0 0", margin: 0, minWidth: 0, display: "grid", gap: 14 }}>
-      <input type="hidden" name="has_cv" value="1" />
-      <legend style={{ ...label, padding: 0 }}>
-        CV, tampil di tab CV pada{" "}
-        <Link href={`/tokoh/${figureId}?tab=cv`} target="_blank" style={{ color: MUTED }}>/tokoh/{figureId}</Link>.
-        {" "}Riwayat jabatannya adalah daftar jabatan di atas; jabatan kini diambil dari baris pertama.
-        {checkedAt ? ` Sumber diperiksa ${checkedAt}.` : ""}
-      </legend>
-      {/* Folded: they rarely change while curating a record. A closed
-          <details> still submits its fields, so saving keeps them. */}
-      <CvGroup title="Biodata" count={profile.facts.length}>
-        <div style={two}>
-          <span style={head}>Fakta</span><span style={head}>Isi</span>
-          {facts.map((f, i) => (
-            <FactRow key={i} a={["fact_label", f.label, "mis. Lahir"]} b={["fact_value", f.value, "mis. Kudus, 12 Oktober 1973"]} style={cell} hint={i === 0} />
-          ))}
-        </div>
-      </CvGroup>
-      <CvGroup title="Pendidikan" count={profile.education.length}>
-        <div style={two}>
-          <span style={head}>Tahun</span><span style={head}>Pendidikan</span>
-          {education.map((e, i) => (
-            <FactRow key={i} a={["edu_year", e.year ?? "", "1997"]} b={["edu_detail", e.detail, "mis. S1 Filsafat, UGM"]} style={cell} hint={i === 0} />
-          ))}
-        </div>
-      </CvGroup>
-      <CvGroup title="Sumber" count={profile.sources.length}>
-        <div style={two}>
-          <span style={head}>Sumber</span><span style={head}>URL</span>
-          {sources.map((s, i) => (
-            <FactRow key={i} a={["src_label", s.label, "mis. Wikipedia"]} b={["src_url", s.url, "https://…"]} style={cell} hint={i === 0} />
-          ))}
-        </div>
-      </CvGroup>
-    </fieldset>
-  );
-}
-
-function CvGroup({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
-  return (
-    <details style={{ border: `1px solid ${RULE}`, borderRadius: 6, padding: "8px 12px", background: SURFACE }}>
-      <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: INK }}>
-        {title} <span style={{ fontWeight: 400, color: MUTED }}>{count ? `${count} isian` : "kosong"}</span>
-      </summary>
-      <div style={{ marginTop: 10 }}>{children}</div>
-    </details>
-  );
-}
-
-function FactRow({ a, b, style, hint }: { a: [string, string, string]; b: [string, string, string]; style: React.CSSProperties; hint: boolean }) {
-  return (
-    <>
-      <input name={a[0]} defaultValue={a[1]} placeholder={hint ? a[2] : ""} style={style} aria-label={a[0]} />
-      <input name={b[0]} defaultValue={b[1]} placeholder={hint ? b[2] : ""} style={style} aria-label={b[0]} />
     </>
-  );
-}
-
-function PositionRow({ position: p, main }: { position: Position; main: boolean }) {
-  const cell = { ...input, width: "100%", fontWeight: main ? 600 : 400 };
-  return (
-    <>
-      <input name="pos_role" defaultValue={p.role} placeholder={main ? "mis. Ketua" : ""} style={cell} aria-label="Jabatan" />
-      <input name="pos_org" list={ORG_LIST} autoComplete="off" defaultValue={p.org} placeholder={main ? "mis. MPR RI" : ""} style={cell} aria-label="Lembaga" />
-      <input name="pos_period" defaultValue={p.period} placeholder={main ? "2024–sekarang" : ""} style={cell} aria-label="Periode" />
-    </>
-  );
-}
-
-const ORG_LIST = "org-options";
-
-/**
- * Both names of every organisation in /kurasi/organisasi, for the office
- * rows: typing "KPK" or "Komisi Pem…" offers either form, the other as hint.
- */
-function OrgOptions({ orgs }: { orgs: Organization[] }) {
-  return (
-    <datalist id={ORG_LIST}>
-      {orgs.flatMap((o) => [
-        ...(o.short_name ? [<option key={`${o.id}s`} value={o.short_name} label={o.name} />] : []),
-        <option key={`${o.id}l`} value={o.name} label={o.short_name ?? ""} />,
-      ])}
-    </datalist>
-  );
-}
-
-const FIGURE_LIST = "figure-options";
-
-/**
- * The roster once per page, for every merge field to search. A <datalist>
- * filters as the curator types, by name or id, with no script; the field
- * submits the id, and `pattern` refuses anything not on the list.
- */
-function FigureOptions({ figures }: { figures: FigureOption[] }) {
-  return (
-    <datalist id={FIGURE_LIST}>
-      {figures.map((f) => (
-        <option
-          key={f.id}
-          value={f.id}
-          label={`${f.name}${f.role ? ` · ${f.role}` : ""}`}
-          data-name={f.name}
-          data-role={f.role ?? ""}
-          data-aliases={f.aliases.join("|")}
-        >
-          {f.name}{f.role ? ` · ${f.role}` : ""}
-        </option>
-      ))}
-    </datalist>
-  );
-}
-
-function NamedList({ item, figures, open }: { item: Item; figures: FigureOption[]; open: Open }) {
-  if (item.named.length === 0) {
-    return <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Tidak ada nama yang dikenali.</p>;
-  }
-  const isRecord = item.kind === "record";
-  return (
-    <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-      {item.named.map((p, i) => (
-        // Each name is addressable, so the queue can send a curator straight
-        // to it: /kurasi/<record>#nama-<slug>.
-        <li key={`${p.kind}-${p.id}`} id={`nama-${p.id}`} style={{ scrollMarginTop: 80, padding: "14px 0", borderTop: i ? `1px solid ${RULE}` : "none" }}>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
-            <Pill tone={p.kind === "candidate" ? "pending" : "neutral"}>{p.kind === "candidate" ? "Nama baru" : "Sudah ada"}</Pill>
-            {p.owner ? <Pill tone="ink">pelaku</Pill> : null}
-            <span style={{ fontSize: 11.5, color: MUTED }}>disebut di {p.articles} artikel</span>
-            {p.struck ? <Pill tone="danger">dicoret dari peristiwa</Pill> : null}
-            {p.kind === "figure" ? (
-              <Link href={open(`tokoh:${p.id}`)} scroll={false} style={{ fontSize: 12, color: MUTED }}>catatan lainnya ›</Link>
-            ) : null}
-          </div>
-          {p.kind === "figure" ? (
-            <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap", opacity: p.struck ? 0.6 : 1 }}>
-              {/* Everything about this figure in one fold: its data, whether it
-                  is someone else, and "Bukan orang". Closed, the line still
-                  says when a duplicate is suspected. */}
-              <details open={p.owner} style={{ flex: "1 1 420px", minWidth: 0 }}>
-                <summary style={{ cursor: "pointer" }}>
-                  <FigureHeading figure={p} />
-                  {p.active !== false && likelyDuplicates(p, figures).length > 0 ? (
-                    <span style={{ marginLeft: 8 }}><Pill tone="pending">mungkin tokoh ganda</Pill></span>
-                  ) : null}
-                  <span style={{ fontSize: 12, color: MUTED, marginLeft: 8 }}>sunting ▾</span>
-                </summary>
-                <SubPanel title="Data tokoh">
-                  <FigureForm figure={p} eventId={item.event_id} />
-                </SubPanel>
-                {p.active !== false ? <SamePerson person={p} eventId={item.event_id} figures={figures} open={open} /> : null}
-                {p.active !== false ? (
-                  // Its button sits beside "Simpan tokoh"; forms cannot nest,
-                  // so it submits this one by id.
-                  <form id={`bukan-orang-${p.id}`} action={notAPerson}>
-                    <Hidden fields={{ event_id: item.event_id, figure_id: p.id, confirm: 1 }} />
-                  </form>
-                ) : null}
-              </details>
-              {!isRecord && !p.owner ? (
-                <form action={relateFigure}>
-                  <Hidden fields={{ event_id: item.event_id, figure_id: p.id, struck: p.struck ? "0" : "1" }} />
-                  <button type="submit" style={button("quiet")}>{p.struck ? "Pulihkan" : "Coret dari peristiwa"}</button>
-                </form>
-              ) : null}
-            </div>
-          ) : (
-            <CandidateRow person={p} figures={figures} open={open} />
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/**
- * A discovered name, decided where the evidence for it is being read.
- *
- * The form itself is shared with the queue (AcceptCandidateForm).
- */
-function CandidateRow({ person: p, figures, open }: { person: NamedPerson; figures: FigureOption[]; open: Open }) {
-  if (p.verdict) {
-    const [tone, text]: [PillTone, string] =
-      p.verdict === "promote" ? ["accept", "dijadikan tokoh"] :
-      p.verdict === "alias" ? ["accept", "disamakan dengan tokoh yang ada"] : ["danger", "ditolak"];
-    return (
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontFamily: "var(--font-serif)", fontSize: 17, fontWeight: 600 }}>{p.name}</span>
-        <Pill tone={tone}>{text}</Pill>
-        {p.verdict === "reject" ? (
-          <form action={decide}>
-            <Hidden fields={{ slug: p.id, verdict: "" }} />
-            <button type="submit" style={button("quiet")}>Batalkan</button>
-          </form>
-        ) : null}
-      </div>
-    );
-  }
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-        <span style={{ fontFamily: "var(--font-serif)", fontSize: 17, fontWeight: 600 }}>{p.name}</span>
-        {p.role ? <span style={{ fontSize: 12.5, color: MUTED }}>liputan menyebutnya “{p.role}”</span> : null}
-      </div>
-      <SamePerson person={p} eventId={0} figures={figures} open={open} />
-      <SubPanel title="Atau: jadikan tokoh baru" note="Isian ini yang disimpan, apa adanya.">
-        <AcceptCandidateForm slug={p.id} name={p.name} role={p.role} />
-      </SubPanel>
-    </div>
-  );
-}
-
-/**
- * "Is this someone already tracked?" — one panel for every person on the page,
- * new name or existing figure alike. It leads with the figures that look like
- * the same person (nobody remembers the whole roster), and ends with a search
- * for any other. For a new name the answer is one click: it becomes that
- * figure's alias. Merging two tracked figures moves records, so it asks for
- * the tick; the suggested direction folds the figure with fewer records into
- * the one with more, and the record's own figure stays put.
- */
-function SamePerson({ person: p, eventId, figures, open }: { person: NamedPerson; eventId: number; figures: FigureOption[]; open: Open }) {
-  const hints = likelyDuplicates(p, figures);
-  const isName = p.kind === "candidate";
-  const own = figures.find((f) => f.id === p.id)?.records ?? 0;
-  // A one-word alias matches inside longer names too: "Prasetyo" would also
-  // claim coverage of Budi Prasetyo.
-  const word = p.name.trim().toLowerCase();
-  const sharedWord = isName && !word.includes(" ")
-    ? figures.filter((f) => f.name.toLowerCase().split(/\s+/).includes(word)).map((f) => f.name)
-    : [];
-  return (
-    <div style={{ flexBasis: "100%", margin: "10px 0 4px", padding: "10px 12px", borderRadius: 6, background: "var(--color-cream-dark)", border: `1px dashed ${RULE}` }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: MUTED, marginBottom: 6 }}>
-        {hints.length ? "Mungkin orang yang sama" : "Orang yang sama dengan tokoh lain?"}
-      </div>
-      {sharedWord.length > 1 ? (
-        <p style={{ fontSize: 12.5, color: "var(--color-clay)", margin: "0 0 8px", lineHeight: 1.5 }}>
-          ⚠ “{p.name}” satu kata dan ada di nama {sharedWord.join(", ")}. Sebagai alias, ia akan ikut
-          mencocokkan liputan semua tokoh itu. Lebih aman ditolak, kecuali memang hanya dipakai untuk satu orang.
-        </p>
-      ) : null}
-      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-        {hints.map(({ figure: f, why }) => (
-          <li key={f.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ flex: "1 1 260px", minWidth: 0, fontSize: 13.5 }}>
-              <strong style={{ fontFamily: "var(--font-serif)", fontSize: 15 }}>{f.name}</strong>
-              <span style={{ color: MUTED }}>{f.role ? ` · ${f.role}` : ""} · {f.records} catatan · </span>
-              <Link href={open(`tokoh:${f.id}`)} scroll={false} style={{ color: MUTED, fontSize: 12 }}>lihat ›</Link>
-              <span style={{ display: "block", fontSize: 12, color: MUTED }}>{why}</span>
-            </span>
-            <SameAction person={p} eventId={eventId} into={f.id} intoName={f.name}
-              reverse={!isName && (p.owner === true || own > f.records)} counts={[own, f.records]} />
-          </li>
-        ))}
-        {/* Anyone else on the roster: out of the way until asked for. */}
-        <li style={{ paddingTop: hints.length ? 6 : 0, borderTop: hints.length ? `1px solid ${RULE}` : "none" }}>
-          <details>
-            <summary style={{ cursor: "pointer", fontSize: 12.5, color: MUTED, fontWeight: 600 }}>
-              Tokoh lainnya…
-            </summary>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
-              <SameAction person={p} eventId={eventId} figures={figures} />
-            </div>
-          </details>
-        </li>
-      </ul>
-    </div>
-  );
-}
-
-/**
- * The one action behind every "same person" choice. Given `into`, a button
- * for that figure; given `figures`, a search field over the whole roster.
- * `reverse` folds the other figure into this one instead.
- */
-/** The second step of a destructive action: what it does, and the final button. */
-const CONFIRM_PANEL: React.CSSProperties = {
-  marginTop: 8, maxWidth: 460, background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 8,
-  padding: "12px 14px", display: "grid", gap: 10, boxShadow: "0 4px 14px rgba(22, 19, 15, 0.08)",
-};
-
-function SameAction({ person: p, eventId, into, intoName, reverse = false, figures, counts }: {
-  person: NamedPerson; eventId: number; into?: string; intoName?: string; reverse?: boolean; figures?: FigureOption[];
-  /** Records of this figure and of `into`, for saying what a merge moves. */
-  counts?: [number, number];
-}) {
-  const isName = p.kind === "candidate";
-  const search = figures ? (
-    <label style={{ ...label, flex: "1 1 260px" }}>
-      Tokoh lain (ketik nama untuk mencari)
-      <input
-        name={isName ? "alias_of" : "into_id"}
-        list={FIGURE_LIST}
-        required
-        autoComplete="off"
-        placeholder="mis. Nusron Wahid"
-        // Ids are [a-z0-9-] only, so they need no escaping in a pattern.
-        pattern={figures.filter((f) => f.id !== p.id).map((f) => f.id).join("|")}
-        title="Pilih tokoh dari daftar saran"
-        style={input}
-      />
-    </label>
-  ) : null;
-  if (isName) {
-    return (
-      <form action={decide} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", flex: figures ? "1 1 100%" : undefined }}>
-        <Hidden fields={into ? { slug: p.id, verdict: "alias", alias_of: into } : { slug: p.id, verdict: "alias" }} />
-        {search}
-        <button type="submit" style={button("ink")}>{into ? `Samakan dengan ${intoName}` : "Samakan"}</button>
-      </form>
-    );
-  }
-  // Two steps instead of a tick box: "Gabungkan…" opens what each direction
-  // would move, and the choice is the final button. The suggested direction
-  // (fewer records into more; the record's own figure stays) comes first.
-  const fields: Record<string, string | number> = into
-    ? { event_id: eventId, figure_id: p.id, into_id: into, confirm: 1 }
-    : { event_id: eventId, figure_id: p.id, confirm: 1 };
-  const other = intoName ?? "tokoh yang dipilih";
-  const [mine, theirs] = counts ?? [undefined, undefined];
-  const n = (x: number | undefined) => (x !== undefined ? ` (${x} catatan)` : "");
-  const choices = [
-    { value: "into", text: `Ya, ${p.name} ke ${other}`, detail: `Catatan ${p.name}${n(mine)} pindah ke ${other}; ${p.name} dinonaktifkan dan namanya jadi alias di sana.` },
-    { value: "here", text: `Ya, ${other} ke ${p.name}`, detail: `Catatan ${other}${n(theirs)} pindah ke ${p.name}; ${other} dinonaktifkan dan namanya jadi alias di sini.` },
-  ];
-  if (reverse) choices.reverse();
-  return (
-    <form action={mergeFigures} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", flex: figures ? "1 1 100%" : undefined }}>
-      {/* Enter in the search field submits with the form's first button. A
-          disabled one first makes Enter do nothing, so a merge only ever
-          happens through the confirmation below. */}
-      <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
-      <Hidden fields={fields} />
-      {search}
-      {/* Opens in the flow, below the button, so it is never cut off by the
-          card's edge however narrow the column. */}
-      <details style={{ flex: "1 1 100%" }}>
-        <summary style={{ ...button("danger"), listStyle: "none", display: "inline-block" }}>Gabungkan…</summary>
-        <div style={CONFIRM_PANEL}>
-          <div style={{ fontSize: 12.5, color: MUTED }}>Ke arah mana? Tidak bisa dibatalkan dari sini.</div>
-          {choices.map((c, i) => (
-            <div key={c.value} style={{ display: "grid", gap: 4 }}>
-              <button type="submit" name="direction" value={c.value} style={{ ...button(i === 0 ? "danger" : "quiet"), textAlign: "left" }}>
-                {c.text}{i === 0 ? " (disarankan)" : ""}
-              </button>
-              <span style={{ fontSize: 12, color: "var(--color-mud)", lineHeight: 1.45 }}>{c.detail}</span>
-            </div>
-          ))}
-        </div>
-      </details>
-    </form>
   );
 }
 
@@ -1316,9 +1098,6 @@ function ReworkItem({ rework: r, item, figures }: { rework: Rework; item: Item; 
     </details>
   );
 }
-
-/** The page with a side panel open: every "open" on this page stays on it. */
-type Open = (panel: string) => string;
 
 function LinkList({ item, open }: { item: Item; open: Open }) {
   if (item.links.length === 0) {
@@ -1530,41 +1309,19 @@ function AddFollowup({ item, candidates, search, open }: { item: Item; candidate
           ))}
         </ul>
       )}
-      <form method="get" action={`/kurasi/${item.event_id}#lini`} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <form method="get" action={`/kurasi/${item.event_id}`} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input type="hidden" name="panel" value="lini" />
         <input name="cari" defaultValue={search} placeholder="Cari judul, misal “Virgo”" style={{ ...input, flex: "1 1 260px" }} aria-label="Cari judul" />
         <button type="submit" style={button("quiet")}>Cari</button>
-        {search ? <Link href={`/kurasi/${item.event_id}#lini`} style={{ fontSize: 12.5, color: MUTED, alignSelf: "center" }}>Kembali ke saran</Link> : null}
+        {search ? <Link href={open("lini")} scroll={false} style={{ fontSize: 12.5, color: MUTED, alignSelf: "center" }}>Kembali ke saran</Link> : null}
       </form>
     </SubPanel>
   );
 }
 
 /** What the record shows as its owner's words, in the Isi card. */
-function ShownQuote({ item }: { item: Item }) {
-  const box = { marginTop: 14, paddingLeft: 12, borderLeft: `3px solid ${RULE}` } as const;
-  if (item.quote) {
-    const outlet = item.sources.find((s) => s.url === item.quote_url)?.source;
-    return (
-      <div style={box}>
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 3 }}>
-          Kutipan yang tampil{outlet ? ` · ${outlet}` : ""} · <a href="#kutipan" style={{ color: MUTED }}>ganti ↓</a>
-        </div>
-        <p style={{ fontFamily: "var(--font-serif)", fontSize: 15, lineHeight: 1.55, margin: 0, fontStyle: "italic" }}>“{item.quote}”</p>
-      </div>
-    );
-  }
-  return (
-    <div style={{ ...box, fontSize: 12.5, color: MUTED }}>
-      {item.quote === ""
-        ? "Tanpa kutipan: kamu memilih tidak menampilkannya."
-        : "Belum ada kutipan dari pelakunya."}{" "}
-      <a href="#kutipan" style={{ color: MUTED }}>Lihat kutipan ↓</a>
-    </div>
-  );
-}
-
-/** Beyond this many, the rest fold away. */
-const QUOTES_OPEN = 10;
+/** In the drawer, beyond this many the rest fold away. */
+const QUOTES_OPEN = 20;
 
 /** "Name · title" for a picker's starting value. */
 function figureLabel(figures: FigureOption[], id: string | null): string | null {
@@ -1572,12 +1329,47 @@ function figureLabel(figures: FigureOption[], id: string | null): string | null 
   return f ? (f.role ? `${f.name} · ${f.role}` : f.name) : null;
 }
 
-function QuoteList({ item, figures, open }: { item: Item; figures: FigureOption[]; open: Open }) {
+/**
+ * Kutipan on the page: the quote the site shows, then the actors' own words,
+ * up to QUOTES_SHOWN. Every quote, adding one and choosing none are in the drawer.
+ */
+function QuotePreview({ item, actors, figures, open }: { item: Item; actors: Actor[]; figures: FigureOption[]; open: Open }) {
+  if (item.quotes.length === 0) {
+    return (
+      <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>
+        {item.sources.some((a) => a.has_body)
+          ? "Tidak ada kalimat langsung yang jelas pembicaranya."
+          : "Belum ada artikel yang teksnya sudah diambil; kutipan muncul setelah pipeline mengambilnya."}
+      </p>
+    );
+  }
+  const actorIds = new Set(actors.map((a) => a.id));
+  const rank = (q: QuoteRow) => (item.quote && item.quote === q.quote ? 0 : q.figure_id && actorIds.has(q.figure_id) ? 1 : q.figure_id ? 2 : 3);
+  const head = [...item.quotes].sort((a, b) => rank(a) - rank(b)).slice(0, QUOTES_SHOWN);
+  return (
+    <>
+      {item.kind === "record" && !item.quote ? (
+        <p style={{ fontSize: 12.5, color: MUTED, margin: "0 0 6px" }}>
+          {item.quote === "" ? "Tanpa kutipan: kamu memilih tidak menampilkannya." : "Belum ada kutipan pelaku yang tampil di catatan."}
+        </p>
+      ) : null}
+      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        {head.map((q, i) => <QuoteItem key={q.id} quote={q} item={item} actors={actors} figures={figures} first={i === 0} open={open} />)}
+      </ul>
+      {item.quotes.length > head.length ? (
+        <div style={{ borderTop: `1px solid ${RULE}`, paddingTop: 10 }}>
+          <TextLink href={open("kutipan")} tone="muted">Semua {item.quotes.length} kutipan →</TextLink>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function QuoteList({ item, actors, figures, open }: { item: Item; actors: Actor[]; figures: FigureOption[]; open: Open }) {
   const isRecord = item.kind === "record";
   const footer = (
     <>
       {isRecord && item.figure_id ? <ShownQuoteChoice item={item} /> : null}
-      <AddQuote item={item} figures={figures} />
     </>
   );
   if (item.quotes.length === 0) {
@@ -1596,7 +1388,7 @@ function QuoteList({ item, figures, open }: { item: Item; figures: FigureOption[
   const rest = item.quotes.slice(QUOTES_OPEN);
   const list = (rows: QuoteRow[], offset: number) => (
     <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-      {rows.map((q, i) => <QuoteItem key={q.id} quote={q} item={item} figures={figures} first={offset + i === 0} open={open} />)}
+      {rows.map((q, i) => <QuoteItem key={q.id} quote={q} item={item} actors={actors} figures={figures} first={offset + i === 0} open={open} />)}
     </ul>
   );
   return (
@@ -1636,8 +1428,8 @@ function ShownQuoteChoice({ item }: { item: Item }) {
 function AddQuote({ item, figures }: { item: Item; figures: FigureOption[] }) {
   const withText = item.sources.filter((s) => s.url);
   return (
-    <details style={{ marginTop: 12 }}>
-      <summary style={{ cursor: "pointer", fontSize: 12.5, color: MUTED }}>Tambah kutipan</summary>
+    <details style={{ border: `1px solid ${RULE}`, borderRadius: 6, padding: "10px 12px", background: "var(--color-cream)" }}>
+      <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: INK }}>+ Tambah kutipan</summary>
       <form action={newQuote} style={{ display: "grid", gap: 8, marginTop: 8 }}>
         <Hidden fields={{ event_id: item.event_id }} />
         <textarea
@@ -1684,13 +1476,16 @@ function AddQuote({ item, figures }: { item: Item; figures: FigureOption[] }) {
   );
 }
 
-function QuoteItem({ quote: q, item, figures, first, open }: { quote: QuoteRow; item: Item; figures: FigureOption[]; first: boolean; open: Open }) {
+function QuoteItem({ quote: q, item, actors, figures, first, open }: { quote: QuoteRow; item: Item; actors: Actor[]; figures: FigureOption[]; first: boolean; open: Open }) {
+  // The site shows a record's quote under the figure it is filed under, with
+  // no name beside it; so only that figure's words can be the one shown.
   const own = Boolean(item.figure_id) && q.figure_id === item.figure_id;
+  const actor = actors.some((a) => a.id === q.figure_id);
   const shown = Boolean(item.quote) && item.quote === q.quote;
   const title = q.figure_id ? figures.find((f) => f.id === q.figure_id)?.role : null;
   return (
-    <li style={{ padding: "12px 0", borderTop: first ? "none" : `1px solid ${RULE}`, ...(shown ? { boxShadow: "inset 3px 0 0 var(--color-clay)", paddingLeft: 12 } : {}) }}>
-      <p style={{ fontFamily: "var(--font-serif)", fontSize: 14.5, lineHeight: 1.55, margin: 0 }}>“{q.quote}”</p>
+    <li style={{ padding: "14px 0", borderTop: first ? "none" : `1px solid ${RULE}`, ...(shown ? { borderLeft: "3px solid var(--color-clay)", paddingLeft: 14 } : {}) }}>
+      <p style={{ fontFamily: "var(--font-serif)", fontStyle: "italic", fontSize: 15, lineHeight: 1.55, margin: 0 }}>“{q.quote}”</p>
       <div style={{ fontSize: 12, color: MUTED, margin: "4px 0 8px" }}>
         — {q.speaker ?? "(tanpa nama)"}
         {q.source ? ` · ${q.source}` : ""}
@@ -1699,7 +1494,7 @@ function QuoteItem({ quote: q, item, figures, first, open }: { quote: QuoteRow; 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {q.figure_id ? (
           <Link href={open(`tokoh:${q.figure_id}`)} scroll={false} style={{ textDecoration: "none" }}>
-            <Pill tone={own ? "ink" : "neutral"} title={q.assigned_by === "curator" ? "Dipilih kurator" : "Dicocokkan otomatis dari nama pembicara"}>
+            <Pill tone={actor ? "ink" : "neutral"} title={q.assigned_by === "curator" ? "Dipilih kurator" : "Dicocokkan otomatis dari nama pembicara"}>
               {q.figure_name ?? q.figure_id}{q.assigned_by === "curator" ? " ✓" : ""}
             </Pill>
           </Link>
@@ -1710,7 +1505,7 @@ function QuoteItem({ quote: q, item, figures, first, open }: { quote: QuoteRow; 
         )}
         {q.figure_id ? (
           <span style={{ fontSize: 12, color: MUTED }}>
-            {[title, own ? "pelaku" : null, q.assigned_by === "curator" ? null : "dicocokkan otomatis"].filter(Boolean).join(" · ")}
+            {[title, actor ? "pelaku" : null, q.assigned_by === "curator" ? null : "dicocokkan otomatis"].filter(Boolean).join(" · ")}
           </span>
         ) : null}
         {shown ? <Pill tone="accept">tampil di catatan</Pill> : null}

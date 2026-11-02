@@ -1,23 +1,29 @@
+import { formatDateShort } from "@/lib/design";
+
 /** Shared look for the internal curation pages. */
 
 export const INK = "var(--color-ink)";
 export const MUTED = "var(--color-stone)";
 export const RULE = "var(--color-parchment)";
-export const ACCEPT = "#3d6b4a";
+export const ACCEPT = "var(--color-sage)";
 /** Card surface: one step lighter than the cream page, so a section reads as a block. */
 export const SURFACE = "#fffdf8";
 
 export function button(tone: "accept" | "danger" | "quiet" | "ink") {
   const bg = { accept: ACCEPT, danger: "var(--color-clay)", quiet: "transparent", ink: INK }[tone];
+  // The site's voice for controls: small tracked capitals, square corners.
   return {
-    fontSize: 12.5,
-    fontWeight: 600,
-    padding: "6px 13px",
-    borderRadius: 3,
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    padding: "8px 14px",
+    minHeight: 36,
+    borderRadius: 2,
     cursor: "pointer",
-    border: `1px solid ${tone === "quiet" ? RULE : bg}`,
+    border: `1px solid ${tone === "quiet" ? "var(--color-parchment-dark)" : bg}`,
     background: bg,
-    color: tone === "quiet" ? MUTED : "var(--color-cream)",
+    color: tone === "quiet" ? INK : "var(--color-cream)",
   } as const;
 }
 
@@ -47,6 +53,7 @@ export const sectionLabel = {
   margin: "0 0 10px",
 } as const;
 
+/** A date as the site writes one: "2 Nov 2026". */
 export function day(iso: string | null): string {
-  return iso ? iso.slice(0, 10) : "tanpa tanggal";
+  return formatDateShort(iso) || "tanpa tanggal";
 }

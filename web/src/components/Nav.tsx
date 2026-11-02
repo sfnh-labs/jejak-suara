@@ -10,6 +10,44 @@ const LINKS = [
 ];
 
 /**
+ * The wave banner alone: the logo box on the left and, on the right, the
+ * edition box or whatever `aside` puts there (the curation tools' desk).
+ */
+export function Masthead({ aside }: { aside?: React.ReactNode }) {
+  const edition = editionParts();
+  return (
+    <header className="masthead waves">
+      <Link href="/" className="masthead-logo box-stamp" aria-label="Jejak Suara — Beranda">
+        <span className="masthead-mark" aria-hidden>
+          <LogoMark height={76} tier="L" color="var(--color-cream)" />
+        </span>
+        <span className="masthead-words">
+          <span className="masthead-eyebrow">Portal Rekam Jejak Tokoh Publik</span>
+          <span className="masthead-word">Jejak Suara</span>
+        </span>
+        {/* Phones: the sheet's horizontal lockup in place of the red block. */}
+        <span className="masthead-compact">
+          <Logo fontSize={30.6} />
+        </span>
+      </Link>
+      {aside ?? (
+        <div className="masthead-edition box-stamp" aria-label={`Edisi ${edition.weekday}, ${edition.month}`}>
+          <span className="masthead-edition-day">Edisi {edition.weekday}</span>
+          <span className="masthead-edition-stamp">{edition.stamp}</span>
+          <span className="masthead-edition-month">{edition.month}</span>
+        </div>
+      )}
+    </header>
+  );
+}
+
+export interface Crumb {
+  label: string;
+  /** Omitted for the current page, the last crumb. */
+  href?: string;
+}
+
+/**
  * The masthead and the nav strip under it, on every page.
  *
  * The masthead is the wave banner with the logo box on the left and the
@@ -17,12 +55,6 @@ const LINKS = [
  * line up with the page below. It scrolls away; the strip sticks, so the links
  * stay in reach. The strip's active underline sits on its own bottom rule.
  */
-export interface Crumb {
-  label: string;
-  /** Omitted for the current page, the last crumb. */
-  href?: string;
-}
-
 export default function Nav({
   active,
   stats,
@@ -33,29 +65,9 @@ export default function Nav({
   /** The page's breadcrumb, in the strip's right side where the home page has its counts. */
   crumbs?: Crumb[];
 }) {
-  const edition = editionParts();
   return (
     <>
-      <header className="masthead waves">
-        <Link href="/" className="masthead-logo box-stamp" aria-label="Jejak Suara — Beranda">
-          <span className="masthead-mark" aria-hidden>
-            <LogoMark height={76} tier="L" color="var(--color-cream)" />
-          </span>
-          <span className="masthead-words">
-            <span className="masthead-eyebrow">Portal Rekam Jejak Tokoh Publik</span>
-            <span className="masthead-word">Jejak Suara</span>
-          </span>
-          {/* Phones: the sheet's horizontal lockup in place of the red block. */}
-          <span className="masthead-compact">
-            <Logo fontSize={30.6} />
-          </span>
-        </Link>
-        <div className="masthead-edition box-stamp" aria-label={`Edisi ${edition.weekday}, ${edition.month}`}>
-          <span className="masthead-edition-day">Edisi {edition.weekday}</span>
-          <span className="masthead-edition-stamp">{edition.stamp}</span>
-          <span className="masthead-edition-month">{edition.month}</span>
-        </div>
-      </header>
+      <Masthead />
 
       <div className="nav-strip">
         <div className="nav-strip-inner">

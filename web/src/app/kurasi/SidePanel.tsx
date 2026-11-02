@@ -3,7 +3,7 @@ import type { LinkVerdict } from "@/lib/curation";
 import { positionTitle } from "@/lib/curation";
 import { eventPanel, type EventPeek, type FigurePeek, type PeekEvent } from "@/lib/panels";
 import { ruleFollowup, ruleLink } from "./actions";
-import { ACCEPT, INK, MUTED, RULE, SURFACE, button, day } from "./ui";
+import { ACCEPT, INK, MUTED, RULE, button, day } from "./ui";
 
 /**
  * How the event in the panel stands to the one being curated: a peristiwa
@@ -15,53 +15,30 @@ export type Relation =
   | { kind: "lini"; pair: { earlier_id: number; later_id: number }; verdict: LinkVerdict | null };
 
 /**
- * The side panel of the record page: another event or a figure, read where
- * the curator already is. Wide, it sits in the reading column; narrow, it
- * covers the page as a sheet. Every link inside opens the next panel in its
- * place, and "Buka untuk dikurasi" is the one way out to another page.
+ * What the record page's drawer shows when it reads another event or a
+ * figure: enough to judge a link or a name without leaving. Every link inside
+ * opens the next one in its place; "Buka untuk dikurasi" is the one way out.
  */
-export function SidePanel({ title, closeHref, children }: { title: string; closeHref: string; children: React.ReactNode }) {
-  return (
-    <article style={{ background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 6, padding: "16px 20px 22px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", marginBottom: 10 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: MUTED }}>{title}</span>
-        <Link href={closeHref} scroll={false} style={{ fontSize: 12.5, color: MUTED }}>Tutup ✕</Link>
-      </div>
-      {children}
-    </article>
-  );
-}
 
-export function MissingPanel({ closeHref }: { closeHref: string }) {
-  return (
-    <SidePanel title="Panel" closeHref={closeHref}>
-      <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Tidak ditemukan. Mungkin sudah digabung atau dihapus.</p>
-    </SidePanel>
-  );
-}
-
-const heading = { fontFamily: "var(--font-serif)", fontWeight: 600, fontSize: 21, lineHeight: 1.3, margin: "0 0 8px", color: INK } as const;
 const sub = { fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: MUTED, margin: "18px 0 6px" } as const;
 
-export function EventPanel({ peek: e, open, closeHref, relation, here }: {
+export function EventPanel({ peek: e, open, relation, here }: {
   peek: EventPeek;
   /** The page with another panel in this one's place. */
   open: (panel: string) => string;
-  closeHref: string;
   relation: Relation | null;
   /** The event being curated: marked in the lists, never opened from them. */
   here: number;
 }) {
   const isRecord = e.kind === "record";
   return (
-    <SidePanel title={`${isRecord ? "Catatan" : "Peristiwa"} #${e.event_id}`} closeHref={closeHref}>
+    <>
       <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 4 }}>
         {day(e.event_date)}
         {e.last_seen && day(e.last_seen) !== day(e.event_date) ? ` – ${day(e.last_seen)}` : ""}
         {" · "}{e.sources.length} artikel
         {e.curated === "rejected" ? <span style={{ color: "var(--color-clay)" }}> · diturunkan</span> : null}
       </div>
-      <h2 style={heading}>{e.title ?? "(tanpa judul)"}</h2>
       {isRecord && e.figure ? (
         <div style={{ fontSize: 13, color: "var(--color-mud)", marginBottom: 8 }}>
           Pelaku:{" "}
@@ -116,7 +93,7 @@ export function EventPanel({ peek: e, open, closeHref, relation, here }: {
           <Link href={`/tokoh/${e.figure.id}/${e.event_id}`} target="_blank" style={{ color: MUTED }}>Lihat di situs ↗</Link>
         ) : null}
       </div>
-    </SidePanel>
+    </>
   );
 }
 
@@ -186,18 +163,14 @@ function EventList({ rows, kind, open, here }: { rows: PeekEvent[]; kind: "recor
   );
 }
 
-export function FigurePanel({ peek: f, open, closeHref, onPage, here }: {
+export function FigurePanel({ peek: f, open, here }: {
   peek: FigurePeek;
   open: (panel: string) => string;
-  closeHref: string;
-  /** Where this figure is edited on the current page, if it is named there. */
-  onPage: string | null;
   here: number;
 }) {
   const title = f.positions.length ? f.positions.map(positionTitle).filter(Boolean)[0] : f.role;
   return (
-    <SidePanel title="Tokoh" closeHref={closeHref}>
-      <h2 style={heading}>{f.name}</h2>
+    <>
       {title ? <div style={{ fontSize: 13.5, color: "var(--color-mud)", marginBottom: 4 }}>{title}</div> : null}
       <div style={{ fontSize: 12, color: MUTED }}>
         <code>/tokoh/{f.id}</code> · {f.records} catatan · {f.quotes} kutipan
@@ -244,9 +217,9 @@ export function FigurePanel({ peek: f, open, closeHref, onPage, here }: {
       ) : null}
 
       <div style={{ marginTop: 18, paddingTop: 12, borderTop: `1px solid ${RULE}`, display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12.5 }}>
-        {onPage ? <a href={onPage} style={{ color: INK, fontWeight: 600 }}>Sunting di halaman ini ↓</a> : null}
+        <Link href={`/kurasi/tokoh/${f.id}`} style={{ color: INK, fontWeight: 600 }}>Halaman tokoh →</Link>
         <Link href={`/tokoh/${f.id}`} target="_blank" style={{ color: MUTED }}>Lihat di situs ↗</Link>
       </div>
-    </SidePanel>
+    </>
   );
 }

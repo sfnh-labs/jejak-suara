@@ -298,7 +298,13 @@ export async function setAutoKind(kind: PointKind, on: boolean): Promise<void> {
 /** What an answer changed, so it can be put back. */
 type Undo =
   | { kind: "pair"; table: "record_links" | "followup_links"; pairs: { a: number; b: number; prev: LinkVerdict | null }[] }
-  | { kind: "pelaku"; prev: { role: string; source: string; quotes: number; assigned_by: string } | null; review: string | null }
+  | {
+      kind: "pelaku";
+      /** The figure whose row changed, when a correction made someone else the actor. */
+      figure?: string;
+      prev: { role: string; source: string; quotes: number; assigned_by: string } | null;
+      review: string | null;
+    }
   | {
       kind: "quotes";
       ids: number[];
@@ -328,10 +334,22 @@ async function setPair(table: "record_links" | "followup_links", a: number, b: n
   else await setFollowupVerdict(a, b, v);
 }
 
+/** Two events as a follow-up pair: the earlier first, the lower id on a tie. */
+async function inDateOrder(a: number, b: number): Promise<[number, number]> {
+  const rows = await query<{ id: number; event_date: string | null }>(`SELECT id, event_date FROM events WHERE id IN (?, ?)`, [a, b]);
+  const da = rows.find((r) => r.id === a)?.event_date ?? "";
+  const db = rows.find((r) => r.id === b)?.event_date ?? "";
+  return da < db || (da === db && a < b) ? [a, b] : [b, a];
+}
+
+/** "Koreksi" on a pembicara point with no tracked figure: the speaker is no one we follow. */
+export const NOT_TRACKED = "-";
+
 /**
- * Answer a point. `correction` is a figure id, for "koreksi" on pembicara —
- * the only kind corrected here; peristiwa and lini are corrected in their own
- * sections of the page, after a "Bukan".
+ * Answer a point. "koreksi" says what is right instead, and `correction`
+ * names it: for pembicara the speaker's figure id (or NOT_TRACKED); for
+ * pelaku the figure who acts instead; for peristiwa the peristiwa id the
+ * record belongs to; for lini the event id it continues or is continued by.
  */
 export async function answerPoint(pointId: number, answer: PointAnswer, correction: string | null): Promise<number> {
   const p = await queryOne<{ id: number; kind: PointKind; event_id: number; status: string; proposal: string }>(
@@ -340,10 +358,24 @@ export async function answerPoint(pointId: number, answer: PointAnswer, correcti
   if (!p) throw new Error(`unknown point: ${pointId}`);
   if (p.status !== "open" && p.status !== "lewati") throw new Error("point already answered");
   const prop = JSON.parse(p.proposal) as Proposal;
-  if (answer === "koreksi" && p.kind !== "pembicara") throw new Error("only a speaker is corrected here");
   let label: string | null = null;
-  if (answer === "koreksi") {
-    const fig = correction ? await queryOne<{ name: string }>(`SELECT name FROM figures WHERE id = ?`, [correction]) : null;
+  if (answer === "koreksi" && (p.kind === "peristiwa" || p.kind === "lini")) {
+    const target = Number(correction);
+    const proposed = p.kind === "peristiwa" ? prop.peristiwa_id : prop.earlier_id === p.event_id ? prop.later_id : prop.earlier_id;
+    if (!Number.isInteger(target) || target <= 0 || target === p.event_id || target === proposed) throw new Error("choose another event");
+    const here = await queryOne<{ kind: string }>(`SELECT kind FROM events WHERE id = ?`, [p.event_id]);
+    const ev = await queryOne<{ kind: string; title: string | null }>(`SELECT kind, title FROM events WHERE id = ?`, [target]);
+    if (!ev || ev.kind !== (p.kind === "peristiwa" ? "peristiwa" : here?.kind)) throw new Error("choose another event");
+    label = ev.title ?? `#${target}`;
+  } else if (answer === "koreksi" && p.kind === "pelaku") {
+    const fig = correction ? await queryOne<{ name: string }>(`SELECT name FROM figures WHERE id = ? AND active = 1`, [correction]) : null;
+    if (!fig || correction === prop.figure_id) throw new Error("choose another figure");
+    label = fig.name;
+  } else if (answer === "koreksi" && correction === NOT_TRACKED) {
+    if (!prop.figure_id) throw new Error("the pipeline already says no tracked figure; answer Ya");
+    label = "bukan tokoh yang dilacak";
+  } else if (answer === "koreksi") {
+    const fig = correction ? await queryOne<{ name: string }>(`SELECT name FROM figures WHERE id = ? AND active = 1`, [correction]) : null;
     if (!fig) throw new Error("choose a figure");
     label = fig.name;
   }
@@ -370,9 +402,36 @@ async function apply(
   if (kind === "peristiwa" || kind === "lini") {
     const table = kind === "peristiwa" ? "record_links" : "followup_links";
     const [a, b] = kind === "peristiwa" ? [eventId, prop.peristiwa_id!] : [prop.earlier_id!, prop.later_id!];
-    const prev = await pairVerdict(table, a, b);
+    const pairs = [{ a, b, prev: await pairVerdict(table, a, b) }];
     await setPair(table, a, b, answer === "ya" ? "confirmed" : "rejected");
-    return { kind: "pair", table, pairs: [{ a, b, prev }] };
+    if (answer === "koreksi") {
+      // The right one instead: this record in that peristiwa, or this event
+      // and that one in date order.
+      const target = Number(correction);
+      const [c, d] = kind === "peristiwa" ? [eventId, target] : await inDateOrder(eventId, target);
+      pairs.push({ a: c, b: d, prev: await pairVerdict(table, c, d) });
+      await setPair(table, c, d, "confirmed");
+    }
+    return { kind: "pair", table, pairs };
+  }
+
+  if (kind === "pelaku" && answer === "koreksi") {
+    // Not this figure but another: the proposed one stays under Disebut, the
+    // one named instead becomes an actor beside the owner.
+    const fig = correction!;
+    const prev = await queryOne<{ role: string; source: string; quotes: number; assigned_by: string }>(
+      `SELECT role, source, quotes, assigned_by FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, fig]
+    );
+    const review = await queryOne<{ decision: string | null }>(`SELECT decision FROM actor_reviews WHERE event_id = ?`, [eventId]);
+    await lrun(
+      `INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
+       VALUES (?, ?, 'actor', 'curator', 0, 'curator')
+       ON CONFLICT (event_id, figure_id) DO UPDATE SET role = 'actor', source = 'curator', assigned_by = 'curator'`,
+      [eventId, fig]
+    );
+    await lrun(`UPDATE actor_reviews SET decision = 'keep', decided_at = ? WHERE event_id = ? AND suggested_id = ?`,
+               [new Date().toISOString(), eventId, prop.figure_id]);
+    return { kind: "pelaku", figure: fig, prev, review: review?.decision ?? null };
   }
 
   if (kind === "pelaku") {
@@ -404,7 +463,7 @@ async function apply(
       WHERE id IN (SELECT value FROM json_each(?)) AND figure_id IS NULL AND coalesce(assigned_by, 'auto') = 'auto'`,
     [ids]
   );
-  const target = answer === "koreksi" ? correction : answer === "ya" ? prop.figure_id ?? null : undefined;
+  const target = answer === "koreksi" ? (correction === NOT_TRACKED ? null : correction) : answer === "ya" ? prop.figure_id ?? null : undefined;
   // "Bukan" to a figure leaves the quotes waiting; "Bukan" to "not tracked" is
   // a "this is someone", which only a correction can say.
   if (target === undefined) return { kind: "none" };
@@ -483,7 +542,7 @@ async function revert(eventId: number, prop: Proposal, undo: Undo): Promise<void
   if (undo.kind === "pair") {
     for (const x of undo.pairs) await setPair(undo.table, x.a, x.b, x.prev);
   } else if (undo.kind === "pelaku") {
-    const fig = prop.figure_id!;
+    const fig = undo.figure ?? prop.figure_id!;
     if (undo.prev) {
       await lrun(`UPDATE record_figures SET role = ?, source = ?, quotes = ?, assigned_by = ? WHERE event_id = ? AND figure_id = ?`,
                  [undo.prev.role, undo.prev.source, undo.prev.quotes, undo.prev.assigned_by, eventId, fig]);
@@ -491,7 +550,7 @@ async function revert(eventId: number, prop: Proposal, undo: Undo): Promise<void
       await lrun(`DELETE FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, fig]);
     }
     await lrun(`UPDATE actor_reviews SET decision = ?, decided_at = NULL WHERE event_id = ? AND suggested_id = ?`,
-               [undo.review, eventId, fig]);
+               [undo.review, eventId, prop.figure_id]);
   } else if (undo.kind === "quotes") {
     for (let i = 0; i < undo.ids.length; i++) {
       await lrun(`UPDATE event_quotes SET figure_id = ?, assigned_by = ? WHERE id = ?`,

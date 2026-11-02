@@ -152,22 +152,24 @@ function Paragraph({ text, terms, focus }: { text: string; terms: ReaderTerm[]; 
  * it needs no client script — /kurasi keeps working when an Access session
  * has lapsed.
  */
-export function ArticleReader({ article, terms, closeHref, focus }: {
+export function ArticleReader({ article, terms, closeHref, focus, bare = false }: {
   article: ReadingArticle;
   terms: ReaderTerm[];
   closeHref: string;
   focus?: ReaderFocus;
+  /** Inside a drawer, which brings its own frame and ✕. */
+  bare?: boolean;
 }) {
   const kinds = [...new Set(terms.map((t) => t.kind))];
   return (
-    <article style={{ background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 6, padding: "18px 22px 24px" }}>
+    <article style={bare ? undefined : { background: SURFACE, border: `1px solid ${RULE}`, borderRadius: 6, padding: "18px 22px 24px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap", marginBottom: 8 }}>
         <span style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, letterSpacing: "0.04em" }}>
           {article.source} · {day(article.published_at)}
         </span>
         <span style={{ display: "flex", gap: 14, fontSize: 12.5 }}>
           <a href={article.url} target="_blank" rel="noreferrer" style={{ color: MUTED }}>Buka di situs asli ↗</a>
-          <Link href={closeHref} scroll={false} style={{ color: MUTED }}>Tutup ✕</Link>
+          {bare ? null : <Link href={closeHref} scroll={false} style={{ color: MUTED }}>Tutup ✕</Link>}
         </span>
       </div>
       <h2 style={{ fontFamily: "var(--font-serif)", fontWeight: 600, fontSize: 21, lineHeight: 1.3, margin: "0 0 10px" }}>
