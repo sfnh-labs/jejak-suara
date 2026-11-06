@@ -14,7 +14,8 @@
  *   npm run telegram-bot      (from web/, with web/.env.local holding
  *                              JEJAK_DB, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
  */
-import { lquery, lqueryOne, lrun, pipelineOp } from "@/lib/localDb";
+import { existsSync } from "node:fs";
+import { localDbPath, lquery, lqueryOne, lrun, pipelineOp } from "@/lib/localDb";
 import { getFigureOptions, getFollowupCandidates, getItem, type FigureOption } from "@/lib/curation";
 import {
   answerPoint,
@@ -37,6 +38,14 @@ const BATCH = Math.max(1, Number(process.env.TELEGRAM_BATCH ?? 1) || 1);
 const KURASI_URL = (process.env.KURASI_URL ?? "").replace(/\/$/, "");
 const STATE_KEY = "telegram_bot";
 const POLL_SECONDS = 50;
+
+// SQLite makes an empty file where JEJAK_DB points if there is none, so a
+// start from the wrong folder would answer into nothing: refuse instead.
+const DB_FILE = localDbPath();
+if (!DB_FILE || !existsSync(DB_FILE)) {
+  console.error(`JEJAK_DB must name jejak.db (got ${DB_FILE ?? "nothing"}); run from web/ with web/.env.local.`);
+  process.exit(1);
+}
 
 if (!TOKEN) {
   console.error("Set TELEGRAM_BOT_TOKEN in web/.env.local: the token @BotFather gave for the bot.");
