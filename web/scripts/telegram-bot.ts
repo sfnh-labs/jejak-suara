@@ -235,6 +235,8 @@ function cardKeyboard(p: Point): Keyboard {
     { text: "Lewati", callback_data: a("lewati") },
   ];
   if (p.paragraph && (p.hl_start !== null || p.paragraph.length > CONTEXT * 2)) last.push({ text: "📄", callback_data: `x:${p.id}` });
+  // The article on its outlet's site, in Telegram's own browser.
+  if (p.article_url && /^https?:\/\//.test(p.article_url)) rows.push([{ text: `📰 Baca berita${p.source ? ` · ${clip(p.source, 30)}` : ""}`, url: p.article_url }]);
   if (KURASI_URL) last.push({ text: "Buka di /kurasi", url: `${KURASI_URL}/kurasi/${p.event_id}` });
   rows.push(last);
   return rows;

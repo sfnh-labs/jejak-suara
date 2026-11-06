@@ -66,6 +66,8 @@ export interface Point {
   article_id: string | null;
   /** Outlet and date of the evidence article. */
   source: string | null;
+  /** The evidence article on its outlet's site. */
+  article_url: string | null;
   published_at: string | null;
   paragraph: string | null;
   hl_start: number | null;
@@ -162,7 +164,7 @@ function toPoint(r: Row, cal: Map<string, Confidence>): Point {
 }
 
 const POINT_SELECT = `SELECT p.id, p.kind, p.event_id, p.group_size, p.proposal, p.article_id,
-            a.source, a.published_at, p.paragraph, p.hl_start, p.hl_end, p.score, p.bucket,
+            a.source, a.url AS article_url, a.published_at, p.paragraph, p.hl_start, p.hl_end, p.score, p.bucket,
             p.status, p.answer, p.answered_by, p.answered_at, p.spot_check
        FROM curation_points p
        LEFT JOIN articles a ON a.id = p.article_id`;
