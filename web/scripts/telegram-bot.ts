@@ -104,6 +104,8 @@ interface State {
   prompts: Record<string, number>;
   /** A new figure a pembicara card offers to create, from the typed reply. */
   newFig: Record<string, { name: string; role: string }>;
+  /** Messages sent alongside a card (📄 paragraphs), deleted once it is answered. */
+  extras: Record<string, number[]>;
 }
 
 async function loadState(): Promise<State> {
@@ -117,9 +119,10 @@ async function loadState(): Promise<State> {
       picks: s.picks && typeof s.picks === "object" ? s.picks : {},
       prompts: s.prompts && typeof s.prompts === "object" ? s.prompts : {},
       newFig: s.newFig && typeof s.newFig === "object" ? s.newFig : {},
+      extras: s.extras && typeof s.extras === "object" ? s.extras : {},
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {} };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {} };
   }
 }
 
@@ -267,13 +270,13 @@ async function topUp(s: State): Promise<void> {
   for (const [id, msg] of Object.entries(s.sent)) {
     const p = await getPoint(Number(id));
     if (p && p.status === "open") continue;
-    forget(s, Number(id));
+    await forget(s, Number(id));
     await edit(msg, p ? `${await answeredText(p)}\n<i>dijawab di /kurasi</i>` : "<i>Poin ini sudah tidak ada.</i>");
   }
   // More open cards than BATCH (it was lowered): take the extra ones back out of the chat.
   for (const id of Object.keys(s.sent).sort((a, b) => s.sent[b] - s.sent[a]).slice(0, Math.max(0, Object.keys(s.sent).length - BATCH))) {
     await drop(s.sent[id]);
-    forget(s, Number(id));
+    await forget(s, Number(id));
   }
   while (Object.keys(s.sent).length < BATCH) {
     const p = await nextPoint(s);
@@ -448,7 +451,10 @@ async function onReply(s: State, replyTo: number, text: string, own: number): Pr
   return true;
 }
 
-function forget(s: State, pointId: number): void {
+/** A card is done: drop what it kept, and take its extra messages (📄 paragraphs) out of the chat. */
+async function forget(s: State, pointId: number): Promise<void> {
+  for (const m of s.extras[pointId] ?? []) await drop(m);
+  delete s.extras[pointId];
   delete s.sent[pointId];
   delete s.picks[pointId];
   delete s.newFig[pointId];
@@ -475,7 +481,7 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
     const answer = async (a: PointAnswer, correction: string | null) => {
       if (!open) throw new Error("Sudah dijawab.");
       await answerPoint(p.id, a, correction);
-      forget(s, p.id);
+      await forget(s, p.id);
       const done = (await getPoint(p.id))!;
       await edit(msg.message_id, await answeredText(done), [[{ text: "Batalkan", callback_data: `u:${p.id}` }]]);
       note = "Tersimpan";
@@ -510,16 +516,18 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
       delete s.picks[p.id];
       await edit(msg.message_id, await cardText(p), cardKeyboard(p));
     } else if (kind === "x") {
-      await send(`<b>Paragraf lengkap</b>${p.source ? ` · ${esc(p.source)}` : ""}\n\n${esc(p.paragraph ?? "")}`, undefined, {
+      const extra = await send(`<b>Paragraf lengkap</b>${p.source ? ` · ${esc(p.source)}` : ""}\n\n${esc(p.paragraph ?? "")}`, undefined, {
         reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true },
       });
+      // Only while the card waits: on an answered one there is nothing to clear it later.
+      if (open) (s.extras[p.id] ??= []).push(extra);
     }
   } catch (e) {
     note = e instanceof Error ? e.message : String(e);
     // Show the card as it now stands, so a stale one doesn't stay tappable.
     const p = Number.isInteger(id) ? await getPoint(id).catch(() => null) : null;
     if (msg && p && p.status !== "open") {
-      forget(s, p.id);
+      await forget(s, p.id);
       const undoable = p.answered_by === "curator" && ["ya", "bukan", "koreksi", "lewati"].includes(p.status);
       await edit(msg.message_id, await answeredText(p), undoable ? [[{ text: "Batalkan", callback_data: `u:${p.id}` }]] : []).catch(() => {});
     }
