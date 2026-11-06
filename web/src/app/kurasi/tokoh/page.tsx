@@ -2,7 +2,7 @@ import Link from "next/link";
 import FigurePortrait from "@/components/FigurePortrait";
 import WeekStrip from "@/components/WeekStrip";
 import { getFigureList, getFigureWeeksLocal } from "@/lib/kurasiLists";
-import { positionTitle } from "@/lib/curation";
+import { figureTitle } from "@/lib/curation";
 import { daysAgoLabel } from "@/lib/design";
 import { GROUPS, groupLabel, groupOf, isGroupId } from "@/lib/groups";
 import { ChipNav, Page, PageHead, SearchBox } from "../kit";
@@ -71,7 +71,7 @@ export default async function TokohList({ searchParams }: { searchParams: Promis
           <ol className="dir-list">
             {rows.map(({ f, group: g, weeks: w }, i) => {
               const thisWeek = w[WEEKS - 1] > 0;
-              const title = f.positions[0] ? positionTitle(f.positions[0]) : f.role;
+              const title = figureTitle(f);
               return (
                 <li key={f.id} className="dir-row" data-week={thisWeek ? "" : undefined}>
                   <span className="dir-rank">{String(i + 1).padStart(2, "0")}</span>

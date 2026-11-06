@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { likelyDuplicates, positionTitle, type FigureOption, type FigureRef, type NamedPerson, type Organization, type Position, type Profile } from "@/lib/curation";
+import { likelyDuplicates, positionLine, type FigureOption, type FigureRef, type NamedPerson, type Organization, type Position, type Profile } from "@/lib/curation";
 import { decide } from "./kandidat/actions";
 import { AcceptCandidateForm } from "./AcceptCandidateForm";
 import { editFigure, mergeFigures, notAPerson } from "./actions";
@@ -71,7 +71,7 @@ export function FigureHeading({ figure }: { figure: FigureRef | NamedPerson }) {
       <span style={{ fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 600, color: INK }}>{figure.name}</span>
       {figure.positions.length > 0 ? (
         <span style={{ fontSize: 13, color: "var(--color-mud)" }}>
-          {figure.positions.map((p) => positionTitle(p) + (p.period ? ` (${p.period})` : "")).join(" · ")}
+          {figure.positions.map((p) => positionLine(p) + (p.period ? ` (${p.period})` : "")).join(" · ")}
         </span>
       ) : figure.role ? (
         <span style={{ fontSize: 13, color: "var(--color-mud)" }}>{figure.role}</span>
@@ -283,12 +283,12 @@ export function FigureOptions({ figures }: { figures: FigureOption[] }) {
         <option
           key={f.id}
           value={f.id}
-          label={`${f.name}${f.role ? ` · ${f.role}` : ""}`}
+          label={`${f.name}${f.title ? ` – ${f.title}` : ""}`}
           data-name={f.name}
-          data-role={f.role ?? ""}
+          data-title={f.title}
           data-aliases={f.aliases.join("|")}
         >
-          {f.name}{f.role ? ` · ${f.role}` : ""}
+          {f.name}{f.title ? ` – ${f.title}` : ""}
         </option>
       ))}
     </datalist>
@@ -368,7 +368,7 @@ export function SamePerson({ person: p, eventId, figures, open }: { person: Name
           <li key={f.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ flex: "1 1 260px", minWidth: 0, fontSize: 13.5 }}>
               <strong style={{ fontFamily: "var(--font-serif)", fontSize: 15 }}>{f.name}</strong>
-              <span style={{ color: MUTED }}>{f.role ? ` · ${f.role}` : ""} · {f.records} catatan · </span>
+              <span style={{ color: MUTED }}>{f.title ? ` – ${f.title}` : ""} · {f.records} catatan · </span>
               <Link href={open(`tokoh:${f.id}`)} scroll={false} style={{ color: MUTED, fontSize: 12 }}>lihat ›</Link>
               <span style={{ display: "block", fontSize: 12, color: MUTED }}>{why}</span>
             </span>

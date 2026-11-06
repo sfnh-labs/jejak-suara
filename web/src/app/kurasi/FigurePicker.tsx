@@ -4,7 +4,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { setQuoteSpeaker } from "./actions";
 import { MUTED, RULE, SURFACE, button, input } from "./ui";
 
-type Choice = { id: string; name: string; role: string; aliases: string[] };
+/** `title`: the main office, role – organisation, as the roster carries it. */
+type Choice = { id: string; name: string; title: string; aliases: string[] };
 
 /**
  * The roster is already on the page once, as the <datalist> the merge fields
@@ -17,7 +18,7 @@ function roster(listId: string): Choice[] {
   return [...list.querySelectorAll("option")].map((o) => ({
     id: o.value,
     name: o.dataset.name ?? o.value,
-    role: o.dataset.role ?? "",
+    title: o.dataset.title ?? "",
     aliases: (o.dataset.aliases ?? "").split("|").filter(Boolean),
   }));
 }
@@ -33,7 +34,7 @@ function search(all: Choice[], q: string, limit = 12): Choice[] {
   const hits: { c: Choice; score: number }[] = [];
   for (const c of all) {
     const name = fold(c.name);
-    const hay = `${name} ${fold(c.aliases.join(" "))} ${fold(c.role)} ${c.id}`;
+    const hay = `${name} ${fold(c.aliases.join(" "))} ${fold(c.title)} ${c.id}`;
     if (!words.every((w) => hay.includes(w))) continue;
     // Names that start with what was typed come first, then any name match,
     // then matches only in the office.
@@ -85,7 +86,7 @@ export function FigurePicker({
     if (!all) setAll(roster(listId));
   };
   const choose = (c: Choice) => {
-    setPicked({ id: c.id, label: c.role ? `${c.name} · ${c.role}` : c.name });
+    setPicked({ id: c.id, label: c.title ? `${c.name} – ${c.title}` : c.name });
     setQ("");
     setOpen(false);
   };
@@ -198,7 +199,7 @@ export function FigurePicker({
               >
                 <div style={{ fontSize: 13 }}>{c.name}</div>
                 <div style={{ fontSize: 11.5, color: MUTED }}>
-                  {c.role || "tanpa jabatan"} · {c.id}
+                  {c.title || "tanpa jabatan"} · {c.id}
                 </div>
               </li>
             ))

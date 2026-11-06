@@ -198,17 +198,24 @@ async function cardText(p: Point): Promise<string> {
     lines.push("<i>Paragrafnya tidak ditemukan di teks artikel.</i>");
   }
   lines.push("");
+  // Every tracked figure named on a card as Name – Role – Organisation, as /kurasi names them.
+  const roster = figureKind(p) ? new Map((await getFigureOptions()).map((f) => [f.id, f])) : new Map<string, FigureOption>();
+  const who = (id: string, fallback: string) => {
+    const f = roster.get(id);
+    return f ? `<b>${esc(f.name)}</b>${f.title ? ` – ${esc(f.title)}` : ""}` : `<b>${esc(fallback)}</b>`;
+  };
   if (p.kind === "pembicara") {
-    const guess = x.figure_id ? x.name ?? x.figure_id : null;
     lines.push(`<b>Siapa “${esc(x.speaker ?? "")}” di sini?</b>`);
-    lines.push(`Tebakan pipeline: ${guess ? `<b>${esc(guess)}</b>` : "bukan tokoh yang dilacak"}.`);
+    lines.push(`Tebakan pipeline: ${x.figure_id ? who(x.figure_id, x.name ?? x.figure_id) : "bukan tokoh yang dilacak"}.`);
+    const alt = others(p);
+    if (alt.length) lines.push(`Kandidat lain: ${alt.map((c) => who(c.id, c.name)).join("; ")}.`);
     if (p.group_size > 1) lines.push(`Jawabanmu berlaku untuk ${p.group_size} kutipan sekaligus.`);
   } else {
     lines.push(`<b>${esc(x.claim)}</b>`);
+    if (p.kind === "pelaku" && x.figure_id) lines.push(`Tokoh: ${who(x.figure_id, x.name ?? x.figure_id)}`);
     lines.push(`<b>Jika Ya:</b> ${esc(p.effect)}`);
     lines.push(`<b>Jika Bukan:</b> ${esc(noEffect(p))}`);
   }
-  lines.push("", `<i>Koreksi lain (peristiwa/tokoh lain): Lewati, lalu buka catatan #${p.event_id} di /kurasi.</i>`);
   return lines.join("\n");
 }
 
@@ -358,7 +365,7 @@ function findFigures(all: FigureOption[], q: string, skip: string | null | undef
     if (new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(name)) return 70;
     if (name.includes(t)) return 60;
     if (aliases.some((a) => a.includes(t))) return 50;
-    if (fold(f.role ?? "").includes(t)) return 20;
+    if (fold(`${f.title} ${f.role ?? ""}`).includes(t)) return 20;
     return 0;
   };
   return all
@@ -401,7 +408,7 @@ async function showFigures(s: State, p: Point, msgId: number, typed: string): Pr
   const role = rest.join(",").trim().slice(0, 300);
   const found = findFigures(await getFigureOptions(), name, p.kind === "pelaku" ? p.proposal.figure_id : null);
   s.picks[p.id] = found.map((f) => f.id);
-  const rows: Keyboard = found.map((f, i) => [{ text: clip(`${f.name}${f.role ? ` · ${f.role}` : ""}`, 60), callback_data: `p:${p.id}:${i}` }]);
+  const rows: Keyboard = found.map((f, i) => [{ text: clip(`${f.name}${f.title ? ` – ${f.title}` : ""}`, 64), callback_data: `p:${p.id}:${i}` }]);
   if (p.kind === "pembicara" && name.length >= 3) {
     s.newFig[p.id] = { name, role };
     rows.push([{ text: clip(`➕ Tokoh baru: ${name}${role ? ` (${role})` : ""}`, 60), callback_data: `n:${p.id}` }]);

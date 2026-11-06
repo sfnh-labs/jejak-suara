@@ -264,14 +264,14 @@ function SpeakerChoice({ point: p, figures, listId, open }: { point: Point; figu
   const n = p.group_size;
   const quotes = `${n} kutipan “${x.speaker}”`;
   const later = `, begitu juga “${x.speaker}” berikutnya${x.scope ? " di catatan sejenis" : ""}`;
-  const roleOf = (id: string) => figures.find((f) => f.id === id)?.role ?? null;
+  const roleOf = (id: string) => figures.find((f) => f.id === id)?.title || null;
   const guess = x.figure_id ? { id: x.figure_id, name: x.name ?? x.figure_id, role: roleOf(x.figure_id) } : null;
   // The likeliest few that also fit; anyone else is a search away, below them.
   const others = (x.candidates ?? []).filter((c) => c.id !== x.figure_id).slice(0, 3).map((c) => ({ ...c, role: roleOf(c.id) }));
   const row = { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "4px 12px", alignItems: "center", padding: "11px 0", borderTop: `1px solid ${RULE}` } as const;
   const who = (name: string, role: string | null) => (
     <span style={{ fontSize: 14, fontWeight: 700, color: INK }}>
-      {name}{role ? <span style={{ fontWeight: 400, color: MUTED }}> · {role}</span> : null}
+      {name}{role ? <span style={{ fontWeight: 400, color: MUTED }}> – {role}</span> : null}
     </span>
   );
   const saves = (text: React.ReactNode) => <span style={{ gridColumn: "1 / -1", fontSize: 12, color: MUTED }}>{text}</span>;
