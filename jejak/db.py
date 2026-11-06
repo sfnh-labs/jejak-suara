@@ -376,7 +376,9 @@ CREATE TABLE IF NOT EXISTS actor_reviews (
 
 -- Organisations by their long and short names ("Komisi Pemberantasan
 -- Korupsi" / "KPK"), kept by the curator in /kurasi/organisasi. The figure
--- editor offers both when filling in an office's organisation.
+-- editor offers both when filling in an office's organisation, and
+-- jejak/organizations.py links every office's org text to its row
+-- (positions[].org_id), seeding the list from organizations.toml.
 CREATE TABLE IF NOT EXISTS organizations (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL UNIQUE COLLATE NOCASE,  -- "Komisi Pemberantasan Korupsi"
@@ -565,6 +567,12 @@ def connect(path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
 
 
 _MIGRATIONS = {
+    # jejak/organizations.py: other spellings that mean the same organisation
+    # ("DPR RI", "DPP Partai Gerindra"), and what sort of body it is.
+    "organizations": [
+        ("aliases", "TEXT"),   # JSON array
+        ("kind", "TEXT"),      # kementerian | lembaga | parlemen | partai | ... (organizations.KINDS)
+    ],
     "figures": [
         ("positions", "TEXT"),
         ("bio", "TEXT"),
