@@ -330,7 +330,8 @@ function SpeakerChoice({ point: p, figures, listId, open }: { point: Point; figu
             <span style={{ fontSize: 13, fontWeight: 700, color: INK }}>Tokoh baru, belum dilacak</span>
             <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <input name="new_name" required maxLength={200} defaultValue={x.speaker ?? ""} aria-label="Nama lengkap tokoh baru" placeholder="Nama lengkap" style={{ ...input, flex: "1 1 180px" }} />
-              <input name="new_role" maxLength={300} aria-label="Jabatan tokoh baru" placeholder="Jabatan (opsional)" style={{ ...input, flex: "1 1 180px" }} />
+              <input name="new_role" maxLength={300} aria-label="Jabatan tokoh baru" placeholder="Jabatan, mis. Wakil Kepala" style={{ ...input, flex: "1 1 160px" }} />
+              <input name="new_org" maxLength={300} aria-label="Organisasi tokoh baru" placeholder="Organisasi, mis. Badan Gizi Nasional" style={{ ...input, flex: "1 1 200px" }} />
             </span>
           </span>
           {pick("Buat & pilih")}

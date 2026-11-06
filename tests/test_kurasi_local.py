@@ -95,6 +95,13 @@ def test_new_figure_from_a_speaker(conn):
     assert "Taufik Hidayat" in json.loads(row["aliases"])
 
 
+def test_new_figure_keeps_role_and_organisation_apart(conn):
+    fid = kurasi_ops.new_figure(conn, "Nanik S Deyang", "Wakil Kepala", "Badan Gizi Nasional")
+    row = conn.execute("SELECT role, positions FROM figures WHERE id = ?", (fid,)).fetchone()
+    assert json.loads(row["positions"])[0] == {"role": "Wakil Kepala", "org": "Badan Gizi Nasional", "period": ""}
+    assert row["role"] == "Wakil Kepala Badan Gizi Nasional"
+
+
 def test_new_figure_refuses_one_already_tracked(conn):
     with pytest.raises(kurasi_ops.Refused):
         kurasi_ops.new_figure(conn, "Ahmad Muzani")

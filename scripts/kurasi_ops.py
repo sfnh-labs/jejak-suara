@@ -7,7 +7,7 @@ page calls this script the moment the curator decides:
     python scripts/kurasi_ops.py candidate <slug>        # apply the queued verdict
     python scripts/kurasi_ops.py merge <from-id> <into-id>
     python scripts/kurasi_ops.py not-a-person <figure-id>
-    python scripts/kurasi_ops.py new-figure <name> [--role R]   # prints the new id
+    python scripts/kurasi_ops.py new-figure <name> [--role R] [--org O]   # prints the new id
     python scripts/kurasi_ops.py refresh                 # rebuild the names queue
     python scripts/kurasi_ops.py rework <request-id>     # draft a rework (Ollama)
     python scripts/kurasi_ops.py rework-accept <request-id>
@@ -91,7 +91,7 @@ def add_alias(conn, slug: str, name: str, figure_id: str | None) -> str:
     return f"alias {slug} -> {figure_id}: {name!r} added"
 
 
-def new_figure(conn, name: str, role: str | None = None) -> str:
+def new_figure(conn, name: str, role: str | None = None, org: str | None = None) -> str:
     """A tracked figure created on the spot, from a curation point that asks
     who a speaker is when the answer is someone not tracked yet. The same
     promote as a discovered name's, so the id, aliases and positions come out
@@ -104,7 +104,9 @@ def new_figure(conn, name: str, role: str | None = None) -> str:
     figure_id = verdicts.slugify(name)
     if not figure_id:
         raise Refused(f"no page address can be made from {name!r}")
-    positions = json.dumps([{"role": role.strip(), "org": "", "period": ""}]) if role and role.strip() else None
+    # Role and organisation apart, as the figure editor records an office.
+    role, org = (role or "").strip(), (org or "").strip()
+    positions = json.dumps([{"role": role, "org": org, "period": ""}]) if role or org else None
     line = verdicts._promote(conn, figure_id, name, name, None, None, None, positions)
     if line.startswith("already a figure"):
         raise Refused(f"{name} sudah dilacak sebagai {figure_id}; pilih dari daftar tokoh")
@@ -176,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     nf = sub.add_parser("new-figure")
     nf.add_argument("name")
     nf.add_argument("--role")
+    nf.add_argument("--org")
     sub.add_parser("refresh")
     sub.add_parser("rework").add_argument("request_id", type=int)
     sub.add_parser("rework-accept").add_argument("request_id", type=int)
@@ -190,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "merge":
             line = merge(conn, args.from_id, args.into_id)
         elif args.cmd == "new-figure":
-            line = new_figure(conn, args.name, args.role)
+            line = new_figure(conn, args.name, args.role, args.org)
         elif args.cmd == "not-a-person":
             line = not_a_person(conn, args.figure_id)
         elif args.cmd == "rework":

@@ -103,7 +103,7 @@ interface State {
   /** "Ketik …" prompts waiting for a reply: prompt message -> point. */
   prompts: Record<string, number>;
   /** A new figure a pembicara card offers to create, from the typed reply. */
-  newFig: Record<string, { name: string; role: string }>;
+  newFig: Record<string, { name: string; role: string; org?: string }>;
   /** Messages sent alongside a card (📄 paragraphs), deleted once it is answered. */
   extras: Record<string, number[]>;
 }
@@ -403,15 +403,17 @@ async function showEvents(s: State, p: Point, msgId: number, page: number, q = "
 
 /** The card with the figures a typed name matched, and for pembicara a new one to create. */
 async function showFigures(s: State, p: Point, msgId: number, typed: string): Promise<void> {
-  const [rawName, ...rest] = typed.split(",");
+  // "Nama Lengkap, jabatan, organisasi": the last two only matter for a new figure.
+  const [rawName, rawRole = "", ...rest] = typed.split(",");
   const name = rawName.trim().slice(0, 200);
-  const role = rest.join(",").trim().slice(0, 300);
+  const role = rawRole.trim().slice(0, 300);
+  const org = rest.join(",").trim().slice(0, 300);
   const found = findFigures(await getFigureOptions(), name, p.kind === "pelaku" ? p.proposal.figure_id : null);
   s.picks[p.id] = found.map((f) => f.id);
   const rows: Keyboard = found.map((f, i) => [{ text: clip(`${f.name}${f.title ? ` – ${f.title}` : ""}`, 64), callback_data: `p:${p.id}:${i}` }]);
   if (p.kind === "pembicara" && name.length >= 3) {
-    s.newFig[p.id] = { name, role };
-    rows.push([{ text: clip(`➕ Tokoh baru: ${name}${role ? ` (${role})` : ""}`, 60), callback_data: `n:${p.id}` }]);
+    s.newFig[p.id] = { name, role, org };
+    rows.push([{ text: clip(`➕ Tokoh baru: ${[name, role, org].filter(Boolean).join(" – ")}`, 64), callback_data: `n:${p.id}` }]);
   }
   rows.push([{ text: "🔎 Cari lagi", callback_data: `s:${p.id}` }, { text: "← Kembali", callback_data: `b:${p.id}` }]);
   const who = p.kind === "pelaku" ? "pelakunya" : `“${esc(p.proposal.speaker ?? "")}”`;
@@ -425,7 +427,7 @@ async function showFigures(s: State, p: Point, msgId: number, typed: string): Pr
 async function prompt(s: State, p: Point, msgId: number): Promise<void> {
   const ask = figureKind(p)
     ? p.kind === "pembicara"
-      ? "Ketik nama tokohnya. Untuk tokoh baru, tambahkan jabatan setelah koma: <i>Nama Lengkap, jabatan</i>"
+      ? "Ketik nama tokohnya. Untuk tokoh baru, tambahkan jabatan dan organisasi, dipisah koma: <i>Nama Lengkap, jabatan, organisasi</i> (mis. <i>Nanik S Deyang, Wakil Kepala, Badan Gizi Nasional</i>)"
       : "Ketik nama tokoh yang menjadi pelaku."
     : "Ketik sebagian judul untuk dicari.";
   const id = await send(ask, undefined, {
@@ -516,7 +518,7 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
     } else if (kind === "n") {
       const fig = s.newFig[p.id];
       if (!fig) throw new Error("Ketik namanya lagi.");
-      const out = await pipelineOp("new-figure", fig.name, ...(fig.role ? ["--role", fig.role] : []));
+      const out = await pipelineOp("new-figure", fig.name, ...(fig.role ? ["--role", fig.role] : []), ...(fig.org ? ["--org", fig.org] : []));
       await answer("koreksi", out.split("\n").pop()!.trim());
       note = `Tokoh baru dibuat: ${fig.name}`;
     } else if (kind === "b") {
