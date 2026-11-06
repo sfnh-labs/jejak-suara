@@ -18,13 +18,14 @@ import { lqueryOne, lrun } from "@/lib/localDb";
 import {
   answerPoint,
   getKindStats,
-  getNextOpenPoints,
+  getNextOpenPoint,
   getPoint,
   undoPoint,
   KIND_LABEL,
   NOT_TRACKED,
   type Point,
   type PointAnswer,
+  type PointKind,
 } from "@/lib/curationPoints";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
@@ -91,13 +92,19 @@ async function edit(messageId: number, text: string, keyboard: Keyboard = []): P
 interface State {
   offset: number;
   sent: Record<string, number>;
+  /** The kind of the last card sent, so the next one is the next kind's turn. */
+  lastKind?: PointKind;
 }
 
 async function loadState(): Promise<State> {
   const row = await lqueryOne<{ value: string }>(`SELECT value FROM pipeline_state WHERE key = ?`, [STATE_KEY]);
   try {
     const s = row ? (JSON.parse(row.value) as Partial<State>) : {};
-    return { offset: Number(s.offset) || 0, sent: s.sent && typeof s.sent === "object" ? s.sent : {} };
+    return {
+      offset: Number(s.offset) || 0,
+      sent: s.sent && typeof s.sent === "object" ? s.sent : {},
+      lastKind: s.lastKind && s.lastKind in KIND_LABEL ? s.lastKind : undefined,
+    };
   } catch {
     return { offset: 0, sent: {} };
   }
@@ -251,13 +258,27 @@ async function topUp(s: State): Promise<void> {
     await tg("deleteMessage", { chat_id: CHAT, message_id: s.sent[id] }).catch(() => {});
     delete s.sent[id];
   }
-  const want = BATCH - Object.keys(s.sent).length;
-  if (want > 0) {
-    for (const p of await getNextOpenPoints(want, Object.keys(s.sent).map(Number))) {
-      s.sent[p.id] = await send(await cardText(p), cardKeyboard(p));
-    }
+  while (Object.keys(s.sent).length < BATCH) {
+    const p = await nextPoint(s);
+    if (!p) break;
+    s.sent[p.id] = await send(await cardText(p), cardKeyboard(p));
+    s.lastKind = p.kind;
   }
   await saveState(s);
+}
+
+/** The kinds take turns, in this order; a kind with nothing open is passed over. */
+const ROTATION: PointKind[] = ["peristiwa", "pembicara", "pelaku", "lini"];
+
+/** The newest open point of the kind after the last one sent. */
+async function nextPoint(s: State): Promise<Point | null> {
+  const start = s.lastKind ? ROTATION.indexOf(s.lastKind) + 1 : 0;
+  const exclude = Object.keys(s.sent).map(Number);
+  for (let i = 0; i < ROTATION.length; i++) {
+    const p = await getNextOpenPoint(ROTATION[(start + i) % ROTATION.length], exclude);
+    if (p) return p;
+  }
+  return null;
 }
 
 async function status(): Promise<string> {

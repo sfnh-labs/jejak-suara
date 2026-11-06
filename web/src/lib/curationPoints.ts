@@ -196,24 +196,24 @@ export async function getPoint(pointId: number): Promise<Point | null> {
 }
 
 /**
- * The next open points across all catatan, for answering away from /kurasi
- * (the Telegram bot): the kinds answered with one tap first, the points that
- * settle most first. Skipped ones and those in `exclude` are left out.
+ * The most recent open point of one kind, for answering away from /kurasi
+ * (the Telegram bot): the newest catatan first, by its date and then its
+ * article's. Skipped ones and those in `exclude` are left out.
  */
-export async function getNextOpenPoints(limit: number, exclude: number[] = []): Promise<Point[]> {
-  if (limit <= 0 || !(await pointsReady())) return [];
-  const [rows, cal] = await Promise.all([
-    query<Row>(
+export async function getNextOpenPoint(kind: PointKind, exclude: number[] = []): Promise<Point | null> {
+  if (!(await pointsReady())) return null;
+  const [row, cal] = await Promise.all([
+    queryOne<Row>(
       `${POINT_SELECT}
-        WHERE p.status = 'open' AND p.id NOT IN (SELECT value FROM json_each(?))
-        ORDER BY CASE p.kind WHEN 'peristiwa' THEN 0 WHEN 'pembicara' THEN 1 WHEN 'pelaku' THEN 2 ELSE 3 END,
-                 -p.group_size, p.id
-        LIMIT ?`,
-      [exclude, limit]
+        LEFT JOIN events e ON e.id = p.event_id
+        WHERE p.status = 'open' AND p.kind = ? AND p.id NOT IN (SELECT value FROM json_each(?))
+        ORDER BY e.event_date DESC, a.published_at DESC, p.id DESC
+        LIMIT 1`,
+      [kind, exclude]
     ),
     calibration(),
   ]);
-  return rows.map((r) => toPoint(r, cal));
+  return row ? toPoint(row, cal) : null;
 }
 
 /** Unanswered points per catatan (skipped ones not counted), for the queue. */
