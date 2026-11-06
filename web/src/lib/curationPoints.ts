@@ -188,6 +188,34 @@ export async function getPoints(eventId: number): Promise<Point[]> {
   return rows.map((r) => toPoint(r, cal));
 }
 
+/** One point, whatever its status; null if there is no such point. */
+export async function getPoint(pointId: number): Promise<Point | null> {
+  if (!(await pointsReady())) return null;
+  const [row, cal] = await Promise.all([queryOne<Row>(`${POINT_SELECT} WHERE p.id = ?`, [pointId]), calibration()]);
+  return row ? toPoint(row, cal) : null;
+}
+
+/**
+ * The next open points across all catatan, for answering away from /kurasi
+ * (the Telegram bot): the kinds answered with one tap first, the points that
+ * settle most first. Skipped ones and those in `exclude` are left out.
+ */
+export async function getNextOpenPoints(limit: number, exclude: number[] = []): Promise<Point[]> {
+  if (limit <= 0 || !(await pointsReady())) return [];
+  const [rows, cal] = await Promise.all([
+    query<Row>(
+      `${POINT_SELECT}
+        WHERE p.status = 'open' AND p.id NOT IN (SELECT value FROM json_each(?))
+        ORDER BY CASE p.kind WHEN 'peristiwa' THEN 0 WHEN 'pembicara' THEN 1 WHEN 'pelaku' THEN 2 ELSE 3 END,
+                 -p.group_size, p.id
+        LIMIT ?`,
+      [exclude, limit]
+    ),
+    calibration(),
+  ]);
+  return rows.map((r) => toPoint(r, cal));
+}
+
 /** Unanswered points per catatan (skipped ones not counted), for the queue. */
 export async function getOpenPointCounts(eventIds: number[]): Promise<Map<number, number>> {
   if (!eventIds.length || !(await pointsReady())) return new Map();
