@@ -234,9 +234,8 @@ function cardKeyboard(p: Point): Keyboard {
     { text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` },
     { text: "Lewati", callback_data: a("lewati") },
   ];
-  if (p.paragraph && (p.hl_start !== null || p.paragraph.length > CONTEXT * 2)) last.push({ text: "📄", callback_data: `x:${p.id}` });
   // The article on its outlet's site, in Telegram's own browser.
-  if (p.article_url && /^https?:\/\//.test(p.article_url)) rows.push([{ text: `📰 Baca berita${p.source ? ` · ${clip(p.source, 30)}` : ""}`, url: p.article_url }]);
+  if (p.article_url && /^https?:\/\//.test(p.article_url)) last.push({ text: "📰 Berita", url: p.article_url });
   if (KURASI_URL) last.push({ text: "Buka di /kurasi", url: `${KURASI_URL}/kurasi/${p.event_id}` });
   rows.push(last);
   return rows;
@@ -517,12 +516,6 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
       if (!open) throw new Error("Sudah dijawab.");
       delete s.picks[p.id];
       await edit(msg.message_id, await cardText(p), cardKeyboard(p));
-    } else if (kind === "x") {
-      const extra = await send(`<b>Paragraf lengkap</b>${p.source ? ` · ${esc(p.source)}` : ""}\n\n${esc(p.paragraph ?? "")}`, undefined, {
-        reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true },
-      });
-      // Only while the card waits: on an answered one there is nothing to clear it later.
-      if (open) (s.extras[p.id] ??= []).push(extra);
     }
   } catch (e) {
     note = e instanceof Error ? e.message : String(e);
