@@ -1,7 +1,7 @@
 import Link from "next/link";
 import FigurePortrait from "@/components/FigurePortrait";
 import { notFound } from "next/navigation";
-import { REASONS, getActors, getFigureOptions, getOrganizations, getFollowupCandidates, getItem, getReading, reasonLabel, type Actor, type FigureOption, type FollowupCandidate, type FollowupRow, type Item, type Rework, type ReworkSnapshot, type LinkRow, type NamedPerson, type QuoteRow } from "@/lib/curation";
+import { REASONS, figureTitle, positionLine, getActors, getFigureOptions, getOrganizations, getFollowupCandidates, getItem, getReading, reasonLabel, type Actor, type FigureOption, type FollowupCandidate, type FollowupRow, type Item, type Rework, type ReworkSnapshot, type LinkRow, type NamedPerson, type QuoteRow } from "@/lib/curation";
 import { decide } from "../kandidat/actions";
 import { FigurePicker, SpeakerEditor } from "../FigurePicker";
 import { ArticleReader, type ReaderFocus, type ReaderTerm } from "../ArticleReader";
@@ -365,7 +365,7 @@ function Relasi({ item, actors, open }: { item: Item; actors: Actor[]; open: Ope
               <Link href={open(`tokoh:${a.id}`)} scroll={false} style={{ flex: 1, minWidth: 0, color: INK, textDecoration: "none" }}>
                 <span style={{ display: "block", fontSize: 14, fontWeight: 600 }}>{a.name}</span>
                 <span style={{ display: "block", fontSize: 12, color: MUTED }}>
-                  {a.positions[0] ? [a.positions[0].role, a.positions[0].org].filter(Boolean).join(" ") : a.role ?? ""}
+                  {figureTitle(a)}
                   {a.quotes ? ` · ${a.quotes} kutipan` : ""}
                 </span>
               </Link>
@@ -552,7 +552,7 @@ function PanelDrawer({ panel, item, actors, figures, peek, candidates, search, o
               <li key={`${p.kind}-${p.id}`} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "9px 0", borderTop: i ? `1px solid ${RULE}` : "none" }}>
                 <Link href={open(`${p.kind === "candidate" ? "nama" : "tokoh"}:${p.id}`)} scroll={false} style={{ flex: 1, minWidth: 0, color: INK, textDecoration: "none" }}>
                   <span style={{ fontSize: 14, fontWeight: 600, ...(p.struck ? { textDecoration: "line-through", color: MUTED } : {}) }}>{p.name}</span>
-                  {p.role ? <span style={{ fontSize: 12, color: MUTED }}> · {p.role}</span> : null}
+                  {figureTitle(p) ? <span style={{ fontSize: 12, color: MUTED }}> – {figureTitle(p)}</span> : null}
                 </Link>
                 {p.kind === "candidate" ? <Pill tone="pending">nama baru</Pill> : null}
                 <span style={{ fontSize: 12, color: MUTED, whiteSpace: "nowrap" }}>{p.articles} artikel</span>
@@ -890,7 +890,7 @@ function CvNote({ item, figures }: { item: Item; figures: FigureOption[] }) {
   const who = figures.find((f) => f.id === p.figure_id)?.name ?? p.figure_id;
   const d = p.proposal;
   const entries = [
-    ...d.positions.map((x) => [x.role, x.org].filter(Boolean).join(" ") + (x.period ? ` (${x.period})` : "")),
+    ...d.positions.map((x) => positionLine(x) + (x.period ? ` (${x.period})` : "")),
     ...d.facts.map((x) => `${x.label}: ${x.value}`),
     ...d.education.map((x) => (x.year ? `${x.year}: ` : "") + x.detail),
   ];
@@ -1326,7 +1326,7 @@ const QUOTES_OPEN = 20;
 /** "Name · title" for a picker's starting value. */
 function figureLabel(figures: FigureOption[], id: string | null): string | null {
   const f = id ? figures.find((x) => x.id === id) : undefined;
-  return f ? (f.role ? `${f.name} · ${f.role}` : f.name) : null;
+  return f ? (f.title ? `${f.name} – ${f.title}` : f.name) : null;
 }
 
 /**
@@ -1482,7 +1482,7 @@ function QuoteItem({ quote: q, item, actors, figures, first, open }: { quote: Qu
   const own = Boolean(item.figure_id) && q.figure_id === item.figure_id;
   const actor = actors.some((a) => a.id === q.figure_id);
   const shown = Boolean(item.quote) && item.quote === q.quote;
-  const title = q.figure_id ? figures.find((f) => f.id === q.figure_id)?.role : null;
+  const title = q.figure_id ? figures.find((f) => f.id === q.figure_id)?.title || null : null;
   return (
     <li style={{ padding: "14px 0", borderTop: first ? "none" : `1px solid ${RULE}`, ...(shown ? { borderLeft: "3px solid var(--color-clay)", paddingLeft: 14 } : {}) }}>
       <p style={{ fontFamily: "var(--font-serif)", fontStyle: "italic", fontSize: 15, lineHeight: 1.55, margin: 0 }}>“{q.quote}”</p>

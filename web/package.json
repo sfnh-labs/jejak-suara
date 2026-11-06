@@ -17,7 +17,8 @@
     "start": "next start",
     "lint": "eslint .",
     "local-db": "node scripts/local-db.mjs",
-    "outlet-logos": "node scripts/fetch-outlet-logos.mjs",
+    "telegram-bot": "esbuild scripts/telegram-bot.ts --bundle --platform=node --format=esm --packages=external --outfile=.telegram-bot/bot.mjs --log-level=warning && node --env-file-if-exists=.env.local .telegram-bot/bot.mjs",
+    "outlet-logos":"node scripts/fetch-outlet-logos.mjs",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
@@ -39,6 +40,7 @@
     "@types/pg": "^8.20.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "^15.3.1",
     "pg": "^8.22.0",

@@ -63,3 +63,7 @@ scripts/*.log.prev
 
 # full-size generated PNGs; web/public ships compressed .webp
 /originals/
+
+# Telegram bot build (npm run telegram-bot)
+web/.telegram-bot/
+scripts/telegram_bot.log

@@ -347,7 +347,8 @@ export async function answerCurationPoint(formData: FormData): Promise<void> {
   const newName = text(formData, "new_name", 200);
   if (answer === "koreksi" && newName) {
     const role = text(formData, "new_role", 300);
-    figure = (await pipelineOp("new-figure", newName, ...(role ? ["--role", role] : []))).split("\n").pop()!.trim();
+    const org = text(formData, "new_org", 300);
+    figure = (await pipelineOp("new-figure", newName, ...(role ? ["--role", role] : []), ...(org ? ["--org", org] : []))).split("\n").pop()!.trim();
   }
   // A peristiwa or lini point corrected to another event names it by id.
   const event = text(formData, "event_target", 20);

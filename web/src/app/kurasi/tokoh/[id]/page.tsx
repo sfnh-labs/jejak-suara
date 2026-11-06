@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getFigureOptions, getOrganizations, positionTitle } from "@/lib/curation";
+import { figureTitle, getFigureOptions, getOrganizations } from "@/lib/curation";
 import { getFigureFull } from "@/lib/kurasiLists";
 import { FigureForm, FigureOptions, NotAPersonForm, OrgOptions, SamePerson, type Open } from "../../FigureEdit";
 import { Card, Columns, Page, PageHead, Pill, RowLink } from "../../kit";
@@ -24,7 +24,7 @@ export default async function TokohPage({ params }: { params: Promise<{ id: stri
   const [full, figures, orgs] = await Promise.all([getFigureFull(id), getFigureOptions(), getOrganizations()]);
   if (!full) notFound();
   const { person: p, records, recordCount, quotes, quoteCount } = full;
-  const title = p.positions[0] ? positionTitle(p.positions[0]) : p.role;
+  const title = figureTitle(p);
   // Links inside the shared forms name a panel; here every figure has a page.
   const open: Open = (panel) => (panel.startsWith("tokoh:") ? `/kurasi/tokoh/${panel.slice(6)}` : `/kurasi/tokoh/${id}`);
   return (

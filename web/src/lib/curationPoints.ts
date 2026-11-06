@@ -66,6 +66,8 @@ export interface Point {
   article_id: string | null;
   /** Outlet and date of the evidence article. */
   source: string | null;
+  /** The evidence article on its outlet's site. */
+  article_url: string | null;
   published_at: string | null;
   paragraph: string | null;
   hl_start: number | null;
@@ -162,7 +164,7 @@ function toPoint(r: Row, cal: Map<string, Confidence>): Point {
 }
 
 const POINT_SELECT = `SELECT p.id, p.kind, p.event_id, p.group_size, p.proposal, p.article_id,
-            a.source, a.published_at, p.paragraph, p.hl_start, p.hl_end, p.score, p.bucket,
+            a.source, a.url AS article_url, a.published_at, p.paragraph, p.hl_start, p.hl_end, p.score, p.bucket,
             p.status, p.answer, p.answered_by, p.answered_at, p.spot_check
        FROM curation_points p
        LEFT JOIN articles a ON a.id = p.article_id`;
@@ -186,6 +188,34 @@ export async function getPoints(eventId: number): Promise<Point[]> {
     calibration(),
   ]);
   return rows.map((r) => toPoint(r, cal));
+}
+
+/** One point, whatever its status; null if there is no such point. */
+export async function getPoint(pointId: number): Promise<Point | null> {
+  if (!(await pointsReady())) return null;
+  const [row, cal] = await Promise.all([queryOne<Row>(`${POINT_SELECT} WHERE p.id = ?`, [pointId]), calibration()]);
+  return row ? toPoint(row, cal) : null;
+}
+
+/**
+ * The most recent open point of one kind, for answering away from /kurasi
+ * (the Telegram bot): the newest catatan first, by its date and then its
+ * article's. Skipped ones and those in `exclude` are left out.
+ */
+export async function getNextOpenPoint(kind: PointKind, exclude: number[] = []): Promise<Point | null> {
+  if (!(await pointsReady())) return null;
+  const [row, cal] = await Promise.all([
+    queryOne<Row>(
+      `${POINT_SELECT}
+        LEFT JOIN events e ON e.id = p.event_id
+        WHERE p.status = 'open' AND p.kind = ? AND p.id NOT IN (SELECT value FROM json_each(?))
+        ORDER BY e.event_date DESC, a.published_at DESC, p.id DESC
+        LIMIT 1`,
+      [kind, exclude]
+    ),
+    calibration(),
+  ]);
+  return row ? toPoint(row, cal) : null;
 }
 
 /** Unanswered points per catatan (skipped ones not counted), for the queue. */

@@ -292,6 +292,26 @@ export function positionTitle(p: Position): string {
   return [p.role, p.org].map((x) => x.trim()).filter(Boolean).join(" ");
 }
 
+/**
+ * "Wakil Kepala – Badan Gizi Nasional": one office as /kurasi lists it, role
+ * then organisation, kept apart so both read at a glance. Display only:
+ * figures.role, which the site shows, is still written with positionTitle.
+ */
+export function positionLine(p: Position): string {
+  return [p.role, p.org].map((x) => x.trim()).filter(Boolean).join(" – ");
+}
+
+/** A figure's main office as a positionLine; the free-text role when no position is recorded. */
+export function figureTitle(f: { role?: string | null; positions?: Position[] }): string {
+  const main = f.positions?.[0];
+  return (main && positionLine(main)) || (f.role ?? "").trim();
+}
+
+/** "Name – Role – Organisation", the one way /kurasi and the Telegram bot name a tracked figure. */
+export function figureLine(f: { name: string; role?: string | null; positions?: Position[] }): string {
+  return [f.name, figureTitle(f)].filter(Boolean).join(" – ");
+}
+
 export function parsePositions(raw: unknown): Position[] {
   if (typeof raw !== "string" || !raw) return [];
   try {
@@ -1351,15 +1371,19 @@ export type FigureOption = {
   aliases: string[];
   /** Records the figure owns, so a suggested merge can say which way round. */
   records: number;
+  /** The main office, role – organisation (figureTitle): what pickers show beside the name. */
+  title: string;
 };
 
 export async function getFigureOptions(): Promise<FigureOption[]> {
-  const rows = await query<{ id: string; name: string; role: string | null; aliases: string | null; records: number }>(
-    `SELECT f.id, f.name, f.role, f.aliases,
+  const rows = await query<{ id: string; name: string; role: string | null; aliases: string | null; positions: string | null; records: number }>(
+    `SELECT f.id, f.name, f.role, f.aliases, f.positions,
             (SELECT count(*) FROM events e WHERE e.figure_id = f.id AND e.kind = 'record') AS records
        FROM figures f WHERE f.active ORDER BY f.name`
   );
-  return rows.map((r) => ({ ...r, aliases: parseAliases(r.aliases) }));
+  return rows.map(({ positions, ...r }) => ({
+    ...r, aliases: parseAliases(r.aliases), title: figureTitle({ role: r.role, positions: parsePositions(positions) }),
+  }));
 }
 
 /** A tracked figure that may be the same person as someone on the page. */

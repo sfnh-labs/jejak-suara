@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { LinkVerdict } from "@/lib/curation";
-import { positionTitle } from "@/lib/curation";
+import { figureTitle, positionLine } from "@/lib/curation";
 import { eventPanel, type EventPeek, type FigurePeek, type PeekEvent } from "@/lib/panels";
 import { ruleFollowup, ruleLink } from "./actions";
 import { ACCEPT, INK, MUTED, RULE, button, day } from "./ui";
@@ -168,7 +168,7 @@ export function FigurePanel({ peek: f, open, here }: {
   open: (panel: string) => string;
   here: number;
 }) {
-  const title = f.positions.length ? f.positions.map(positionTitle).filter(Boolean)[0] : f.role;
+  const title = figureTitle(f);
   return (
     <>
       {title ? <div style={{ fontSize: 13.5, color: "var(--color-mud)", marginBottom: 4 }}>{title}</div> : null}
@@ -183,7 +183,7 @@ export function FigurePanel({ peek: f, open, here }: {
         <>
           <div style={sub}>Jabatan</div>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.55 }}>
-            {f.positions.map((p, i) => <li key={i}>{positionTitle(p)}{p.period ? ` (${p.period})` : ""}</li>)}
+            {f.positions.map((p, i) => <li key={i}>{positionLine(p)}{p.period ? ` (${p.period})` : ""}</li>)}
           </ul>
         </>
       ) : null}
