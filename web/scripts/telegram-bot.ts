@@ -29,8 +29,8 @@ import {
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
 const CHAT = process.env.TELEGRAM_CHAT_ID ?? "";
-/** How many open cards the chat holds at once. */
-const BATCH = Math.max(1, Number(process.env.TELEGRAM_BATCH ?? 5) || 5);
+/** How many open cards the chat holds at once: one, the next after each answer. */
+const BATCH = Math.max(1, Number(process.env.TELEGRAM_BATCH ?? 1) || 1);
 /** Optional: where /kurasi is reachable from the phone, for an "open" link. */
 const KURASI_URL = (process.env.KURASI_URL ?? "").replace(/\/$/, "");
 const STATE_KEY = "telegram_bot";
@@ -245,6 +245,11 @@ async function topUp(s: State): Promise<void> {
     if (p && p.status === "open") continue;
     delete s.sent[id];
     await edit(msg, p ? `${await answeredText(p)}\n<i>dijawab di /kurasi</i>` : "<i>Poin ini sudah tidak ada.</i>");
+  }
+  // More open cards than BATCH (it was lowered): take the extra ones back out of the chat.
+  for (const id of Object.keys(s.sent).sort((a, b) => s.sent[b] - s.sent[a]).slice(0, Math.max(0, Object.keys(s.sent).length - BATCH))) {
+    await tg("deleteMessage", { chat_id: CHAT, message_id: s.sent[id] }).catch(() => {});
+    delete s.sent[id];
   }
   const want = BATCH - Object.keys(s.sent).length;
   if (want > 0) {
