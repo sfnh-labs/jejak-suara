@@ -226,25 +226,25 @@ function cardKeyboard(p: Point): Keyboard {
     const x = p.proposal;
     if (x.figure_id) rows.push([{ text: `Ya, ${x.name ?? x.figure_id}`, callback_data: a("ya") }]);
     others(p).forEach((c, i) => rows.push([{ text: `Ini ${c.name}`, callback_data: a(`c${i}`) }]));
-    rows.push([
-      { text: "Bukan tokoh yang dilacak", callback_data: a("nt") },
-      ...(x.figure_id ? [{ text: "Bukan dia", callback_data: a("bukan") }] : []),
-    ]);
+    // Telegram cuts a label to its share of the row and never wraps it: a
+    // long one gets a row to itself, short ones go at most two to a row.
+    rows.push([{ text: "Bukan tokoh yang dilacak", callback_data: a("nt") }]);
+    if (x.figure_id) rows.push([{ text: `Bukan ${x.name ?? "dia"}, belum tahu siapa`, callback_data: a("bukan") }]);
+  } else if (p.kind === "pelaku") {
+    rows.push([{ text: `Ya, ${p.proposal.name} pelaku`, callback_data: a("ya") }]);
+    rows.push([{ text: "Bukan, hanya disebut", callback_data: a("bukan") }]);
   } else {
-    const pelaku = p.kind === "pelaku";
-    rows.push([
-      { text: pelaku ? `Ya, ${p.proposal.name} pelaku` : "Ya", callback_data: a("ya") },
-      { text: pelaku ? "Bukan, hanya disebut" : "Bukan", callback_data: a("bukan") },
-    ]);
+    rows.push([{ text: "Ya", callback_data: a("ya") }, { text: "Bukan", callback_data: a("bukan") }]);
   }
-  const last: Button[] = [
+  rows.push([
     { text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` },
-    { text: "Lewati", callback_data: a("lewati") },
-  ];
+    { text: "⏭ Lewati", callback_data: a("lewati") },
+  ]);
   // The article on its outlet's site, in Telegram's own browser.
-  if (p.article_url && /^https?:\/\//.test(p.article_url)) last.push({ text: "📰 Berita", url: p.article_url });
-  if (KURASI_URL) last.push({ text: "Buka di /kurasi", url: `${KURASI_URL}/kurasi/${p.event_id}` });
-  rows.push(last);
+  if (p.article_url && /^https?:\/\//.test(p.article_url)) {
+    rows.push([{ text: `📰 Baca berita${p.source ? ` · ${clip(p.source, 28)}` : ""}`, url: p.article_url }]);
+  }
+  if (KURASI_URL) rows.push([{ text: "Buka di /kurasi", url: `${KURASI_URL}/kurasi/${p.event_id}` }]);
   return rows;
 }
 
@@ -332,7 +332,7 @@ async function eventChoices(p: Point, q = ""): Promise<{ id: number; label: stri
   const item = await getItem(p.event_id);
   if (!item) return [];
   const label = (e: { title: string | null; event_date: string | null }, extra = "") =>
-    clip(`${day(e.event_date)}${extra} · ${e.title ?? "tanpa judul"}`, 60);
+    clip(`${day(e.event_date)}${extra} · ${e.title ?? "tanpa judul"}`, 140);
   if (p.kind === "peristiwa") {
     const rows = q
       ? await lquery<{ event_id: number; title: string | null; event_date: string | null }>(
@@ -385,8 +385,16 @@ async function showEvents(s: State, p: Point, msgId: number, page: number, q = "
   const head = q ? `Hasil “${esc(q)}”` : p.kind === "peristiwa" ? "Peristiwa dalam ±7 hari" : "Kandidat lini cerita";
   const pages = Math.max(1, Math.ceil(choices.length / PAGE));
   page = Math.min(Math.max(0, page), pages - 1);
-  const rows: Keyboard = choices.slice(page * PAGE, page * PAGE + PAGE)
-    .map((c, i) => [{ text: c.label, callback_data: `p:${p.id}:${page * PAGE + i}` }]);
+  // A full-width button shows ~30 characters: the titles go in the text,
+  // numbered, and the buttons carry the numbers, three to a row.
+  const shown = choices.slice(page * PAGE, page * PAGE + PAGE);
+  const list = shown.map((c, i) => `<b>${page * PAGE + i + 1}.</b> ${esc(c.label)}`).join("\n");
+  const rows: Keyboard = [];
+  shown.forEach((_, i) => {
+    const n = page * PAGE + i;
+    if (i % 3 === 0) rows.push([]);
+    rows[rows.length - 1].push({ text: String(n + 1), callback_data: `p:${p.id}:${n}` });
+  });
   if (pages > 1) {
     rows.push([
       ...(page > 0 ? [{ text: "‹", callback_data: `k:${p.id}:${page - 1}` }] : []),
@@ -396,7 +404,7 @@ async function showEvents(s: State, p: Point, msgId: number, page: number, q = "
   }
   rows.push([{ text: "🔎 Ketik judul", callback_data: `s:${p.id}` }, { text: "← Kembali", callback_data: `b:${p.id}` }]);
   const body = choices.length
-    ? `<b>✏️ Bukan — pilih ${what}.</b> ${head}:`
+    ? `<b>✏️ Bukan — pilih ${what}.</b> ${head}:\n${list}`
     : `<b>✏️ ${head}: tidak ada.</b> Ketik judul untuk mencari, atau Kembali.`;
   await edit(msgId, `${await cardText(p)}\n\n${body}`, rows);
 }
@@ -410,16 +418,20 @@ async function showFigures(s: State, p: Point, msgId: number, typed: string): Pr
   const org = rest.join(",").trim().slice(0, 300);
   const found = findFigures(await getFigureOptions(), name, p.kind === "pelaku" ? p.proposal.figure_id : null);
   s.picks[p.id] = found.map((f) => f.id);
-  const rows: Keyboard = found.map((f, i) => [{ text: clip(`${f.name}${f.title ? ` – ${f.title}` : ""}`, 64), callback_data: `p:${p.id}:${i}` }]);
-  if (p.kind === "pembicara" && name.length >= 3) {
-    s.newFig[p.id] = { name, role, org };
-    rows.push([{ text: clip(`➕ Tokoh baru: ${[name, role, org].filter(Boolean).join(" – ")}`, 64), callback_data: `n:${p.id}` }]);
+  // Name – Role – Organisation in the text, numbered; the button only needs the number and name.
+  const list = found.map((f, i) => `<b>${i + 1}.</b> <b>${esc(f.name)}</b>${f.title ? ` – ${esc(f.title)}` : ""}`).join("\n");
+  const rows: Keyboard = found.map((f, i) => [{ text: clip(`${i + 1}. ${f.name}`, 30), callback_data: `p:${p.id}:${i}` }]);
+  const fresh = p.kind === "pembicara" && name.length >= 3 ? { name, role, org } : null;
+  if (fresh) {
+    s.newFig[p.id] = fresh;
+    rows.push([{ text: "➕ Buat tokoh baru", callback_data: `n:${p.id}` }]);
   }
   rows.push([{ text: "🔎 Cari lagi", callback_data: `s:${p.id}` }, { text: "← Kembali", callback_data: `b:${p.id}` }]);
   const who = p.kind === "pelaku" ? "pelakunya" : `“${esc(p.proposal.speaker ?? "")}”`;
-  const body = found.length
-    ? `<b>✏️ Siapa ${who}?</b> Hasil “${esc(name)}”:`
-    : `<b>✏️ Tidak ada tokoh yang cocok dengan “${esc(name)}”.</b>${p.kind === "pembicara" ? " Buat tokoh baru, atau cari lagi." : " Cari lagi, atau Kembali."}`;
+  const body = (found.length
+    ? `<b>✏️ Siapa ${who}?</b> Hasil “${esc(name)}”:\n${list}`
+    : `<b>✏️ Tidak ada tokoh yang cocok dengan “${esc(name)}”.</b>${fresh ? "" : " Cari lagi, atau Kembali."}`)
+    + (fresh ? `\n\n➕ <b>Tokoh baru:</b> ${[fresh.name, fresh.role, fresh.org].filter(Boolean).map(esc).join(" – ")}${fresh.role && fresh.org ? "" : "\n<i>Lengkapi jabatan dan organisasinya: Cari lagi, lalu ketik Nama, jabatan, organisasi.</i>"}` : "");
   await edit(msgId, `${await cardText(p)}\n\n${body}`, rows);
 }
 
