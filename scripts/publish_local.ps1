@@ -122,7 +122,9 @@ try {
     # Curation upkeep: undone drafts, learning from the curator, names queue.
     Invoke-Stage "kurasi" @("-m", "jejak.cli", "kurasi")
 
-    foreach ($stage in @("cluster", "link", "quotes", "translate", "summarize",
+    # participants after quotes: who is quoted in a record decides its Pelaku /
+    # Disebut list and the pelaku points "points" asks about.
+    foreach ($stage in @("cluster", "link", "quotes", "participants", "translate", "summarize",
                          "sentiment", "buzzer", "suggest", "points")) {
         Invoke-Stage $stage @("-m", "jejak.cli", $stage)
     }
