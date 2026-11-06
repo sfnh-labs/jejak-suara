@@ -14,7 +14,8 @@
  *   npm run telegram-bot      (from web/, with web/.env.local holding
  *                              JEJAK_DB, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
  */
-import { lqueryOne, lrun } from "@/lib/localDb";
+import { lquery, lqueryOne, lrun, pipelineOp } from "@/lib/localDb";
+import { getFigureOptions, getFollowupCandidates, getItem, type FigureOption } from "@/lib/curation";
 import {
   answerPoint,
   getKindStats,
@@ -50,7 +51,7 @@ type Keyboard = Button[][];
 
 interface Update {
   update_id: number;
-  message?: { chat: { id: number }; text?: string };
+  message?: { message_id: number; chat: { id: number }; text?: string; reply_to_message?: { message_id: number } };
   callback_query?: { id: string; data?: string; message?: { message_id: number; chat: { id: number } } };
 }
 
@@ -66,13 +67,16 @@ async function tg<T = unknown>(method: string, body: object, timeoutMs = 30_000)
   return json.result;
 }
 
-async function send(text: string, keyboard?: Keyboard): Promise<number> {
+async function send(text: string, keyboard?: Keyboard, extra: object = {}): Promise<number> {
   const msg = await tg<{ message_id: number }>("sendMessage", {
     chat_id: CHAT, text, parse_mode: "HTML", link_preview_options: { is_disabled: true },
     ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+    ...extra,
   });
   return msg.message_id;
 }
+
+const drop = (messageId: number) => tg("deleteMessage", { chat_id: CHAT, message_id: messageId }).catch(() => {});
 
 async function edit(messageId: number, text: string, keyboard: Keyboard = []): Promise<void> {
   try {
@@ -94,6 +98,12 @@ interface State {
   sent: Record<string, number>;
   /** The kind of the last card sent, so the next one is the next kind's turn. */
   lastKind?: PointKind;
+  /** A card's correction choices, as listed on it: event ids or figure ids. */
+  picks: Record<string, string[]>;
+  /** "Ketik …" prompts waiting for a reply: prompt message -> point. */
+  prompts: Record<string, number>;
+  /** A new figure a pembicara card offers to create, from the typed reply. */
+  newFig: Record<string, { name: string; role: string }>;
 }
 
 async function loadState(): Promise<State> {
@@ -104,9 +114,12 @@ async function loadState(): Promise<State> {
       offset: Number(s.offset) || 0,
       sent: s.sent && typeof s.sent === "object" ? s.sent : {},
       lastKind: s.lastKind && s.lastKind in KIND_LABEL ? s.lastKind : undefined,
+      picks: s.picks && typeof s.picks === "object" ? s.picks : {},
+      prompts: s.prompts && typeof s.prompts === "object" ? s.prompts : {},
+      newFig: s.newFig && typeof s.newFig === "object" ? s.newFig : {},
     };
   } catch {
-    return { offset: 0, sent: {} };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {} };
   }
 }
 
@@ -214,7 +227,11 @@ function cardKeyboard(p: Point): Keyboard {
       { text: pelaku ? "Bukan, hanya disebut" : "Bukan", callback_data: a("bukan") },
     ]);
   }
-  const last: Button[] = [{ text: "Lewati", callback_data: a("lewati") }];
+  const last: Button[] = [
+    { text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` },
+    { text: "Lewati", callback_data: a("lewati") },
+  ];
+  if (p.paragraph && (p.hl_start !== null || p.paragraph.length > CONTEXT * 2)) last.push({ text: "📄", callback_data: `x:${p.id}` });
   if (KURASI_URL) last.push({ text: "Buka di /kurasi", url: `${KURASI_URL}/kurasi/${p.event_id}` });
   rows.push(last);
   return rows;
@@ -250,13 +267,13 @@ async function topUp(s: State): Promise<void> {
   for (const [id, msg] of Object.entries(s.sent)) {
     const p = await getPoint(Number(id));
     if (p && p.status === "open") continue;
-    delete s.sent[id];
+    forget(s, Number(id));
     await edit(msg, p ? `${await answeredText(p)}\n<i>dijawab di /kurasi</i>` : "<i>Poin ini sudah tidak ada.</i>");
   }
   // More open cards than BATCH (it was lowered): take the extra ones back out of the chat.
   for (const id of Object.keys(s.sent).sort((a, b) => s.sent[b] - s.sent[a]).slice(0, Math.max(0, Object.keys(s.sent).length - BATCH))) {
-    await tg("deleteMessage", { chat_id: CHAT, message_id: s.sent[id] }).catch(() => {});
-    delete s.sent[id];
+    await drop(s.sent[id]);
+    forget(s, Number(id));
   }
   while (Object.keys(s.sent).length < BATCH) {
     const p = await nextPoint(s);
@@ -281,6 +298,163 @@ async function nextPoint(s: State): Promise<Point | null> {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Corrections: the right answer instead, saved as /kurasi's "koreksi".
+//
+// Peristiwa and lini list the events /kurasi offers, on the card itself; a
+// typed reply searches titles. Pelaku and pembicara ask for a name as a
+// Telegram reply and list the figures it matches; pembicara can also create
+// the figure, as "Tokoh baru" does in /kurasi.
+
+const PAGE = 6;
+const FOUND = 8;
+
+const figureKind = (p: Point) => p.kind === "pelaku" || p.kind === "pembicara";
+
+const clip = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
+
+/** The event a lini point already proposes, which a correction must not repeat. */
+const liniOther = (p: Point) => (p.proposal.earlier_id === p.event_id ? p.proposal.later_id : p.proposal.earlier_id);
+
+/** Events a peristiwa or lini point can be corrected to; `q` searches titles instead. */
+async function eventChoices(p: Point, q = ""): Promise<{ id: number; label: string }[]> {
+  const item = await getItem(p.event_id);
+  if (!item) return [];
+  const label = (e: { title: string | null; event_date: string | null }, extra = "") =>
+    clip(`${day(e.event_date)}${extra} · ${e.title ?? "tanpa judul"}`, 60);
+  if (p.kind === "peristiwa") {
+    const rows = q
+      ? await lquery<{ event_id: number; title: string | null; event_date: string | null }>(
+          `SELECT id AS event_id, title, event_date FROM events
+            WHERE kind = 'peristiwa' AND curated IS NOT 'rejected' AND title LIKE '%' || ? || '%' ESCAPE '\\'
+            ORDER BY abs(julianday(event_date) - julianday(?)) LIMIT 40`,
+          [q.replace(/[%_\\]/g, "\\$&"), item.event_date ?? new Date().toISOString()]
+        )
+      : item.nearby;
+    return rows.filter((e) => e.event_id !== p.proposal.peristiwa_id).map((e) => ({ id: e.event_id, label: label(e) }));
+  }
+  const other = liniOther(p);
+  return (await getFollowupCandidates(item, q))
+    .filter((e) => e.event_id !== other)
+    .slice(0, 40)
+    .map((e) => ({ id: e.event_id, label: label(e, e.before ? " · sebelum" : " · sesudah") }));
+}
+
+const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+
+/** Tracked figures matching a typed name: name first, then aliases, then office. */
+function findFigures(all: FigureOption[], q: string, skip: string | null | undefined): FigureOption[] {
+  const t = fold(q);
+  if (t.length < 2) return [];
+  const score = (f: FigureOption) => {
+    const name = fold(f.name);
+    const aliases = f.aliases.map(fold);
+    if (name === t || aliases.includes(t)) return 100;
+    if (name.startsWith(t)) return 80;
+    if (new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(name)) return 70;
+    if (name.includes(t)) return 60;
+    if (aliases.some((a) => a.includes(t))) return 50;
+    if (fold(f.role ?? "").includes(t)) return 20;
+    return 0;
+  };
+  return all
+    .filter((f) => f.id !== skip)
+    .map((f) => ({ f, n: score(f) }))
+    .filter((x) => x.n > 0)
+    .sort((a, b) => b.n - a.n || b.f.records - a.f.records)
+    .slice(0, FOUND)
+    .map((x) => x.f);
+}
+
+/** The card turned into a list of choices, with paging and a way back. */
+async function showEvents(s: State, p: Point, msgId: number, page: number, q = ""): Promise<void> {
+  const choices = await eventChoices(p, q);
+  s.picks[p.id] = choices.map((c) => String(c.id));
+  const what = p.kind === "peristiwa" ? "peristiwa yang benar" : "kelanjutan yang benar";
+  const head = q ? `Hasil “${esc(q)}”` : p.kind === "peristiwa" ? "Peristiwa dalam ±7 hari" : "Kandidat lini cerita";
+  const pages = Math.max(1, Math.ceil(choices.length / PAGE));
+  page = Math.min(Math.max(0, page), pages - 1);
+  const rows: Keyboard = choices.slice(page * PAGE, page * PAGE + PAGE)
+    .map((c, i) => [{ text: c.label, callback_data: `p:${p.id}:${page * PAGE + i}` }]);
+  if (pages > 1) {
+    rows.push([
+      ...(page > 0 ? [{ text: "‹", callback_data: `k:${p.id}:${page - 1}` }] : []),
+      { text: `${page + 1}/${pages}`, callback_data: `k:${p.id}:${page}` },
+      ...(page < pages - 1 ? [{ text: "›", callback_data: `k:${p.id}:${page + 1}` }] : []),
+    ]);
+  }
+  rows.push([{ text: "🔎 Ketik judul", callback_data: `s:${p.id}` }, { text: "← Kembali", callback_data: `b:${p.id}` }]);
+  const body = choices.length
+    ? `<b>✏️ Bukan — pilih ${what}.</b> ${head}:`
+    : `<b>✏️ ${head}: tidak ada.</b> Ketik judul untuk mencari, atau Kembali.`;
+  await edit(msgId, `${await cardText(p)}\n\n${body}`, rows);
+}
+
+/** The card with the figures a typed name matched, and for pembicara a new one to create. */
+async function showFigures(s: State, p: Point, msgId: number, typed: string): Promise<void> {
+  const [rawName, ...rest] = typed.split(",");
+  const name = rawName.trim().slice(0, 200);
+  const role = rest.join(",").trim().slice(0, 300);
+  const found = findFigures(await getFigureOptions(), name, p.kind === "pelaku" ? p.proposal.figure_id : null);
+  s.picks[p.id] = found.map((f) => f.id);
+  const rows: Keyboard = found.map((f, i) => [{ text: clip(`${f.name}${f.role ? ` · ${f.role}` : ""}`, 60), callback_data: `p:${p.id}:${i}` }]);
+  if (p.kind === "pembicara" && name.length >= 3) {
+    s.newFig[p.id] = { name, role };
+    rows.push([{ text: clip(`➕ Tokoh baru: ${name}${role ? ` (${role})` : ""}`, 60), callback_data: `n:${p.id}` }]);
+  }
+  rows.push([{ text: "🔎 Cari lagi", callback_data: `s:${p.id}` }, { text: "← Kembali", callback_data: `b:${p.id}` }]);
+  const who = p.kind === "pelaku" ? "pelakunya" : `“${esc(p.proposal.speaker ?? "")}”`;
+  const body = found.length
+    ? `<b>✏️ Siapa ${who}?</b> Hasil “${esc(name)}”:`
+    : `<b>✏️ Tidak ada tokoh yang cocok dengan “${esc(name)}”.</b>${p.kind === "pembicara" ? " Buat tokoh baru, atau cari lagi." : " Cari lagi, atau Kembali."}`;
+  await edit(msgId, `${await cardText(p)}\n\n${body}`, rows);
+}
+
+/** Ask for a name or title as a reply to the card; the reply comes back to onMessage. */
+async function prompt(s: State, p: Point, msgId: number): Promise<void> {
+  const ask = figureKind(p)
+    ? p.kind === "pembicara"
+      ? "Ketik nama tokohnya. Untuk tokoh baru, tambahkan jabatan setelah koma: <i>Nama Lengkap, jabatan</i>"
+      : "Ketik nama tokoh yang menjadi pelaku."
+    : "Ketik sebagian judul untuk dicari.";
+  const id = await send(ask, undefined, {
+    reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
+    reply_markup: { force_reply: true, input_field_placeholder: figureKind(p) ? "Nama tokoh" : "Judul" },
+  });
+  s.prompts[id] = p.id;
+}
+
+/** A typed reply: to a prompt, or straight to a card. */
+async function onReply(s: State, replyTo: number, text: string, own: number): Promise<boolean> {
+  let pointId = s.prompts[replyTo];
+  let promptId: number | null = pointId ? replyTo : null;
+  if (!pointId) {
+    const hit = Object.entries(s.sent).find(([, m]) => m === replyTo);
+    if (!hit) return false;
+    pointId = Number(hit[0]);
+  }
+  const p = await getPoint(pointId);
+  const card = s.sent[pointId];
+  if (promptId) delete s.prompts[promptId];
+  if (!p || p.status !== "open" || !card) {
+    await send("Kartu itu sudah dijawab.");
+    return true;
+  }
+  if (figureKind(p)) await showFigures(s, p, card, text.trim());
+  else await showEvents(s, p, card, 0, text.trim().slice(0, 100));
+  // Keep the chat to the card: the question and the typed answer have done their job.
+  if (promptId) await drop(promptId);
+  await drop(own);
+  return true;
+}
+
+function forget(s: State, pointId: number): void {
+  delete s.sent[pointId];
+  delete s.picks[pointId];
+  delete s.newFig[pointId];
+  for (const [m, id] of Object.entries(s.prompts)) if (id === pointId) delete s.prompts[m];
+}
+
 async function status(): Promise<string> {
   const stats = await getKindStats();
   if (!stats) return "Belum ada poin kurasi di jejak.db.";
@@ -297,28 +471,55 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
   try {
     const p = Number.isInteger(id) ? await getPoint(id) : null;
     if (!p || !msg) throw new Error("Poin ini sudah tidak ada.");
-    if (kind === "a") {
-      if (p.status !== "open" && p.status !== "lewati") throw new Error("Sudah dijawab.");
-      const decoded = decode(p, code ?? "");
-      if (!decoded) throw new Error("Tombol tidak dikenal.");
-      await answerPoint(p.id, ...decoded);
-      delete s.sent[p.id];
+    const open = p.status === "open" || p.status === "lewati";
+    const answer = async (a: PointAnswer, correction: string | null) => {
+      if (!open) throw new Error("Sudah dijawab.");
+      await answerPoint(p.id, a, correction);
+      forget(s, p.id);
       const done = (await getPoint(p.id))!;
       await edit(msg.message_id, await answeredText(done), [[{ text: "Batalkan", callback_data: `u:${p.id}` }]]);
       note = "Tersimpan";
+    };
+    if (kind === "a") {
+      const decoded = decode(p, code ?? "");
+      if (!decoded) throw new Error("Tombol tidak dikenal.");
+      await answer(...decoded);
     } else if (kind === "u") {
       await undoPoint(p.id);
       const back = (await getPoint(p.id))!;
       s.sent[p.id] = msg.message_id;
       await edit(msg.message_id, await cardText(back), cardKeyboard(back));
       note = "Dibatalkan";
+    } else if (kind === "k" || kind === "s") {
+      if (!open) throw new Error("Sudah dijawab.");
+      // Figures have no list to start from: ask for a name straight away.
+      if (kind === "s" || figureKind(p)) await prompt(s, p, msg.message_id);
+      else await showEvents(s, p, msg.message_id, Number(code) || 0);
+    } else if (kind === "p") {
+      const pick = s.picks[p.id]?.[Number(code)];
+      if (!pick) throw new Error("Pilihan ini sudah kedaluwarsa; buka Koreksi lagi.");
+      await answer("koreksi", pick);
+    } else if (kind === "n") {
+      const fig = s.newFig[p.id];
+      if (!fig) throw new Error("Ketik namanya lagi.");
+      const out = await pipelineOp("new-figure", fig.name, ...(fig.role ? ["--role", fig.role] : []));
+      await answer("koreksi", out.split("\n").pop()!.trim());
+      note = `Tokoh baru dibuat: ${fig.name}`;
+    } else if (kind === "b") {
+      if (!open) throw new Error("Sudah dijawab.");
+      delete s.picks[p.id];
+      await edit(msg.message_id, await cardText(p), cardKeyboard(p));
+    } else if (kind === "x") {
+      await send(`<b>Paragraf lengkap</b>${p.source ? ` · ${esc(p.source)}` : ""}\n\n${esc(p.paragraph ?? "")}`, undefined, {
+        reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true },
+      });
     }
   } catch (e) {
     note = e instanceof Error ? e.message : String(e);
     // Show the card as it now stands, so a stale one doesn't stay tappable.
     const p = Number.isInteger(id) ? await getPoint(id).catch(() => null) : null;
     if (msg && p && p.status !== "open") {
-      delete s.sent[p.id];
+      forget(s, p.id);
       const undoable = p.answered_by === "curator" && ["ya", "bukan", "koreksi", "lewati"].includes(p.status);
       await edit(msg.message_id, await answeredText(p), undoable ? [[{ text: "Batalkan", callback_data: `u:${p.id}` }]] : []).catch(() => {});
     }
@@ -326,7 +527,9 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
   await tg("answerCallbackQuery", { callback_query_id: q.id, text: note.slice(0, 190) }).catch(() => {});
 }
 
-async function onMessage(s: State, text: string): Promise<void> {
+async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<void> {
+  const text = m.text ?? "";
+  if (m.reply_to_message && !text.startsWith("/") && (await onReply(s, m.reply_to_message.message_id, text, m.message_id))) return;
   const cmd = text.trim().split(/[\s@]/)[0].toLowerCase();
   if (cmd === "/status") await send(await status());
   else if (cmd === "/start" || cmd === "/lagi") await topUp(s);
@@ -365,6 +568,11 @@ async function main(): Promise<void> {
       { command: "status", description: "Jumlah poin terbuka per jenis" },
     ],
   }).catch(() => {});
+  // Cards from before a restart get this version's text and buttons.
+  for (const [id, msg] of Object.entries(s.sent)) {
+    const p = await getPoint(Number(id));
+    if (p?.status === "open") await edit(msg, await cardText(p), cardKeyboard(p)).catch(() => {});
+  }
   await topUp(s);
   console.log(`telegram-bot: up, ${Object.keys(s.sent).length} cards open in chat ${CHAT}`);
   for (;;) {
@@ -377,7 +585,7 @@ async function main(): Promise<void> {
         const chat = u.callback_query?.message?.chat.id ?? u.message?.chat.id;
         if (String(chat) !== CHAT) continue; // anyone else who finds the bot gets nothing
         if (u.callback_query) await onCallback(s, u.callback_query);
-        else if (u.message?.text) await onMessage(s, u.message.text);
+        else if (u.message?.text) await onMessage(s, u.message);
       }
       await topUp(s);
     } catch (e) {
