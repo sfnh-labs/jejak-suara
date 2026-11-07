@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
+  canonicalOrg,
+  getOrgChoices,
   isLinkVerdict,
   isReasonCode,
   isVerdict,
@@ -159,8 +161,11 @@ export async function editFigure(formData: FormData): Promise<void> {
   const roles = column("pos_role");
   const orgs = column("pos_org");
   const periods = column("pos_period");
+  // An organisation typed the way another office already spells it ("kpk",
+  // "Partai golkar") is stored as that spelling, so one body is never two.
+  const known = await getOrgChoices();
   const positions: Position[] = roles
-    .map((role, i) => ({ role, org: orgs[i] ?? "", period: periods[i] ?? "" }))
+    .map((role, i) => ({ role, org: canonicalOrg(orgs[i] ?? "", known), period: periods[i] ?? "" }))
     .filter((p) => p.role || p.org);
   if (positions.length > 20) throw new Error("too many positions");
   const role = positions.length > 0 ? positionTitle(positions[0]) : null;
@@ -362,6 +367,13 @@ export async function answerCurationPoint(formData: FormData): Promise<void> {
   }
   if (figure && figure !== NOT_TRACKED && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figure)) throw new Error("choose a figure");
   done(await answerPoint(pointId, answer, figure));
+}
+
+/** Open the catatan's automatic decisions as points, to check them (open_checks). */
+export async function openDecisionPoints(formData: FormData): Promise<void> {
+  const id = eventId(formData);
+  await pipelineOp("open-checks", String(id));
+  done(id);
 }
 
 /** "Batalkan": put the record back as it was before the answer, and ask again. */

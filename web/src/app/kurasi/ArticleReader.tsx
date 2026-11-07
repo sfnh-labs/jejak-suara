@@ -8,7 +8,7 @@ import { INK, MUTED, RULE, SURFACE, day } from "./ui";
 /** A name to mark in the text, and why it is there. */
 export interface ReaderTerm {
   text: string;
-  /** owner: the record's own figure · figure: another tracked one · candidate: a new name */
+  /** owner: one of the record's Pelaku · figure: another tracked one · candidate: a new name */
   kind: "owner" | "figure" | "candidate";
   /** Who it marks, for the hover title. */
   label: string;

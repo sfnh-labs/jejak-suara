@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DrawerShell } from "./DrawerShell";
 import { INK, MUTED, RULE } from "./ui";
 
 /**
@@ -155,14 +156,35 @@ export function Group({ label, action, children, last = false }: { label: React.
   );
 }
 
-/** A text action: clay and bold like the site's action links, or a quiet underlined one. */
-export function TextLink({ href, children, tone = "ink" }: { href: string; children: React.ReactNode; tone?: "ink" | "muted" }) {
-  return tone === "ink" ? (
-    <Link href={href} scroll={false} className="link" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>{children}</Link>
-  ) : (
-    <span style={{ fontSize: 12.5, color: MUTED, whiteSpace: "nowrap" }}>
-      <Link href={href} scroll={false} className="link-subtle">{children}</Link>
-    </span>
+/**
+ * The mark on a link that opens the right-hand panel rather than leaving the
+ * page: a window with its side pane filled.
+ */
+export function PanelMark() {
+  return (
+    <svg aria-hidden width="11" height="11" viewBox="0 0 12 12" style={{ marginLeft: 5, verticalAlign: "-1px", flex: "none", display: "inline-block" }}>
+      <rect x="0.75" y="0.75" width="10.5" height="10.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="7" y="0.75" width="4.25" height="10.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * A text link that opens a panel: clay and bold like the site's action links
+ * (or quieter, in the muted tone), always ending in the panel mark, so it
+ * reads apart from running text and from links that go elsewhere.
+ */
+export function TextLink({ href, children, tone = "ink", size = 12.5 }: { href: string; children: React.ReactNode; tone?: "ink" | "muted"; size?: number }) {
+  return (
+    <Link
+      href={href}
+      scroll={false}
+      className="link"
+      style={{ fontSize: size, whiteSpace: "nowrap", ...(tone === "muted" ? { color: "var(--color-mud)", fontWeight: 600 } : {}) }}
+    >
+      {children}
+      <PanelMark />
+    </Link>
   );
 }
 
@@ -237,7 +259,7 @@ export function Drawer({ crumb, title, closeHref, width = 560, aside, children }
   children: React.ReactNode;
 }) {
   return (
-    <>
+    <DrawerShell closeHref={closeHref}>
       <Link href={closeHref} scroll={false} aria-label="Tutup panel" tabIndex={-1} style={{ position: "fixed", inset: 0, background: "rgba(22, 19, 15, 0.38)", zIndex: 40 }} />
       <div role="dialog" aria-modal="false" style={{ position: "fixed", top: 0, right: 0, bottom: 0, width, maxWidth: "100%", zIndex: 41, background: "var(--color-cream)", borderLeft: `3px double ${INK}`, boxShadow: "-12px 0 40px rgba(22, 19, 15, 0.25)", display: "flex", flexDirection: "column" }}>
         <div className="rule-heavy" style={{ padding: "18px 24px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -256,7 +278,7 @@ export function Drawer({ crumb, title, closeHref, width = 560, aside, children }
           {children}
         </div>
       </div>
-    </>
+    </DrawerShell>
   );
 }
 

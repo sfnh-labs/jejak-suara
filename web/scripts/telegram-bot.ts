@@ -177,7 +177,10 @@ function noEffect(p: Point): string {
   switch (p.kind) {
     case "peristiwa": return "usulan tautan ditolak dan tidak ditanyakan lagi.";
     case "lini": return "usulan lini ditolak dan tidak ditanyakan lagi.";
-    case "pelaku": return `${p.proposal.name} tetap di Disebut; pelakunya tidak berubah.`;
+    case "pelaku":
+      return p.proposal.check === "pelaku"
+        ? `${p.proposal.name} pindah ke Disebut.`
+        : `${p.proposal.name} tetap di Disebut; pelakunya tidak berubah.`;
     default: return "tidak ada yang berubah.";
   }
 }
@@ -185,6 +188,15 @@ function noEffect(p: Point): string {
 function meter(p: Point): string {
   const c = p.confidence;
   return c.value === null ? "yakin –" : `yakin ${Math.round(c.value * 100)}% (${c.agreed}/${c.answered})`;
+}
+
+/**
+ * A decision the pipeline made without asking (a cek: point, opened from
+ * /kurasi): said on the card, since Ya there confirms what is already done.
+ */
+function checkTag(p: Point): string {
+  if (!p.proposal.check) return "";
+  return p.proposal.check === "usul" ? " · dari kutipan" : " · keputusan otomatis";
 }
 
 /** The other figures a pembicara point offers, as /kurasi lists them. */
@@ -196,7 +208,7 @@ async function cardText(p: Point): Promise<string> {
   const ev = await lqueryOne<{ title: string | null }>(`SELECT title FROM events WHERE id = ?`, [p.event_id]);
   const x = p.proposal;
   const lines = [
-    `<b>${esc(KIND_LABEL[p.kind].toUpperCase())}</b> · ${meter(p)}${p.spot_check ? " · cek acak" : ""}`,
+    `<b>${esc(KIND_LABEL[p.kind].toUpperCase())}</b> · ${meter(p)}${checkTag(p)}${p.spot_check ? " · cek acak" : ""}`,
     `<i>${esc(ev?.title ?? `Catatan #${p.event_id}`)}</i>`,
     "",
   ];
@@ -215,7 +227,7 @@ async function cardText(p: Point): Promise<string> {
   };
   if (p.kind === "pembicara") {
     lines.push(`<b>Siapa “${esc(x.speaker ?? "")}” di sini?</b>`);
-    lines.push(`Tebakan pipeline: ${x.figure_id ? who(x.figure_id, x.name ?? x.figure_id) : "bukan tokoh yang dilacak"}.`);
+    lines.push(`${x.check ? "Pipeline sudah menuliskannya atas nama" : "Tebakan pipeline:"} ${x.figure_id ? who(x.figure_id, x.name ?? x.figure_id) : "bukan tokoh yang dilacak"}.`);
     const alt = others(p);
     if (alt.length) lines.push(`Kandidat lain: ${alt.map((c) => who(c.id, c.name)).join("; ")}.`);
     if (p.group_size > 1) lines.push(`Jawabanmu berlaku untuk ${p.group_size} kutipan sekaligus.`);
@@ -245,8 +257,10 @@ function cardKeyboard(p: Point): Keyboard {
   } else {
     rows.push([{ text: "Ya", callback_data: a("ya") }, { text: "Bukan", callback_data: a("bukan") }]);
   }
+  // A Pelaku the pipeline set is kept or moved to Disebut; who else acts is
+  // added in /kurasi, as there.
   rows.push([
-    { text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` },
+    ...(p.proposal.check === "pelaku" ? [] : [{ text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` }]),
     { text: "⏭ Lewati", callback_data: a("lewati") },
   ]);
   // The article on its outlet's site, in Telegram's own browser.
@@ -472,6 +486,11 @@ async function onReply(s: State, replyTo: number, text: string, own: number): Pr
   if (promptId) delete s.prompts[promptId];
   if (!p || p.status !== "open" || !card) {
     await send("Kartu itu sudah dijawab.");
+    return true;
+  }
+  if (p.proposal.check === "pelaku") {
+    await send("Kartu ini hanya Ya atau Bukan; tambahkan pelaku lain di /kurasi.");
+    await drop(own);
     return true;
   }
   if (figureKind(p)) await showFigures(s, p, card, text.trim());

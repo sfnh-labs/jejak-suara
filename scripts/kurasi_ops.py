@@ -183,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("rework").add_argument("request_id", type=int)
     sub.add_parser("rework-accept").add_argument("request_id", type=int)
     sub.add_parser("cv-draft").add_argument("proposal_id", type=int)
+    sub.add_parser("open-checks").add_argument("event_id", type=int)
     args = ap.parse_args(argv)
 
     db.init_db(args.db)
@@ -202,6 +203,9 @@ def main(argv: list[str] | None = None) -> int:
             line = accept_rework(conn, args.request_id)
         elif args.cmd == "cv-draft":
             line = draft_cv(conn, args.proposal_id)
+        elif args.cmd == "open-checks":
+            from jejak.curation_points import open_checks
+            line = f"{open_checks(conn, args.event_id)} points opened"
         else:
             line = f"{candidate_queue.refresh(conn)} names in the queue"
         conn.commit()
