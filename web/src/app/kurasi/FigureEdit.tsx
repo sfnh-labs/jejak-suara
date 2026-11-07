@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { likelyDuplicates, positionLine, type FigureOption, type FigureRef, type NamedPerson, type Organization, type Position, type Profile } from "@/lib/curation";
+import { likelyDuplicates, positionLine, type FigureOption, type FigureRef, type NamedPerson, type OrgChoice, type Position, type Profile } from "@/lib/curation";
 import { decide } from "./kandidat/actions";
 import { AcceptCandidateForm } from "./AcceptCandidateForm";
+import { OrgPicker } from "./OrgPicker";
 import { editFigure, mergeFigures, notAPerson } from "./actions";
-import { Hidden, Pill, type PillTone } from "./kit";
+import { Hidden, Pill, TextLink, type PillTone } from "./kit";
 import { INK, MUTED, RULE, SURFACE, button, input, label } from "./ui";
 
 /**
@@ -146,10 +147,11 @@ export function FigureForm({ figure, eventId }: { figure: FigureRef | NamedPerso
 }
 
 /**
- * Offices as rows of role, organisation and period. Plain inputs with no
- * script, so there are always two blank rows to add to; clearing a row
- * deletes it. A figure with no curated offices yet starts from its one-line
- * title in the role column, to be split into role and organisation.
+ * Offices, one block each: the role and its period, then the organisation
+ * on its own line, picked from the known ones (OrgPicker). There are always
+ * two blank blocks to add to; clearing one deletes it. A figure with no
+ * curated offices yet starts from its one-line title as the role, to be
+ * split into role and organisation.
  */
 function Positions({ figure }: { figure: FigureRef | NamedPerson }) {
   const rows: Position[] = figure.positions.length > 0
@@ -158,18 +160,13 @@ function Positions({ figure }: { figure: FigureRef | NamedPerson }) {
   const blank = { role: "", org: "", period: "" };
   const all = [...rows, blank, blank];
   return (
-    <fieldset style={{ gridColumn: "1 / -1", border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-      <legend style={{ ...label, padding: 0, marginBottom: 6 }}>
-        Jabatan dan lembaga. Baris pertama adalah jabatan utama, tampil di bawah nama di seluruh situs. Kosongkan baris untuk menghapus.
+    <fieldset style={{ gridColumn: "1 / -1", border: 0, padding: 0, margin: 0, minWidth: 0, display: "grid", gap: 10 }}>
+      <legend style={{ ...label, padding: 0, marginBottom: 8 }}>
+        Jabatan. Yang pertama adalah jabatan utama, tampil di bawah nama di seluruh situs. Kosongkan jabatan dan lembaganya untuk menghapus.
       </legend>
-      <div style={{ display: "grid", gap: 6, gridTemplateColumns: "minmax(120px, 1.2fr) minmax(120px, 1.2fr) minmax(100px, 0.8fr)" }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>Jabatan</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>Lembaga / organisasi</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: MUTED }}>Periode</span>
-        {all.map((p, i) => (
-          <PositionRow key={i} position={p} main={i === 0} />
-        ))}
-      </div>
+      {all.map((p, i) => (
+        <PositionRow key={i} position={p} index={i} filled={i < rows.length} />
+      ))}
     </fieldset>
   );
 }
@@ -241,30 +238,50 @@ function FactRow({ a, b, style, hint }: { a: [string, string, string]; b: [strin
   );
 }
 
-function PositionRow({ position: p, main }: { position: Position; main: boolean }) {
-  const cell = { ...input, width: "100%", fontWeight: main ? 600 : 400 };
+function PositionRow({ position: p, index, filled }: { position: Position; index: number; filled: boolean }) {
+  const main = index === 0;
+  const field = { fontSize: 11, fontWeight: 700, color: MUTED, display: "grid", gap: 3 } as const;
   return (
-    <>
-      <input name="pos_role" defaultValue={p.role} placeholder={main ? "mis. Ketua" : ""} style={cell} aria-label="Jabatan" />
-      <input name="pos_org" list={ORG_LIST} autoComplete="off" defaultValue={p.org} placeholder={main ? "mis. MPR RI" : ""} style={cell} aria-label="Lembaga" />
-      <input name="pos_period" defaultValue={p.period} placeholder={main ? "2024–sekarang" : ""} style={cell} aria-label="Periode" />
-    </>
+    <div
+      style={{
+        display: "grid", gap: 8, padding: "10px 12px", background: SURFACE,
+        border: main ? "1.5px solid var(--color-ink)" : `1px ${filled ? "solid" : "dashed"} ${filled ? RULE : "var(--color-parchment-dark)"}`,
+      }}
+    >
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: main ? "var(--color-clay)" : MUTED }}>
+        {main ? "Jabatan utama" : filled ? `Jabatan ${index + 1}` : "Tambah jabatan"}
+      </div>
+      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(160px, 2fr) minmax(110px, 1fr)" }}>
+        <label style={field}>
+          Jabatan
+          <input name="pos_role" defaultValue={p.role} placeholder={main ? "mis. Ketua" : ""} style={{ ...input, width: "100%", fontWeight: main ? 600 : 400 }} />
+        </label>
+        <label style={field}>
+          Periode
+          <input name="pos_period" defaultValue={p.period} placeholder={main ? "2024–sekarang" : ""} style={{ ...input, width: "100%" }} />
+        </label>
+      </div>
+      <div style={field}>
+        <span>Lembaga / organisasi</span>
+        <OrgPicker listId={ORG_LIST} defaultValue={p.org} placeholder={main ? "Cari lembaga, mis. MPR atau Kabinet Merah Putih" : undefined} />
+      </div>
+    </div>
   );
 }
 
 export const ORG_LIST = "org-options";
 
 /**
- * Both names of every organisation in /kurasi/organisasi, for the office
- * rows: typing "KPK" or "Komisi Pem…" offers either form, the other as hint.
+ * Every known organisation once per page (lib/curation getOrgChoices), for
+ * the office pickers to search: its name, its short name and how many
+ * figures hold an office there.
  */
-export function OrgOptions({ orgs }: { orgs: Organization[] }) {
+export function OrgOptions({ orgs }: { orgs: OrgChoice[] }) {
   return (
     <datalist id={ORG_LIST}>
-      {orgs.flatMap((o) => [
-        ...(o.short_name ? [<option key={`${o.id}s`} value={o.short_name} label={o.name} />] : []),
-        <option key={`${o.id}l`} value={o.name} label={o.short_name ?? ""} />,
-      ])}
+      {orgs.map((o) => (
+        <option key={o.name} value={o.name} data-short={o.short_name ?? ""} data-uses={o.uses} />
+      ))}
     </datalist>
   );
 }
@@ -369,7 +386,7 @@ export function SamePerson({ person: p, eventId, figures, open }: { person: Name
             <span style={{ flex: "1 1 260px", minWidth: 0, fontSize: 13.5 }}>
               <strong style={{ fontFamily: "var(--font-serif)", fontSize: 15 }}>{f.name}</strong>
               <span style={{ color: MUTED }}>{f.title ? ` – ${f.title}` : ""} · {f.records} catatan · </span>
-              <Link href={open(`tokoh:${f.id}`)} scroll={false} style={{ color: MUTED, fontSize: 12 }}>lihat ›</Link>
+              <TextLink href={open(`tokoh:${f.id}`)} tone="muted" size={12}>lihat tokohnya</TextLink>
               <span style={{ display: "block", fontSize: 12, color: MUTED }}>{why}</span>
             </span>
             <SameAction person={p} eventId={eventId} into={f.id} intoName={f.name}

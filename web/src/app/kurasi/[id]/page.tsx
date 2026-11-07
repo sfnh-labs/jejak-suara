@@ -1,15 +1,15 @@
 import Link from "next/link";
 import FigurePortrait from "@/components/FigurePortrait";
 import { notFound } from "next/navigation";
-import { REASONS, figureTitle, positionLine, getActors, getFigureOptions, getOrganizations, getFollowupCandidates, getItem, getReading, reasonLabel, type Actor, type FigureOption, type FollowupCandidate, type FollowupRow, type Item, type Rework, type ReworkSnapshot, type LinkRow, type NamedPerson, type QuoteRow } from "@/lib/curation";
+import { REASONS, figureTitle, positionLine, getActors, getFigureOptions, getOrgChoices, getFollowupCandidates, getItem, getReading, reasonLabel, type Actor, type FigureOption, type FollowupCandidate, type FollowupRow, type Item, type Rework, type ReworkSnapshot, type LinkRow, type NamedPerson, type QuoteRow } from "@/lib/curation";
 import { decide } from "../kandidat/actions";
 import { FigurePicker, SpeakerEditor } from "../FigurePicker";
 import { ArticleReader, type ReaderFocus, type ReaderTerm } from "../ArticleReader";
 import { EventPanel, FigurePanel, type Relation } from "../SidePanel";
 import { eventPanel, getEventPeek, getFigurePeek, parsePanel, type EventPeek, type FigurePeek, type PanelRef } from "@/lib/panels";
 import { PointList } from "../CurationPoints";
-import { getPoints } from "@/lib/curationPoints";
-import { addFollowup, curate, relateFigure, ruleFollowup, ruleLink, rework, decideRework, setQuoteSpeaker, pickQuote, newQuote, setRecordActor } from "../actions";
+import { AUTO_MIN_AGREEMENT, AUTO_MIN_ANSWERS, getPoints, getUncheckedCount } from "@/lib/curationPoints";
+import { addFollowup, curate, relateFigure, ruleFollowup, ruleLink, rework, decideRework, setQuoteSpeaker, pickQuote, newQuote, setRecordActor, openDecisionPoints } from "../actions";
 import { storyImageSource, storylines } from "@/lib/data";
 import { EventBanner } from "../EventImage";
 import { placeGroups, provinceLabel, provincesIn } from "@/lib/places";
@@ -54,12 +54,12 @@ export default async function KurasiItem({
   const { perlu, cari = "", baca, p: pointParam, panel: panelParam } = await searchParams;
   const eventId = Number(id);
   if (!Number.isInteger(eventId) || eventId <= 0) notFound();
-  const [item, figures, orgs] = await Promise.all([getItem(eventId), getFigureOptions(), getOrganizations()]);
+  const [item, figures, orgs] = await Promise.all([getItem(eventId), getFigureOptions(), getOrgChoices()]);
   if (!item) notFound();
   const isRecord = item.kind === "record";
   // One drawer at a time: an article, or a panel; opening either closes the other.
   const panelRef = baca ? null : parsePanel(panelParam);
-  const [candidates, reading, points, peek, actors] = await Promise.all([
+  const [candidates, reading, points, peek, actors, unchecked] = await Promise.all([
     panelRef?.kind === "lini" ? getFollowupCandidates(item, cari.slice(0, 100)) : Promise.resolve([] as FollowupCandidate[]),
     baca ? getReading(eventId, baca.slice(0, 128)) : null,
     getPoints(eventId),
@@ -67,6 +67,7 @@ export default async function KurasiItem({
       : panelRef?.kind === "peristiwa" || panelRef?.kind === "catatan" ? getEventPeek(panelRef.id)
       : null,
     isRecord ? getActors(eventId, item.figure_id) : Promise.resolve([] as Actor[]),
+    getUncheckedCount(eventId),
   ]);
   const openPoints = points.filter((p) => p.status === "open" || p.status === "lewati").length;
   // A lini point can be corrected to another suggestion; read them only when one waits.
@@ -89,7 +90,7 @@ export default async function KurasiItem({
   };
   const read = (article: string) => at({ baca: article });
   const open: Open = (panel) => at({ panel });
-  const terms = readerTerms(item);
+  const terms = readerTerms(item, actors);
   // "baca beritanya" on a point: the reader opens at the paragraph it quotes.
   const focused = reading ? points.find((p) => String(p.id) === pointParam && p.article_id === reading.id) : undefined;
   const focus: ReaderFocus | undefined = focused?.paragraph
@@ -134,7 +135,13 @@ export default async function KurasiItem({
         <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>
           {day(item.event_date)}
           {item.last_seen && day(item.last_seen) !== day(item.event_date) ? ` – ${day(item.last_seen)}` : ""}
-          {isRecord && item.owner ? <> · tentang <Link href={open(`tokoh:${item.owner.id}`)} scroll={false} className="link-subtle" style={{ color: INK, fontWeight: 600 }}>{item.owner.name}</Link></> : null}
+          {isRecord ? (
+            actors.length ? (
+              <> · pelaku {actors.map((a, i) => (
+                <span key={a.id}>{i ? ", " : ""}<Link href={open(`tokoh:${a.id}`)} scroll={false} className="link-subtle" style={{ color: INK, fontWeight: 600 }}>{a.name}</Link></span>
+              ))}</>
+            ) : <> · belum ada pelaku</>
+          ) : null}
           {` · ${outlets} media · ${item.sources.length} artikel`}
         </p>
         {outlets <= 1 || scattered ? (
@@ -165,8 +172,9 @@ export default async function KurasiItem({
               id="poin"
               title="Poin kurasi"
               count={points.length ? `${openPoints} terbuka · ${points.length - openPoints} terjawab` : undefined}
-              note="Penilaian pipeline yang belum yakin. Jawabanmu langsung mengubah isi dan relasi catatan ini, dan menambah keyakinan untuk poin sejenis."
+              note="Penilaian pipeline yang belum yakin, dan keputusan otomatisnya yang kamu buka untuk dicek. Jawabanmu langsung mengubah isi dan relasi catatan ini, dan mengukur keyakinan untuk poin sejenis."
             >
+              {unchecked ? <CheckOffer eventId={eventId} count={unchecked} /> : null}
               {points.length ? (
                 <PointList
                   points={points}
@@ -179,7 +187,10 @@ export default async function KurasiItem({
                   liniPanel={isRecord ? "catatan" : "peristiwa"}
                 />
               ) : (
-                <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Tidak ada. Pipeline yakin dengan semua isi {isRecord ? "catatan" : "peristiwa"} ini.</p>
+                <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>
+                  Pipeline tidak punya pertanyaan untuk {isRecord ? "catatan" : "peristiwa"} ini.
+                  {unchecked ? " Itu belum berarti benar: keputusan otomatisnya belum dicek." : ""}
+                </p>
               )}
             </Card>
 
@@ -261,18 +272,27 @@ function relationTo(item: Item, otherId: number): Relation | null {
  * tracked figures this coverage names, and the new names waiting for a
  * verdict. Two-letter terms are skipped; they would mark half of every page.
  */
-function readerTerms(item: Item): ReaderTerm[] {
+function readerTerms(item: Item, actors: Actor[]): ReaderTerm[] {
   const out: ReaderTerm[] = [];
   const add = (texts: string[], kind: ReaderTerm["kind"], label: string) => {
     for (const text of new Set(texts.map((t) => t.trim()))) {
       if (text.length > 2) out.push({ text, kind, label });
     }
   };
-  if (item.owner) add([item.owner.name, ...item.owner.aliases], "owner", item.owner.name);
+  // Marked "pelaku" is whoever the record's Pelaku are, not the figure it is
+  // filed under; that one is just another tracked name unless also a Pelaku.
+  const pelaku = new Set(actors.map((a) => a.id));
+  const seen = new Set<string>();
+  const figure = (id: string, name: string, aliases: string[]) => {
+    seen.add(id);
+    add([name, ...aliases], pelaku.has(id) ? "owner" : "figure", name);
+  };
+  if (item.owner) figure(item.owner.id, item.owner.name, item.owner.aliases);
   for (const p of item.named) {
-    if (p.kind === "figure") add([p.name, ...p.aliases], "figure", p.name);
+    if (p.kind === "figure") figure(p.id, p.name, p.aliases);
     else if (!p.verdict) add([p.name], "candidate", p.name);
   }
+  for (const a of actors) if (!seen.has(a.id)) add([a.name], "owner", a.name);
   return out;
 }
 
@@ -369,14 +389,12 @@ function Relasi({ item, actors, open }: { item: Item; actors: Actor[]; open: Ope
                   {a.quotes ? ` · ${a.quotes} kutipan` : ""}
                 </span>
               </Link>
-              {actors.length > 1 ? (
-                <form action={setRecordActor}>
+              <form action={setRecordActor}>
                   <Hidden fields={{ event_id: item.event_id, figure_id: a.id, on: "0" }} />
                   <button type="submit" aria-label={`Pindahkan ${a.name} ke Disebut`} style={{ fontSize: 12, background: "none", border: "none", padding: "6px 0", cursor: "pointer", color: "var(--color-mud)", textDecoration: "underline", whiteSpace: "nowrap" }}>
                     ke Disebut
                   </button>
                 </form>
-              ) : null}
             </div>
           ))}
         </Group>
@@ -641,14 +659,10 @@ function FigureDrawer({ item, actors, figures, peek: f, open }: { item: Item; ac
           <span style={{ flex: "1 1 220px", fontSize: 13, color: "var(--color-mud)" }}>
             Di catatan ini: <strong style={{ color: INK }}>{isActor ? "pelaku" : person ? "disebut" : "tidak disebut"}</strong>
           </span>
-          {isActor && actors.length < 2 ? (
-            <span style={{ fontSize: 12, color: MUTED }}>Satu-satunya pelaku</span>
-          ) : (
-            <form action={setRecordActor}>
-              <Hidden fields={{ event_id: item.event_id, figure_id: f.id, on: isActor ? "0" : "1" }} />
-              <button type="submit" style={button(isActor ? "quiet" : "ink")}>{isActor ? "Pindahkan ke Disebut" : "Jadikan pelaku"}</button>
-            </form>
-          )}
+          <form action={setRecordActor}>
+            <Hidden fields={{ event_id: item.event_id, figure_id: f.id, on: isActor ? "0" : "1" }} />
+            <button type="submit" style={button(isActor ? "quiet" : "ink")}>{isActor ? "Pindahkan ke Disebut" : "Jadikan pelaku"}</button>
+          </form>
         </div>
       ) : person ? (
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "10px 12px", borderRadius: 6, background: "var(--color-cream)", border: `1px solid ${RULE}` }}>
@@ -698,7 +712,7 @@ function AddActor({ item, actors, figures }: { item: Item; actors: Actor[]; figu
     <>
       <p style={{ fontSize: 13, color: "var(--color-mud)", lineHeight: 1.55, margin: 0 }}>
         Pelaku adalah yang melakukan atau mengucapkan tindakannya. Yang hanya disebut atau dikutip tetap di Disebut.
-        Catatan tetap beralamat di tokoh {item.owner?.name ?? "aslinya"}; menambah pelaku tidak memindahkannya.
+        Catatan boleh punya beberapa pelaku, atau belum punya sama sekali; tidak ada pelaku utama.
       </p>
       {fromCoverage.length ? (
         <>
@@ -917,7 +931,7 @@ function SuggestionLine({ item, open }: { item: Item; open: Open }) {
       {s.reason ? reasonLabel(s.reason) : "turunkan"}
       {s.confidence !== null ? ` · ${Math.round(s.confidence * 100)}%` : ""}
       {s.support > 0 ? ` · mirip ${s.support} yang pernah kamu turunkan` : ""}
-      {item.examples.length > 0 ? <> · <Link href={open("saran")} scroll={false} style={{ color: "#7a5a12" }}>lihat contohnya</Link></> : null}
+      {item.examples.length > 0 ? <> · <TextLink href={open("saran")} tone="muted" size={12}>lihat contohnya</TextLink></> : null}
     </div>
   );
 }
@@ -1519,5 +1533,26 @@ function QuoteItem({ quote: q, item, actors, figures, first, open }: { quote: Qu
         <SpeakerEditor quoteId={q.id} listId={FIGURE_LIST} canClear={Boolean(q.figure_id) || q.assigned_by !== "curator"} />
       </div>
     </li>
+  );
+}
+
+/**
+ * The decisions the pipeline made here without asking (Pelaku, quote
+ * speakers), offered as points to check. Each answer counts toward the
+ * confidence of its band; a band past the gate can be answered automatically.
+ */
+function CheckOffer({ eventId, count }: { eventId: number; count: number }) {
+  return (
+    <form
+      action={openDecisionPoints}
+      style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "12px 14px", marginBottom: 18, border: `1.5px dashed var(--color-parchment-dark)`, borderRadius: 2 }}
+    >
+      <input type="hidden" name="event_id" value={eventId} />
+      <span style={{ flex: "1 1 320px", fontSize: 13, color: "var(--color-mud)", lineHeight: 1.5 }}>
+        <strong style={{ color: INK }}>{count} keputusan otomatis belum dicek</strong> di sini: Pelaku dan pembicara kutipan yang ditetapkan pipeline tanpa bertanya.
+        Tiap jawabanmu mengukur ketepatannya; jenis yang mencapai {AUTO_MIN_ANSWERS} jawaban dengan ≥{Math.round(AUTO_MIN_AGREEMENT * 100)}% setuju bisa dikonfirmasi otomatis.
+      </span>
+      <button type="submit" style={{ ...button("ink"), padding: "8px 16px" }}>Buka sebagai poin</button>
+    </form>
   );
 }

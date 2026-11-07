@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { figureTitle, getFigureOptions, getOrganizations } from "@/lib/curation";
+import { figureTitle, getFigureOptions, getOrgChoices } from "@/lib/curation";
 import { getFigureFull } from "@/lib/kurasiLists";
 import { FigureForm, FigureOptions, NotAPersonForm, OrgOptions, SamePerson, type Open } from "../../FigureEdit";
 import { Card, Columns, Page, PageHead, Pill, RowLink } from "../../kit";
@@ -21,7 +21,7 @@ export const metadata = {
 export default async function TokohPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[a-z0-9-]{1,128}$/.test(id)) notFound();
-  const [full, figures, orgs] = await Promise.all([getFigureFull(id), getFigureOptions(), getOrganizations()]);
+  const [full, figures, orgs] = await Promise.all([getFigureFull(id), getFigureOptions(), getOrgChoices()]);
   if (!full) notFound();
   const { person: p, records, recordCount, quotes, quoteCount } = full;
   const title = figureTitle(p);

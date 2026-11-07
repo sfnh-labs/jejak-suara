@@ -1555,61 +1555,41 @@ export interface Actor {
 }
 
 export async function getActors(eventId: number, filedId: string | null): Promise<Actor[]> {
+  // Everyone involved, the most quoted first. No one leads the list for being
+  // the figure the record is filed under: a record has Pelaku, not an owner,
+  // and may have none until the curator names them.
   const rows = (await tableExists("record_figures"))
     ? await query<Omit<Actor, "positions" | "filed"> & { positions: string | null }>(
         `SELECT f.id, f.name, f.role, f.positions, rf.quotes, rf.assigned_by
            FROM record_figures rf JOIN figures f ON f.id = rf.figure_id
           WHERE rf.event_id = ? AND rf.role = 'actor'
-          ORDER BY rf.figure_id IS ? DESC, rf.quotes DESC, f.name`,
-        [eventId, filedId]
+          ORDER BY rf.quotes DESC, f.name`,
+        [eventId]
       )
     : [];
-  const actors = rows.map((r) => ({ ...r, positions: parsePositions(r.positions), filed: r.id === filedId }));
-  // A record the participants stage has not reached yet: its filed figure is
-  // its one actor until then.
-  if (actors.length === 0 && filedId) {
-    const f = await queryOne<{ id: string; name: string; role: string | null; positions: string | null }>(
-      `SELECT id, name, role, positions FROM figures WHERE id = ?`, [filedId]
-    );
-    if (f) actors.push({ ...f, positions: parsePositions(f.positions), quotes: 0, filed: true, assigned_by: "auto" });
-  }
-  return actors;
+  return rows.map((r) => ({ ...r, positions: parsePositions(r.positions), filed: r.id === filedId }));
 }
 
 /**
  * Make a figure an actor of a record, or move them back to Disebut. Either
  * way the row becomes the curator's, so the participants stage (which
- * rebuilds only its own rows) keeps it. The last actor cannot be removed.
+ * rebuilds only its own rows) keeps it. Any Pelaku can go, the last one too:
+ * a record need not be anyone's.
  */
 export async function setActor(eventId: number, figureId: string, actor: boolean): Promise<void> {
   const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ?`, [figureId]);
   if (!fig) throw new Error(`unknown figure: ${figureId}`);
-  const ev = await queryOne<{ kind: string; figure_id: string | null }>(`SELECT kind, figure_id FROM events WHERE id = ?`, [eventId]);
+  const ev = await queryOne<{ kind: string }>(`SELECT kind FROM events WHERE id = ?`, [eventId]);
   if (ev?.kind !== "record") throw new Error("only a record has actors");
-  if (!actor) {
-    const others = (await getActors(eventId, ev.figure_id)).filter((a) => a.id !== figureId);
-    if (others.length === 0) throw new Error("a record keeps at least one actor");
-  }
   const quotes = await queryOne<{ n: number }>(
     `SELECT count(*) AS n FROM event_quotes WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]
   );
-  await ltx(async () => {
-    // Writing the filed figure's own row first keeps it an actor when another
-    // is added to a record the participants stage has not reached.
-    if (actor && ev.figure_id && ev.figure_id !== figureId) {
-      await lrun(
-        `INSERT OR IGNORE INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
-         VALUES (?, ?, 'actor', 'owner', 0, 'auto')`,
-        [eventId, ev.figure_id]
-      );
-    }
-    await lrun(
-      `INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
-       VALUES (?, ?, ?, 'curator', ?, 'curator')
-       ON CONFLICT (event_id, figure_id) DO UPDATE SET role = excluded.role, source = 'curator', assigned_by = 'curator'`,
-      [eventId, figureId, actor ? "actor" : "quoted", Number(quotes?.n ?? 0)]
-    );
-  });
+  await lrun(
+    `INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
+     VALUES (?, ?, ?, 'curator', ?, 'curator')
+     ON CONFLICT (event_id, figure_id) DO UPDATE SET role = excluded.role, source = 'curator', assigned_by = 'curator'`,
+    [eventId, figureId, actor ? "actor" : "quoted", Number(quotes?.n ?? 0)]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1723,6 +1703,62 @@ export async function getUnlinkedOrgs(): Promise<{ org: string; figures: number 
       GROUP BY org ORDER BY figures DESC, org`
   );
   return rows.map((r) => ({ ...r, figures: Number(r.figures) }));
+}
+
+export interface OrgChoice {
+  name: string;
+  short_name: string | null;
+  /** Active figures with an office there. */
+  uses: number;
+}
+
+/**
+ * Every organisation an office can name: the curated list in
+ * /kurasi/organisasi, then every organisation already written on a figure's
+ * offices, once each however it was cased. The office picker searches these,
+ * so a curator picks "Komisi Pemberantasan Korupsi" rather than typing a
+ * fresh "KPK" beside it.
+ */
+export async function getOrgChoices(): Promise<OrgChoice[]> {
+  const [registry, used] = await Promise.all([
+    getOrganizations(),
+    query<{ org: string; uses: number }>(
+      `SELECT trim(json_extract(p.value, '$.org')) AS org, count(DISTINCT f.id) AS uses
+         FROM figures f, json_each(CASE WHEN json_valid(f.positions) THEN f.positions ELSE '[]' END) p
+        WHERE f.active AND trim(COALESCE(json_extract(p.value, '$.org'), '')) != ''
+        GROUP BY lower(trim(json_extract(p.value, '$.org')))`
+    ),
+  ]);
+  const byKey = new Map<string, OrgChoice>();
+  for (const o of registry) {
+    const c = { name: o.name, short_name: o.short_name, uses: 0 };
+    byKey.set(orgKey(o.name), c);
+    if (o.short_name) byKey.set(orgKey(o.short_name), c);
+  }
+  for (const u of used) {
+    const hit = byKey.get(orgKey(u.org));
+    if (hit) hit.uses += Number(u.uses);
+    else byKey.set(orgKey(u.org), { name: u.org, short_name: null, uses: Number(u.uses) });
+  }
+  return [...new Set(byKey.values())].sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name, "id"));
+}
+
+/** How two spellings of one organisation are told to be the same: case, accents and spacing aside. */
+export function orgKey(name: string): string {
+  return name.normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * The organisation as it is already written, for one typed on an office:
+ * "kpk" becomes the registry's "Komisi Pemberantasan Korupsi" if KPK is its
+ * short name, "partai golkar" the "Partai Golkar" already in use. A name
+ * nobody has used yet is kept as typed: that is a new organisation.
+ */
+export function canonicalOrg(typed: string, choices: OrgChoice[]): string {
+  const key = orgKey(typed);
+  if (!key) return "";
+  const hit = choices.find((c) => orgKey(c.name) === key || (c.short_name && orgKey(c.short_name) === key));
+  return hit ? hit.name : typed.replace(/\s+/g, " ").trim();
 }
 
 /**

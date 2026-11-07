@@ -3,7 +3,11 @@ import { notFound } from "next/navigation";
 import { isCurationHost } from "@/lib/localDb";
 import { getNavCounts } from "@/lib/kurasiNav";
 import { Masthead } from "@/components/Nav";
+import { randomUUID } from "node:crypto";
+import { Suspense } from "react";
+import { ActionFeedback } from "./ActionFeedback";
 import { NavTabs } from "./NavTabs";
+import { PanelPending } from "./PanelPending";
 
 /**
  * /kurasi exists only where jejak.db is: the curator's machine, with JEJAK_DB
@@ -40,6 +44,11 @@ export default async function KurasiLayout({ children }: { children: React.React
         extra={[{ href: "/kurasi/pelajaran", label: "Pelajaran", match: ["/kurasi/pelajaran"] }]}
       />
       {children}
+      <Suspense fallback={null}>
+        <PanelPending />
+        {/* A fresh stamp on every server render: how the feedback knows an action's new page has arrived. */}
+        <ActionFeedback stamp={randomUUID()} />
+      </Suspense>
     </div>
   );
 }

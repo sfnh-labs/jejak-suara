@@ -166,9 +166,11 @@ class _Writer:
         self.conn.execute("CREATE TEMP TABLE IF NOT EXISTS _seen_points (key TEXT PRIMARY KEY)")
         self.conn.execute("DELETE FROM _seen_points")
         self.conn.executemany("INSERT INTO _seen_points (key) VALUES (?)", [(k,) for k in self.seen])
+        # 'cek:' points were opened by hand (open_checks) and no producer asks them.
         n = self.conn.execute(
             "UPDATE curation_points SET status = 'settled', refreshed_at = ? "
-            "WHERE status IN ('open', 'lewati') AND key NOT IN (SELECT key FROM _seen_points)",
+            "WHERE status IN ('open', 'lewati') AND key NOT LIKE 'cek:%' "
+            "AND key NOT IN (SELECT key FROM _seen_points)",
             (self.now,),
         ).rowcount
         self.conn.execute("DROP TABLE _seen_points")
@@ -279,7 +281,20 @@ def _actor_evidence(conn: sqlite3.Connection, event_id: int, fig):
             if fallback is None and named.search(para):
                 s, e = _best_sentence(para, lambda t: 1 if named.search(t) else 0)
                 fallback = (art["id"], *_cut(para, s, e))
-    return fallback
+    if fallback is not None:
+        return fallback
+    # The coverage never writes their name, only a speaker string the quotes
+    # were filed under ("kata Sugeng"): show the first such quote, which is
+    # where a wrong match shows itself.
+    for q in conn.execute(
+        "SELECT article_id, quote, speaker FROM event_quotes "
+        "WHERE event_id = ? AND figure_id = ? ORDER BY id", (event_id, fig.id)
+    ):
+        ev = _quote_evidence(conn, {"article_id": q["article_id"], "quote": q["quote"],
+                                    "speaker": q["speaker"] or ""})
+        if ev is not None:
+            return ev
+    return None
 
 
 # Pembicara bands, best first. The score only orders them; what each is worth
@@ -430,6 +445,84 @@ def _quote_evidence(conn: sqlite3.Connection, q):
 
 
 PRODUCERS = {"peristiwa": _peristiwa, "lini": _lini, "pelaku": _pelaku, "pembicara": _pembicara}
+
+
+# ---------------------------------------------------------------------------
+# Checks: the decisions the pipeline made without asking, opened as points
+#
+# The producers above ask only what the pipeline is unsure of. What it decided
+# on its own (the filed figure as Pelaku, quotes it gave a speaker) is never
+# asked, so nothing measures it. open_checks() turns one catatan's automatic
+# decisions into points, each in a band of its own, so the curator's answers
+# measure them and auto-answering can take a band over once it is proven.
+# Opened on request from /kurasi; keyed 'cek:…' so the run never settles them.
+
+def _check_band(fig, speaker: str) -> str:
+    """How the speaker as written names the figure: a multi-word name of theirs,
+    one word of it ("Bahlil"), or neither (an office, "Juru bicara KPK")."""
+    s = speaker.lower()
+    hits = [t for t in fig.match_terms() if re.search(r"\b" + re.escape(t) + r"\b", s)]
+    words = {w for t in fig.match_terms() for w in t.split() if len(w) >= 3}
+    if any(" " in t for t in hits):
+        return "otomatis · nama lengkap"
+    if hits or any(re.search(r"\b" + re.escape(w) + r"\b", s) for w in words):
+        return "otomatis · satu kata"
+    return "otomatis · sebutan"
+
+
+def open_checks(conn: sqlite3.Connection, event_id: int) -> int:
+    """Open a point for each automatic decision on the catatan; returns how many
+    are open or were reopened. Answered ones are left as they are."""
+    figures = {f.id: f for f in load_figures(conn)}
+    asked = {r[0] for r in conn.execute(
+        "SELECT key FROM curation_points WHERE event_id = ? AND status <> 'settled'", (event_id,))}
+    w = _Writer(conn)
+
+    # Pelaku the pipeline set itself, and figures it only counted as quoted.
+    for r in conn.execute(
+        """SELECT figure_id, role, quotes FROM record_figures
+            WHERE event_id = ? AND COALESCE(assigned_by, 'auto') = 'auto'
+              AND role IN ('actor', 'quoted')""", (event_id,)
+    ).fetchall():
+        fig = figures.get(r["figure_id"])
+        if fig is None:
+            continue
+        quotes = r["quotes"] or 0
+        if r["role"] == "actor":
+            w.put("pelaku", f"cek:pelaku:{event_id}:{fig.id}", event_id,
+                  {"figure_id": fig.id, "name": fig.name, "quotes": quotes, "check": "pelaku",
+                   "claim": f"{fig.name} pelaku catatan ini"},
+                  float(quotes), "otomatis · dikutip" if quotes else "otomatis · tak dikutip",
+                  _actor_evidence(conn, event_id, fig))
+        elif f"pelaku:{event_id}:{fig.id}" not in asked:
+            # The same question actor_reviews asks, so the same bands.
+            w.put("pelaku", f"cek:usul:{event_id}:{fig.id}", event_id,
+                  {"figure_id": fig.id, "name": fig.name, "quotes": quotes, "check": "usul",
+                   "claim": f"{fig.name} ikut menjadi pelaku, bukan hanya disebut"},
+                  float(quotes), _band(quotes, (2, 4), ("1 kutipan", "2-3 kutipan", "4+ kutipan")),
+                  _actor_evidence(conn, event_id, fig))
+
+    # Quotes the quotes stage gave a speaker, one point per figure and speaker as written.
+    groups: dict[tuple[str, str], list] = defaultdict(list)
+    for q in conn.execute(
+        """SELECT id, article_id, quote, speaker, figure_id FROM event_quotes
+            WHERE event_id = ? AND figure_id IS NOT NULL
+              AND COALESCE(assigned_by, 'auto') = 'auto'""", (event_id,)
+    ).fetchall():
+        groups[(q["figure_id"], norm_speaker(q["speaker"] or ""))].append(q)
+    for (fid, speaker), quotes in groups.items():
+        fig = figures.get(fid)
+        if fig is None:
+            continue
+        written = quotes[0]["speaker"] or fig.name
+        w.put("pembicara", f"cek:pembicara:{event_id}:{fid}:{speaker}", event_id,
+              {"speaker": written, "figure_id": fid, "name": fig.name, "candidates": [],
+               "quote_ids": sorted(q["id"] for q in quotes), "events": 1, "check": "pembicara",
+               "claim": f"“{written}” di sini adalah {fig.name}"},
+              None, _check_band(fig, written),
+              _quote_evidence(conn, {**dict(quotes[0]), "speaker": written}), group_size=len(quotes))
+    conn.commit()
+    return sum(w.stats.values())
 
 
 def run(conn: sqlite3.Connection) -> dict[str, int]:

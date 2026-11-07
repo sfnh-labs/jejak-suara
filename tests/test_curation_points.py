@@ -137,6 +137,20 @@ def test_actor_review_points_at_the_paragraph_naming_them(conn):
     assert "Amran menegaskan" in p["paragraph"][p["hl_start"]:p["hl_end"]]
 
 
+def test_actor_review_unnamed_in_the_text_points_at_their_quote(conn):
+    # The coverage names someone else with the same first name; only the
+    # quotes filed under the figure lead back to the paragraph.
+    _event(conn, 1, "suyudi", "Syok",
+           "Wakil Ketua Sufmi Hartono bicara.\n\"Kami syok sekali,\" kata Sufmi di Jakarta.")
+    _quote(conn, 1, "Sufmi", "Kami syok sekali,", figure="dasco")
+    conn.execute("INSERT INTO actor_reviews (event_id, owner_id, suggested_id, quotes, found_at) "
+                 "VALUES (1, 'suyudi', 'dasco', 1, ?)", (NOW,))
+    cp.run(conn)
+    p = _points(conn, "pelaku")["pelaku:1:dasco"]
+    assert p["article_id"] == "a1"
+    assert "kata Sufmi" in p["paragraph"][p["hl_start"]:p["hl_end"]]
+
+
 # ---------------------------------------------------------------------------
 # pembicara
 
@@ -379,3 +393,43 @@ def test_a_lesson_settles_quotes_waiting_from_before(conn):
     assert _points(conn, "pembicara") == {}
     assert {tuple(r) for r in conn.execute("SELECT figure_id, assigned_by FROM event_quotes")} == \
         {("suyudi", "lesson")}
+
+
+# ---------------------------------------------------------------------------
+# checks: automatic decisions opened as points
+
+
+def _figure_row(conn, eid, fid, role, quotes=0, by="auto"):
+    conn.execute("INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by) "
+                 "VALUES (?, ?, ?, 'owner', ?, ?)", (eid, fid, role, quotes, by))
+
+
+def test_open_checks_turns_automatic_decisions_into_points(conn):
+    _event(conn, 1, "suyudi", "Satgas tegaskan stok aman",
+           'Suyudi Ario Seto meninjau pasar.\n"Stok aman," kata Amran.\n"Kami kooperatif," kata Juru Bicara KPK Budi Prasetyo.')
+    _figure_row(conn, 1, "suyudi", "actor")
+    _figure_row(conn, 1, "amran", "quoted", quotes=1)
+    _figure_row(conn, 1, "dasco", "actor", by="curator")  # the curator's own: not re-checked
+    _quote(conn, 1, "Amran", "Stok aman,", "amran")
+    _quote(conn, 1, "Juru Bicara KPK Budi Prasetyo", "Kami kooperatif,", "budi-b")
+    _quote(conn, 1, "Dasco", "Sudah,", "dasco", by="curator")
+
+    assert cp.open_checks(conn, 1) == 4
+    pel, spk = _points(conn, "pelaku"), _points(conn, "pembicara")
+    assert set(pel) == {"cek:pelaku:1:suyudi", "cek:usul:1:amran"}
+    assert pel["cek:pelaku:1:suyudi"]["bucket"] == "otomatis · tak dikutip"
+    assert pel["cek:usul:1:amran"]["bucket"] == "1 kutipan"  # pooled with actor_reviews points
+    assert {p["bucket"] for p in spk.values()} == {"otomatis · satu kata", "otomatis · nama lengkap"}
+    assert json.loads(pel["cek:pelaku:1:suyudi"]["proposal"])["check"] == "pelaku"
+
+    # The run asks nothing of these and must not settle them; opening again is a no-op.
+    cp.run(conn)
+    assert {r[0] for r in conn.execute("SELECT status FROM curation_points WHERE key LIKE 'cek:%'")} == {"open"}
+    assert conn.execute("SELECT count(*) FROM curation_points WHERE key LIKE 'cek:%'").fetchone()[0] == 4
+
+
+def test_an_office_alone_is_its_own_band(conn):
+    fig = next(f for f in cp.load_figures(conn) if f.id == "budi-b")
+    assert cp._check_band(fig, "Juru bicara KPK") == "otomatis · sebutan"
+    assert cp._check_band(fig, "Budi") == "otomatis · satu kata"
+    assert cp._check_band(fig, "Jubir KPK Budi Prasetyo") == "otomatis · nama lengkap"

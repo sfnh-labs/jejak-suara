@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { KIND_LABEL, NOT_TRACKED, type Confidence, type Point } from "@/lib/curationPoints";
+import { AUTO_MIN_AGREEMENT, AUTO_MIN_ANSWERS, KIND_LABEL, NOT_TRACKED, type Confidence, type Point } from "@/lib/curationPoints";
 import { answerCurationPoint, markCurationPointWrong, undoCurationPoint } from "./actions";
 import { FigurePicker } from "./FigurePicker";
+import { TextLink } from "./kit";
 import type { FigureOption } from "@/lib/curation";
-import { ACCEPT, INK, MUTED, RULE, button, day, input } from "./ui";
+import { ACCEPT, INK, MUTED, RULE, SURFACE, button, day, input } from "./ui";
 
 /**
  * A catatan's curation points: each open one as a card with the paragraph
@@ -50,16 +51,40 @@ export function PointList({
   /** What the other end of a lini cerita point is: catatan on a record, peristiwa on a peristiwa. */
   liniPanel: "catatan" | "peristiwa";
 }) {
+  const waiting = points.filter((p) => p.status === "open" || p.status === "lewati");
+  const done = points.filter((p) => !waiting.includes(p));
   return (
-    <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
-      {points.map((p, i) => (
-        <li key={p.id} style={{ borderTop: i ? `1px solid ${RULE}` : "none", padding: i ? "14px 0 0" : 0, marginTop: i ? 14 : 0 }}>
-          {p.status === "open" || p.status === "lewati"
-            ? <PointCard point={p} figures={figures} nearby={nearby} liniChoices={liniChoices} listId={listId} readHref={readHref} open={open} liniPanel={liniPanel} />
-            : <PointDone point={p} />}
-        </li>
-      ))}
-    </ol>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 26 }}>
+      {waiting.length ? (
+        // Each open point is its own card, set off like the site's boxed
+        // controls (ink edge, hard ink shadow), so one never runs into the next.
+        <ol style={{ listStyle: "none", margin: 0, padding: "0 4px 4px 0", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 22 }}>
+          {waiting.map((p, i) => (
+            <li
+              key={p.id}
+              aria-label={`Poin ${i + 1} dari ${waiting.length}`}
+              style={{ background: SURFACE, border: `1.5px solid ${INK}`, boxShadow: `4px 4px 0 ${INK}`, padding: "16px 18px 18px" }}
+            >
+              <PointCard index={i + 1} total={waiting.length} point={p} figures={figures} nearby={nearby} liniChoices={liniChoices} listId={listId} readHref={readHref} open={open} liniPanel={liniPanel} />
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {done.length ? (
+        <div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: MUTED, paddingBottom: 8, borderBottom: `1.5px solid ${INK}` }}>
+            Sudah dijawab · {done.length}
+          </div>
+          <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {done.map((p) => (
+              <li key={p.id} style={{ borderBottom: `1px solid ${RULE}`, padding: "11px 0" }}>
+                <PointDone point={p} />
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -72,16 +97,28 @@ function PointHidden({ id, answer }: { id: number; answer?: string }) {
   );
 }
 
-function PointCard({ point: p, figures, nearby, liniChoices, listId, readHref, open, liniPanel }: {
-  point: Point; figures: FigureOption[]; nearby: EventChoice[]; liniChoices: EventChoice[]; listId: string; readHref: ReadHref; open: OpenHref; liniPanel: "catatan" | "peristiwa";
+function PointCard({ index, total, point: p, figures, nearby, liniChoices, listId, readHref, open, liniPanel }: {
+  index: number; total: number; point: Point; figures: FigureOption[]; nearby: EventChoice[]; liniChoices: EventChoice[]; listId: string; readHref: ReadHref; open: OpenHref; liniPanel: "catatan" | "peristiwa";
 }) {
   const subject = subjectPanel(p, liniPanel);
   return (
-    <div style={{ display: "grid", gap: 10 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingBottom: 10, borderBottom: `1px solid ${RULE}` }}>
+        <span style={{ fontFamily: "var(--font-serif)", fontWeight: 700, fontSize: 18, lineHeight: 1, color: "var(--color-clay)", fontVariantNumeric: "tabular-nums" }}>
+          {String(index).padStart(2, "0")}
+          <span style={{ fontFamily: "var(--font-sans)", fontWeight: 500, fontSize: 11.5, color: MUTED }}> / {total}</span>
+        </span>
         <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", padding: "1px 7px", borderRadius: 2, background: INK, color: "var(--color-cream)" }}>
           {KIND_LABEL[p.kind]}
         </span>
+        {p.proposal.check ? (
+          <span
+            title={p.proposal.check === "usul" ? "Pipeline mencatatnya hanya dikutip, tanpa bertanya." : "Pipeline sudah memutuskan ini tanpa bertanya; jawabanmu mengukur ketepatannya."}
+            style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", padding: "1px 7px", borderRadius: 2, border: `1px solid ${INK}`, color: INK }}
+          >
+            {p.proposal.check === "usul" ? "Dari kutipan" : "Keputusan otomatis"}
+          </span>
+        ) : null}
         {p.status === "lewati" ? <span style={{ fontSize: 12, color: MUTED }}>dilewati</span> : null}
         {p.spot_check ? (
           <span title="Jenis ini dijawab otomatis; yang ini sengaja ditanyakan untuk memeriksanya. Jawaban “Bukan” mematikan otomatisnya." style={{ fontSize: 12, fontWeight: 600, color: "#7a5a12" }}>
@@ -100,10 +137,10 @@ function PointCard({ point: p, figures, nearby, liniChoices, listId, readHref, o
       {p.paragraph ? (
         <blockquote style={{ margin: 0, padding: "1px 0 1px 14px", borderLeft: `3px solid ${RULE}`, fontFamily: "var(--font-serif)", fontSize: 15, lineHeight: 1.6, color: "var(--color-mud)" }}>
           {p.article_id ? (
-            <Link href={readHref(p.article_id, p.id)} scroll={false} style={{ display: "block", fontFamily: "var(--font-sans)", fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 2 }}>
+            <span style={{ display: "block", fontFamily: "var(--font-sans)", fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 2 }}>
               {[p.source, p.published_at ? day(p.published_at) : null].filter(Boolean).join(" · ")}
-              {" · "}<span style={{ fontWeight: 400, textDecoration: "underline" }}>baca beritanya</span>
-            </Link>
+              {" · "}<TextLink href={readHref(p.article_id, p.id)} size={11.5}>baca beritanya</TextLink>
+            </span>
           ) : null}
           <Highlighted text={p.paragraph} start={p.hl_start} end={p.hl_end} />
         </blockquote>
@@ -121,9 +158,9 @@ function PointCard({ point: p, figures, nearby, liniChoices, listId, readHref, o
               {subject ? (
                 <>
                   {" "}
-                  <Link href={open(subject.panel)} scroll={false} style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, fontWeight: 400, color: MUTED, whiteSpace: "nowrap" }}>
-                    {subject.label} ›
-                  </Link>
+                  <span style={{ fontFamily: "var(--font-sans)", fontWeight: 400 }}>
+                    <TextLink href={open(subject.panel)} tone="muted">{subject.label}</TextLink>
+                  </span>
                 </>
               ) : null}
             </div>
@@ -143,7 +180,7 @@ function PointCard({ point: p, figures, nearby, liniChoices, listId, readHref, o
             <span style={{ flex: 1 }} />
             <SkipForm point={p} />
           </div>
-          <Correction point={p} nearby={nearby} liniChoices={liniChoices} listId={listId} liniPanel={liniPanel} />
+          {p.proposal.check === "pelaku" ? null : <Correction point={p} nearby={nearby} liniChoices={liniChoices} listId={listId} liniPanel={liniPanel} />}
         </>
       )}
     </div>
@@ -246,7 +283,9 @@ function noEffect(p: Point): string {
     case "lini":
       return "usulan lini ditolak dan tidak ditanyakan lagi; sambungkan yang benar lewat “Sambungkan” di Relasi.";
     case "pelaku":
-      return `${p.proposal.name} tetap di Disebut; pelakunya tidak berubah.`;
+      return p.proposal.check === "pelaku"
+        ? `${p.proposal.name} pindah ke Disebut.`
+        : `${p.proposal.name} tetap di Disebut; pelakunya tidak berubah.`;
     default:
       return "tidak ada yang berubah.";
   }
@@ -280,12 +319,13 @@ function SpeakerChoice({ point: p, figures, listId, open }: { point: Point; figu
   );
 
   return (
-    <div style={{ display: "grid", gap: 6 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 6 }}>
       <div style={{ fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 500, lineHeight: 1.3, color: INK }}>
         Siapa “{x.speaker}” di sini?
       </div>
       <div style={{ fontSize: 12, color: MUTED }}>
-        Tebakan pipeline: {guess ? <strong style={{ color: INK }}>{guess.name}</strong> : "bukan tokoh yang dilacak"}. {basis(p)} Jawabanmu berlaku untuk {n} kutipan sekaligus.
+        {x.check ? "Pipeline sudah menuliskannya atas nama " : "Tebakan pipeline: "}
+        {guess ? <strong style={{ color: INK }}>{guess.name}</strong> : "bukan tokoh yang dilacak"}. {basis(p)} Jawabanmu berlaku untuk {n} kutipan sekaligus.
       </div>
 
       <div style={{ marginTop: 4 }}>
@@ -294,7 +334,7 @@ function SpeakerChoice({ point: p, figures, listId, open }: { point: Point; figu
             <PointHidden id={p.id} answer="ya" />
             <span>
               {who(guess.name, guess.role)}{" "}
-              <Link href={open(`tokoh:${guess.id}`)} scroll={false} style={{ fontSize: 12, color: MUTED }}>lihat tokohnya ›</Link>
+              <TextLink href={open(`tokoh:${guess.id}`)} tone="muted" size={12}>lihat tokohnya</TextLink>
             </span>
             {pick(`Ya, ${guess.name}`, true)}
             {saves(<>Disimpan: {quotes} ditulis atas nama tokoh <code>{guess.id}</code>{later}.</>)}
@@ -307,7 +347,7 @@ function SpeakerChoice({ point: p, figures, listId, open }: { point: Point; figu
             <input type="hidden" name="figure_id" value={c.id} />
             <span>
               {who(c.name, c.role)}{" "}
-              <Link href={open(`tokoh:${c.id}`)} scroll={false} style={{ fontSize: 12, color: MUTED }}>lihat tokohnya ›</Link>
+              <TextLink href={open(`tokoh:${c.id}`)} tone="muted" size={12}>lihat tokohnya</TextLink>
             </span>
             {pick(`Ini ${c.name}`)}
             {saves(<>Disimpan: {quotes} ditulis atas nama tokoh <code>{c.id}</code>{later}.</>)}
@@ -351,7 +391,9 @@ function SpeakerChoice({ point: p, figures, listId, open }: { point: Point; figu
             <PointHidden id={p.id} answer="bukan" />
             <span style={{ fontSize: 13, fontWeight: 700, color: INK }}>Bukan {guess.name}, tapi belum tahu siapa</span>
             {pick("Bukan dia")}
-            {saves(<>Disimpan: tidak ada yang berubah; kutipannya tetap menunggu tokohnya.</>)}
+            {saves(x.check
+              ? <>Disimpan: {quotes} dilepas dari {guess.name} dan menunggu tokohnya.</>
+              : <>Disimpan: tidak ada yang berubah; kutipannya tetap menunggu tokohnya.</>)}
           </form>
         ) : null}
       </div>
@@ -450,6 +492,7 @@ function Meter({ confidence: c }: { confidence: Confidence }) {
         <span style={{ display: "block", height: "100%", width: `${pct ?? 0}%`, background: color }} />
       </span>
       <strong style={{ fontSize: 13.5, color: pct === null ? MUTED : INK }}>{pct === null ? "–" : `${pct}%`}</strong>
+      <span style={{ fontSize: 11.5, color: MUTED, fontVariantNumeric: "tabular-nums" }}>{c.answered}/{AUTO_MIN_ANSWERS}</span>
     </span>
   );
 }
@@ -457,6 +500,8 @@ function Meter({ confidence: c }: { confidence: Confidence }) {
 function basis(p: Point): string {
   const c = p.confidence;
   const band = p.bucket ? ` (pita “${p.bucket}”)` : "";
-  if (!c.answered) return `Belum ada jawaban untuk poin sejenis${band}; tiap jawabanmu mulai mengukurnya.`;
-  return `Kamu setuju ${c.agreed} dari ${c.answered} kali untuk poin sejenis${band}.`;
+  const gate = `Otomatis bisa dinyalakan setelah ${AUTO_MIN_ANSWERS} jawaban dengan ≥${Math.round(AUTO_MIN_AGREEMENT * 100)}% setuju.`;
+  if (!c.answered) return `Belum ada jawaban untuk poin sejenis${band}; tiap jawabanmu mulai mengukurnya. ${gate}`;
+  const left = Math.max(0, AUTO_MIN_ANSWERS - c.answered);
+  return `Kamu setuju ${c.agreed} dari ${c.answered} kali untuk poin sejenis${band}.${left ? ` ${left} jawaban lagi sebelum bisa otomatis.` : ` ${gate}`}`;
 }

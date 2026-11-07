@@ -55,6 +55,13 @@ interface Proposal {
   events?: number;
   /** Where the answer holds, for its speaker lesson: "" everywhere, a figure id, or "e<id>". */
   scope?: string;
+  /**
+   * A decision the pipeline made without asking, opened to be checked
+   * (open_checks in jejak/curation_points.py): "pelaku" a Pelaku it set,
+   * "usul" a quoted figure it left out of Pelaku, "pembicara" quotes it gave
+   * a speaker. Absent on the pipeline's own questions.
+   */
+  check?: "pelaku" | "usul" | "pembicara";
 }
 
 export interface Point {
@@ -129,8 +136,11 @@ function effectOf(kind: PointKind, p: Proposal, groupSize: number): string {
     case "lini":
       return `catatan ini tersambung sebagai kelanjutan “${p.title}” dalam lini cerita.`;
     case "pelaku":
-      return `${p.name} masuk Pelaku catatan ini, di samping yang sudah ada.`;
+      return p.check === "pelaku"
+        ? `${p.name} tetap Pelaku, ditandai sudah dicek.`
+        : `${p.name} masuk Pelaku catatan ini, di samping yang sudah ada.`;
     case "pembicara":
+      if (p.check) return `${groupSize} kutipan “${p.speaker}” tetap atas nama ${p.name}, ditandai sudah dicek.`;
       return p.figure_id
         ? `${groupSize} kutipan “${p.speaker}” menjadi milik ${p.name}, begitu juga “${p.speaker}” berikutnya${p.scope ? " di catatan sejenis" : ""}.`
         : `${groupSize} kutipan “${p.speaker}” ditandai bukan tokoh yang dilacak, dan tidak ditanyakan lagi.`;
@@ -216,6 +226,26 @@ export async function getNextOpenPoint(kind: PointKind, exclude: number[] = []):
     calibration(),
   ]);
   return row ? toPoint(row, cal) : null;
+}
+
+/**
+ * The catatan's automatic decisions not yet open as points: Pelaku and quoted
+ * figures from record_figures, and quotes given a speaker, one per figure and
+ * speaker as written — what open_checks would open.
+ */
+export async function getUncheckedCount(eventId: number): Promise<number> {
+  if (!(await pointsReady()) || !(await tableExists("record_figures"))) return 0;
+  const row = await queryOne<{ decisions: number; opened: number }>(
+    `SELECT
+       (SELECT count(*) FROM record_figures
+         WHERE event_id = ?1 AND coalesce(assigned_by, 'auto') = 'auto' AND role IN ('actor', 'quoted'))
+     + (SELECT count(*) FROM (SELECT DISTINCT figure_id, lower(trim(coalesce(speaker, ''))) FROM event_quotes
+         WHERE event_id = ?1 AND figure_id IS NOT NULL AND coalesce(assigned_by, 'auto') = 'auto')) AS decisions,
+       (SELECT count(*) FROM curation_points
+         WHERE event_id = ?1 AND key LIKE 'cek:%' AND status IN ('open', 'lewati')) AS opened`,
+    [eventId]
+  );
+  return Math.max(0, Number(row?.decisions ?? 0) - Number(row?.opened ?? 0));
 }
 
 /** Unanswered points per catatan (skipped ones not counted), for the queue. */
@@ -464,6 +494,21 @@ async function apply(
     return { kind: "pelaku", figure: fig, prev, review: review?.decision ?? null };
   }
 
+  if (kind === "pelaku" && prop.check === "pelaku" && answer === "bukan") {
+    // A Pelaku the pipeline set, wrongly: moved to Disebut, by the curator.
+    const fig = prop.figure_id!;
+    const prev = await queryOne<{ role: string; source: string; quotes: number; assigned_by: string }>(
+      `SELECT role, source, quotes, assigned_by FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, fig]
+    );
+    // Kept so undoing puts back any actor_reviews decision exactly as it was.
+    const review = await queryOne<{ decision: string | null }>(
+      `SELECT decision FROM actor_reviews WHERE event_id = ? AND suggested_id = ?`, [eventId, fig]
+    );
+    await lrun(`UPDATE record_figures SET role = 'quoted', source = 'curator', assigned_by = 'curator' WHERE event_id = ? AND figure_id = ?`,
+               [eventId, fig]);
+    return { kind: "pelaku", prev, review: review?.decision ?? null };
+  }
+
   if (kind === "pelaku") {
     const fig = prop.figure_id!;
     const prev = await queryOne<{ role: string; source: string; quotes: number; assigned_by: string }>(
@@ -488,16 +533,29 @@ async function apply(
   // pembicara: every quote of the group still waiting. A quote the curator
   // placed since the point was made keeps their say.
   const ids = prop.quote_ids ?? [];
+  // A check is about quotes the pipeline already gave a speaker; a question,
+  // about quotes still without one.
   const waiting = await query<{ id: number; figure_id: string | null; assigned_by: string | null }>(
     `SELECT id, figure_id, assigned_by FROM event_quotes
-      WHERE id IN (SELECT value FROM json_each(?)) AND figure_id IS NULL AND coalesce(assigned_by, 'auto') = 'auto'`,
-    [ids]
+      WHERE id IN (SELECT value FROM json_each(?)) AND coalesce(assigned_by, 'auto') = 'auto'
+        AND ${prop.check ? "figure_id = ?" : "figure_id IS NULL AND ? IS NULL"}`,
+    [ids, prop.check ? prop.figure_id ?? null : null]
   );
   const target = answer === "koreksi" ? (correction === NOT_TRACKED ? null : correction) : answer === "ya" ? prop.figure_id ?? null : undefined;
-  // "Bukan" to a figure leaves the quotes waiting; "Bukan" to "not tracked" is
-  // a "this is someone", which only a correction can say.
-  if (target === undefined) return { kind: "none" };
   const moved = waiting.map((q) => q.id);
+  if (target === undefined) {
+    // "Bukan" to a figure leaves question quotes waiting; on a check it takes
+    // them off that figure, to wait for their speaker like any other.
+    if (!prop.check) return { kind: "none" };
+    await lrun(`UPDATE event_quotes SET figure_id = NULL, assigned_by = 'auto' WHERE id IN (SELECT value FROM json_each(?))`, [moved]);
+    return {
+      kind: "quotes",
+      ids: moved,
+      prev: waiting.map((q) => ({ figure_id: q.figure_id, assigned_by: q.assigned_by })),
+      shown: await replaceShownQuotes(moved, null),
+      lesson: null,
+    };
+  }
   await lrun(
     `UPDATE event_quotes SET figure_id = ?, assigned_by = 'curator'
       WHERE id IN (SELECT value FROM json_each(?))`,
