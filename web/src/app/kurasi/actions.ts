@@ -30,7 +30,7 @@ import {
   addQuote,
   showQuote,
 } from "@/lib/curation";
-import { answerPoint, isPointAnswer, salahPoint, setAutoKind, undoPoint, KIND_LABEL, NOT_TRACKED, type PointKind } from "@/lib/curationPoints";
+import { answerPoint, isPointAnswer, officeCorrection, salahPoint, setAutoKind, undoPoint, KIND_LABEL, NOT_TRACKED, type PointKind } from "@/lib/curationPoints";
 import { pipelineOp } from "@/lib/localDb";
 
 /*
@@ -357,6 +357,13 @@ export async function answerCurationPoint(formData: FormData): Promise<void> {
     const role = text(formData, "new_role", 300);
     const org = text(formData, "new_org", 300);
     figure = (await pipelineOp("new-figure", newName, ...(role ? ["--role", role] : []), ...(org ? ["--org", org] : []))).split("\n").pop()!.trim();
+  }
+  // A jabatan point corrected names the office and its organisation.
+  const officeRole = text(formData, "office_role", 200);
+  const officeOrg = text(formData, "office_org", 300);
+  if (answer === "koreksi" && (officeRole || officeOrg)) {
+    done(await answerPoint(pointId, answer, officeCorrection(officeRole, officeOrg)));
+    return;
   }
   // A peristiwa or lini point corrected to another event names it by id.
   const event = text(formData, "event_target", 20);

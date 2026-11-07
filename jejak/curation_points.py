@@ -14,6 +14,9 @@ row the question came from, so nothing downstream changes.
   pembicara  event_quotes, figure_id NULL     — whose words are these? Grouped by the
              speaker as written, so one answer settles every quote that names them the
              same way and points the same way.
+  jabatan    office_proposals, verdict NULL   — is this the figure's main office, role –
+             organisation? (jejak/offices.py proposes them; listed on the catatan the
+             evidence is from.)
 
 Confidence is not the score. It is how often the curator agreed with points
 of the same kind and band (calibration(), below), which is also what
@@ -33,12 +36,12 @@ import zlib
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
-from . import actors
+from . import actors, offices
 from .cluster import _tokens
 from .config import load_figures
 from .quotes import _terms, apply_lessons, lesson_scope, norm_speaker
 
-KINDS = ("peristiwa", "lini", "pelaku", "pembicara")
+KINDS = ("peristiwa", "lini", "pelaku", "pembicara", "jabatan")
 
 # The auto-answer gate, as for auto-hide (curation_suggest.py).
 AUTO_MIN_ANSWERS = 25
@@ -444,7 +447,33 @@ def _quote_evidence(conn: sqlite3.Connection, q):
     return None
 
 
-PRODUCERS = {"peristiwa": _peristiwa, "lini": _lini, "pelaku": _pelaku, "pembicara": _pembicara}
+def _jabatan(conn: sqlite3.Connection, w: _Writer) -> None:
+    rows = conn.execute(
+        """SELECT o.*, f.name, f.role AS label, f.positions, f.active
+             FROM office_proposals o JOIN figures f ON f.id = o.figure_id
+            WHERE o.verdict IS NULL"""
+    ).fetchall()
+    gone = []
+    for r in rows:
+        positions = offices._positions(r["positions"])
+        # Fixed some other way (the CV edited, the organisation linked), or
+        # the figure no longer followed: the question went away.
+        if not r["active"] or not offices.needs_office(positions) or r["event_id"] is None:
+            gone.append(r["id"])
+            continue
+        w.put("jabatan", f"jabatan:{r['id']}", r["event_id"],
+              {"proposal_id": r["id"], "figure_id": r["figure_id"], "name": r["name"],
+               "role": r["role"], "org": r["org"], "org_known": r["band"] != "model, baru",
+               "current": offices.label_of(r["label"], positions),
+               "claim": f"Jabatan utama {r['name']}: {r['role']} – {r['org']}"},
+              offices.BANDS.get(r["band"], 0.0), r["band"],
+              (r["article_id"], r["paragraph"], r["hl_start"], r["hl_end"]) if r["paragraph"] else None)
+    conn.executemany("UPDATE office_proposals SET verdict = 'settled', decided_at = ? WHERE id = ?",
+                     [(_now(), i) for i in gone])
+
+
+PRODUCERS = {"peristiwa": _peristiwa, "lini": _lini, "pelaku": _pelaku, "pembicara": _pembicara,
+             "jabatan": _jabatan}
 
 
 # ---------------------------------------------------------------------------
@@ -762,8 +791,12 @@ def _yes_pembicara(conn, event_id: int, prop: dict, point_id: int) -> dict:
             "lesson": teach_speaker(conn, prop, target, point_id, "auto")}
 
 
+def _yes_jabatan(conn, event_id: int, prop: dict, point_id: int) -> dict:
+    return offices.auto_yes(conn, prop)
+
+
 _YES = {"peristiwa": _yes_peristiwa, "lini": _yes_lini, "pelaku": _yes_pelaku,
-        "pembicara": _yes_pembicara}
+        "pembicara": _yes_pembicara, "jabatan": _yes_jabatan}
 
 
 def auto_answer(conn: sqlite3.Connection) -> dict[str, int]:

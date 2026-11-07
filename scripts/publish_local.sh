@@ -134,8 +134,9 @@ run_stage "mentions" -m jejak.cli mentions --limit 1000
 # left undone, learn from the curator's decisions, rebuild the names queue.
 run_stage "kurasi" -m jejak.cli kurasi
 # participants after quotes: who is quoted in a record decides its Pelaku /
-# Disebut list and the pelaku points `points` asks about.
-for stage in cluster link quotes participants translate summarize sentiment buzzer suggest points; do
+# Disebut list and the pelaku points `points` asks about. offices before
+# points: its proposals are the jabatan points.
+for stage in cluster link quotes participants translate summarize sentiment buzzer suggest offices points; do
     run_stage "$stage" -m jejak.cli "$stage"
 done
 # Neon gets one push a day, from the evening run: each push wakes Neon's
