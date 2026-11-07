@@ -1,0 +1,483 @@
+# Organisations: the seed for the `organizations` table (jejak/organizations.py).
+#
+# Every office on a figure's CV names an organisation in free text
+# (positions[].org). Each run links that text to one row here, by its name,
+# short name or an alias, so "DPR", "DPR RI" and "Dewan Perwakilan Rakyat"
+# are one datapoint. The curator keeps the list in /kurasi/organisasi; this
+# file only adds what is missing and fills an empty short name, kind or alias
+# list, so an edit there is never undone from here.
+#
+# kind: kementerian | lembaga | parlemen | pemerintah | kabinet | partai |
+#       aparat | bumn | swasta | ormas | kampus | media | olahraga |
+#       internasional | lainnya
+#
+# Left out on purpose (an office's "org" that is not an organisation, or is
+# ambiguous): Dapil …, Pemilu 2024, "Terpilih kembali pada Pilkada 2024",
+# "Pelaksana tugas sejak 2014", Florida, Varanasi, Kalimantan Tengah,
+# Bidang …, Formula E Jakarta 2022, The Apprentice, "Pramono Anung–Rano Karno",
+# "Komisi IV" (of which body?), PBB (Perserikatan Bangsa-Bangsa or Partai
+# Bulan Bintang?). They stay unlinked and come up for review.
+
+# --- Negara: parlemen, lembaga, pemerintah --------------------------------
+
+[[org]]
+name = "Dewan Perwakilan Rakyat"
+short = "DPR"
+aliases = ["DPR RI", "Dewan Perwakilan Rakyat Republik Indonesia"]
+kind = "parlemen"
+
+[[org]]
+name = "Majelis Permusyawaratan Rakyat"
+short = "MPR"
+aliases = ["MPR RI"]
+kind = "parlemen"
+
+[[org]]
+name = "Republik Indonesia"
+aliases = ["Pemerintah Republik Indonesia"]
+kind = "pemerintah"
+
+[[org]]
+name = "Komisi Pemberantasan Korupsi"
+short = "KPK"
+kind = "lembaga"
+
+[[org]]
+name = "Badan Gizi Nasional"
+short = "BGN"
+kind = "lembaga"
+
+[[org]]
+name = "Badan Pengawasan Keuangan dan Pembangunan"
+short = "BPKP"
+kind = "lembaga"
+
+[[org]]
+name = "Badan Pembinaan Ideologi Pancasila"
+short = "BPIP"
+kind = "lembaga"
+
+[[org]]
+name = "Badan Komunikasi Pemerintah"
+short = "Bakom"
+aliases = ["Bakom RI"]
+kind = "lembaga"
+
+[[org]]
+name = "Bank Indonesia"
+short = "BI"
+kind = "lembaga"
+
+[[org]]
+name = "Lembaga Penjamin Simpanan"
+short = "LPS"
+kind = "lembaga"
+
+[[org]]
+name = "Komisi Nasional Hak Asasi Manusia"
+short = "Komnas HAM"
+kind = "lembaga"
+
+[[org]]
+name = "Badan Pengelola Investasi Daya Anagata Nusantara"
+short = "Danantara"
+kind = "lembaga"
+
+[[org]]
+name = "Badan Rehabilitasi dan Rekonstruksi Aceh–Nias"
+short = "BRR Aceh–Nias"
+kind = "lembaga"
+
+# --- Kementerian -------------------------------------------------------------
+
+[[org]]
+name = "Kementerian Agama"
+short = "Kemenag"
+kind = "kementerian"
+
+[[org]]
+name = "Kementerian Luar Negeri"
+short = "Kemlu"
+kind = "kementerian"
+
+[[org]]
+name = "Kementerian Pendayagunaan Aparatur Negara dan Reformasi Birokrasi"
+short = "Kemenpan-RB"
+aliases = ["Kementerian PAN-RB"]
+kind = "kementerian"
+
+[[org]]
+name = "Kementerian Pekerjaan Umum"
+short = "Kementerian PU"
+kind = "kementerian"
+
+[[org]]
+name = "Kementerian Perdagangan"
+short = "Kemendag"
+kind = "kementerian"
+
+[[org]]
+name = "Kementerian Pertahanan"
+short = "Kemhan"
+kind = "kementerian"
+
+[[org]]
+name = "Kementerian Pertanian"
+short = "Kementan"
+kind = "kementerian"
+
+[[org]]
+name = "Kementerian Tenaga Kerja dan Transmigrasi"
+short = "Kemnakertrans"
+kind = "kementerian"
+
+# --- Kabinet -----------------------------------------------------------------
+
+[[org]]
+name = "Kabinet Merah Putih"
+kind = "kabinet"
+
+[[org]]
+name = "Kabinet Indonesia Maju"
+kind = "kabinet"
+
+[[org]]
+name = "Kabinet Kerja"
+kind = "kabinet"
+
+[[org]]
+name = "Kabinet Indonesia Bersatu II"
+kind = "kabinet"
+
+# --- Aparat ------------------------------------------------------------------
+
+[[org]]
+name = "Kepolisian Negara Republik Indonesia"
+short = "Polri"
+kind = "aparat"
+
+[[org]]
+name = "Korps Lalu Lintas Polri"
+short = "Korlantas Polri"
+aliases = ["Korlantas", "Direktorat Keamanan dan Keselamatan Korlantas Polri"]
+kind = "aparat"
+
+[[org]]
+name = "Kepolisian Daerah Kalimantan Tengah"
+short = "Polda Kalimantan Tengah"
+aliases = ["Polda Kalteng"]
+kind = "aparat"
+
+[[org]]
+name = "Kepolisian Daerah Sulawesi Selatan"
+short = "Polda Sulawesi Selatan"
+aliases = ["Polda Sulsel"]
+kind = "aparat"
+
+[[org]]
+name = "TNI Angkatan Darat"
+short = "TNI AD"
+kind = "aparat"
+
+# --- Partai (Indonesia) ------------------------------------------------------
+
+[[org]]
+name = "Partai Gerakan Indonesia Raya"
+short = "Gerindra"
+aliases = ["Partai Gerindra", "DPP Partai Gerindra", "Partai Gerindra Banten"]
+kind = "partai"
+
+[[org]]
+name = "Partai Demokrasi Indonesia Perjuangan"
+short = "PDI Perjuangan"
+aliases = ["PDI-P", "PDIP"]
+kind = "partai"
+
+[[org]]
+name = "Partai Golongan Karya"
+short = "Golkar"
+aliases = ["Partai Golkar"]
+kind = "partai"
+
+[[org]]
+name = "Partai NasDem"
+short = "NasDem"
+aliases = ["Fraksi NasDem", "NasDem, Dapil Jawa Barat VII"]
+kind = "partai"
+
+[[org]]
+name = "Partai Demokrat"
+short = "Demokrat"
+aliases = ["Demokrat, Dapil Jawa Barat VII", "Partai Demokrat Kota Pekanbaru", "Partai Demokrat Riau"]
+kind = "partai"
+
+[[org]]
+name = "Partai Amanat Nasional"
+short = "PAN"
+aliases = ["PAN, Dapil Jawa Barat IX"]
+kind = "partai"
+
+[[org]]
+name = "Partai Kebangkitan Bangsa"
+short = "PKB"
+kind = "partai"
+
+[[org]]
+name = "Partai Solidaritas Indonesia"
+short = "PSI"
+aliases = ["DPP Partai Solidaritas Indonesia"]
+kind = "partai"
+
+[[org]]
+name = "Partai Buruh"
+kind = "partai"
+
+[[org]]
+name = "Partai Aceh"
+kind = "partai"
+
+[[org]]
+name = "Partai Berkarya"
+kind = "partai"
+
+[[org]]
+name = "Partai Demokrasi Indonesia"
+short = "PDI"
+kind = "partai"
+
+[[org]]
+name = "Partai Rakyat Adil Makmur"
+short = "PRIMA"
+aliases = ["Partai Rakyat Adil Makmur (PRIMA)"]
+kind = "partai"
+
+[[org]]
+name = "Partai Rakyat Demokratik"
+short = "PRD"
+kind = "partai"
+
+[[org]]
+name = "Partai Sarikat Indonesia"
+kind = "partai"
+
+# --- Partai (luar negeri) ----------------------------------------------------
+
+[[org]]
+name = "Partai Bhumjaithai"
+kind = "partai"
+
+[[org]]
+name = "Partai Demokrat Korea"
+kind = "partai"
+
+[[org]]
+name = "Partai Komunis Tiongkok"
+kind = "partai"
+
+[[org]]
+name = "Partai Likud"
+kind = "partai"
+
+[[org]]
+name = "People's Action Party"
+short = "PAP"
+kind = "partai"
+
+[[org]]
+name = "Pakatan Harapan"
+kind = "partai"
+
+# --- Ormas, serikat, masyarakat sipil ---------------------------------------
+
+[[org]]
+name = "Gerakan Pemuda Ansor"
+short = "GP Ansor"
+kind = "ormas"
+
+[[org]]
+name = "Muslimat Nahdlatul Ulama"
+short = "Muslimat NU"
+kind = "ormas"
+
+[[org]]
+name = "Pengurus Besar Pergerakan Mahasiswa Islam Indonesia"
+short = "PB PMII"
+kind = "ormas"
+
+[[org]]
+name = "Projo"
+kind = "ormas"
+
+[[org]]
+name = "Dewan Koperasi Indonesia"
+short = "Dekopin"
+aliases = ["Dewan Koperasi Indonesia (Dekopin)"]
+kind = "ormas"
+
+[[org]]
+name = "Dewan Tani Indonesia"
+kind = "ormas"
+
+[[org]]
+name = "Konfederasi Serikat Pekerja Indonesia"
+short = "KSPI"
+aliases = ["Konfederasi Serikat Pekerja Indonesia (KSPI)"]
+kind = "ormas"
+
+[[org]]
+name = "Konfederasi Serikat Pekerja Seluruh Indonesia"
+short = "KSPSI"
+aliases = ["Konfederasi Serikat Pekerja Seluruh Indonesia (KSPSI)"]
+kind = "ormas"
+
+[[org]]
+name = "Indonesia Corruption Watch"
+short = "ICW"
+kind = "ormas"
+
+[[org]]
+name = "Gerakan Aceh Merdeka"
+short = "GAM"
+kind = "lainnya"
+
+[[org]]
+name = "Tim Kampanye Nasional Prabowo–Gibran"
+short = "TKN Prabowo–Gibran"
+kind = "lainnya"
+
+[[org]]
+name = "Masjid Istiqlal"
+kind = "lainnya"
+
+# --- Usaha: BUMN, swasta, asosiasi -------------------------------------------
+
+[[org]]
+name = "Kamar Dagang dan Industri Indonesia"
+short = "Kadin"
+aliases = ["Kadin Indonesia"]
+kind = "swasta"
+
+[[org]]
+name = "Himpunan Pengusaha Muda Indonesia"
+short = "HIPMI"
+kind = "swasta"
+
+[[org]]
+name = "ASEAN Business Advisory Council Indonesia"
+short = "ASEAN-BAC Indonesia"
+kind = "swasta"
+
+[[org]]
+name = "PT Indonesia Asahan Aluminium (Persero)"
+short = "Inalum"
+aliases = ["PT Inalum (Persero)", "PT Inalum"]
+kind = "bumn"
+
+[[org]]
+name = "PT Kereta Api Indonesia"
+short = "KAI"
+aliases = ["PT KAI"]
+kind = "bumn"
+
+[[org]]
+name = "PT Len Industri"
+short = "Len"
+kind = "bumn"
+
+[[org]]
+name = "PT Perkebunan Nusantara V"
+short = "PTPN V"
+kind = "bumn"
+
+[[org]]
+name = "Danareksa Sekuritas"
+kind = "bumn"
+
+[[org]]
+name = "PT Bakrie Telecom Tbk"
+short = "Bakrie Telecom"
+kind = "swasta"
+
+[[org]]
+name = "Visi Law Office"
+kind = "swasta"
+
+[[org]]
+name = "Parameter Politik Indonesia"
+kind = "swasta"
+
+[[org]]
+name = "Metro TV"
+kind = "media"
+
+# --- Kampus ------------------------------------------------------------------
+
+[[org]]
+name = "Institut Pertanian Bogor"
+short = "IPB"
+kind = "kampus"
+
+[[org]]
+name = "UIN Syarif Hidayatullah Jakarta"
+kind = "kampus"
+
+[[org]]
+name = "Universitas Kebangsaan Republik Indonesia"
+kind = "kampus"
+
+[[org]]
+name = "Universitas PTIQ Jakarta"
+kind = "kampus"
+
+# --- Olahraga ----------------------------------------------------------------
+
+[[org]]
+name = "Persatuan Sepak Bola Seluruh Indonesia"
+short = "PSSI"
+kind = "olahraga"
+
+[[org]]
+name = "Komite Olimpiade Indonesia"
+short = "KOI"
+kind = "olahraga"
+
+[[org]]
+name = "Komite Olimpiade Internasional"
+short = "IOC"
+kind = "olahraga"
+
+[[org]]
+name = "Akuatik Indonesia"
+kind = "olahraga"
+
+[[org]]
+name = "Indonesia Asian Games Organizing Committee"
+short = "INASGOC"
+kind = "olahraga"
+
+[[org]]
+name = "Inter Milan"
+kind = "olahraga"
+
+# --- Internasional -----------------------------------------------------------
+
+[[org]]
+name = "Global Organization of Parliamentarians Against Corruption"
+short = "GOPAC"
+aliases = ["GOPAC (Global Organization of Parliamentarians Against Corruption)"]
+kind = "internasional"
+
+[[org]]
+name = "International Commission on Irrigation and Drainage"
+short = "ICID"
+kind = "internasional"
+
+[[org]]
+name = "Knesset"
+kind = "parlemen"
+
+[[org]]
+name = "Dinas Keamanan Federal Rusia"
+short = "FSB"
+aliases = ["Dinas Keamanan Federal (FSB)", "Dinas Keamanan Federal"]
+kind = "internasional"

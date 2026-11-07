@@ -1668,30 +1668,75 @@ export interface Organization {
   id: number;
   name: string;
   short_name: string | null;
+  /** Other spellings that mean it ("DPR RI"); jejak/organizations.py links offices by all of them. */
+  aliases: string[];
+  /** What sort of body: one of ORG_KINDS, or null. */
+  kind: string | null;
+  /** Active figures with an office linked to it. */
+  figures: number;
 }
+
+/** As jejak/organizations.py KINDS. */
+export const ORG_KINDS = ["kementerian", "lembaga", "parlemen", "pemerintah", "kabinet", "partai", "aparat",
+  "bumn", "swasta", "ormas", "kampus", "media", "olahraga", "internasional", "lainnya"] as const;
 
 // Same as jejak/db.py, so the page works before the pipeline has next run.
 const ORGANIZATIONS_DDL = `CREATE TABLE IF NOT EXISTS organizations (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
     short_name  TEXT UNIQUE COLLATE NOCASE,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    aliases     TEXT,
+    kind        TEXT
 )`;
 
-export async function getOrganizations(): Promise<Organization[]> {
+/** The table, with the columns a database made before aliases and kind lacks. */
+async function ensureOrganizations(): Promise<void> {
   await lrun(ORGANIZATIONS_DDL);
-  return query<Organization>(`SELECT id, name, short_name FROM organizations ORDER BY name COLLATE NOCASE`);
+  const cols = new Set((await query<{ name: string }>(`PRAGMA table_info(organizations)`)).map((c) => c.name));
+  for (const c of ["aliases", "kind"]) if (!cols.has(c)) await lrun(`ALTER TABLE organizations ADD COLUMN ${c} TEXT`);
+}
+
+export async function getOrganizations(): Promise<Organization[]> {
+  await ensureOrganizations();
+  const rows = await query<Omit<Organization, "aliases"> & { aliases: string | null }>(
+    `SELECT o.id, o.name, o.short_name, o.aliases, o.kind,
+            (SELECT count(DISTINCT f.id) FROM figures f, json_each(f.positions) j
+              WHERE f.active AND json_valid(f.positions) AND json_extract(j.value, '$.org_id') = o.id) AS figures
+       FROM organizations o ORDER BY o.name COLLATE NOCASE`
+  );
+  return rows.map((r) => ({ ...r, aliases: parseAliases(r.aliases), figures: Number(r.figures) }));
+}
+
+/**
+ * The organisation text on offices that no organisation matched at the
+ * pipeline's last run (no org_id), most-used first: a name to add here, or
+ * a CV to correct.
+ */
+export async function getUnlinkedOrgs(): Promise<{ org: string; figures: number }[]> {
+  const rows = await query<{ org: string; figures: number }>(
+    `SELECT trim(json_extract(j.value, '$.org')) AS org, count(DISTINCT f.id) AS figures
+       FROM figures f, json_each(f.positions) j
+      WHERE f.active AND json_valid(f.positions)
+        AND trim(coalesce(json_extract(j.value, '$.org'), '')) <> ''
+        AND json_extract(j.value, '$.org_id') IS NULL
+      GROUP BY org ORDER BY figures DESC, org`
+  );
+  return rows.map((r) => ({ ...r, figures: Number(r.figures) }));
 }
 
 /**
  * Adds an organisation (id null) or renames one. A name may be used once
  * across both columns, so "KPK" cannot be one organisation's short name and
- * another's long one.
+ * another's long one. Aliases take effect at the pipeline's next run.
  */
-export async function saveOrganization(id: number | null, name: string, shortName: string | null): Promise<void> {
-  await lrun(ORGANIZATIONS_DDL);
+export async function saveOrganization(
+  id: number | null, name: string, shortName: string | null, aliases: string[] = [], kind: string | null = null
+): Promise<void> {
+  await ensureOrganizations();
   if (!name) throw new Error("name is required");
   if (shortName && shortName.toLowerCase() === name.toLowerCase()) shortName = null;
+  if (kind && !(ORG_KINDS as readonly string[]).includes(kind)) throw new Error(`unknown kind: ${kind}`);
   const clash = await queryOne<{ name: string }>(
     `SELECT name FROM organizations
       WHERE id IS NOT ?1
@@ -1701,14 +1746,17 @@ export async function saveOrganization(id: number | null, name: string, shortNam
   );
   if (clash) throw new Error(`already used by ${clash.name}`);
   const now = new Date().toISOString();
+  const list = JSON.stringify([...new Set(aliases.map((a) => a.trim()).filter((a) => a && a.toLowerCase() !== name.toLowerCase()))]);
   if (id === null) {
-    await lrun(`INSERT INTO organizations (name, short_name, updated_at) VALUES (?, ?, ?)`, [name, shortName, now]);
+    await lrun(`INSERT INTO organizations (name, short_name, aliases, kind, updated_at) VALUES (?, ?, ?, ?, ?)`,
+               [name, shortName, list, kind, now]);
   } else {
-    await lrun(`UPDATE organizations SET name = ?, short_name = ?, updated_at = ? WHERE id = ?`, [name, shortName, now, id]);
+    await lrun(`UPDATE organizations SET name = ?, short_name = ?, aliases = ?, kind = ?, updated_at = ? WHERE id = ?`,
+               [name, shortName, list, kind, now, id]);
   }
 }
 
 export async function deleteOrganization(id: number): Promise<void> {
-  await lrun(ORGANIZATIONS_DDL);
+  await ensureOrganizations();
   await lrun(`DELETE FROM organizations WHERE id = ?`, [id]);
 }

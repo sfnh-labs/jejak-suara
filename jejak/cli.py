@@ -15,6 +15,7 @@
     python -m jejak.cli buzzer               # coordinated-engagement detection
     python -m jejak.cli suggest [--auto-hide] # guess curator verdicts from /kurasi labels
     python -m jejak.cli curation-report      # what the /kurasi labels say, for rule-writing
+    python -m jejak.cli organizations        # link every office to its organisation (organizations.toml)
     python -m jejak.cli points               # open questions per catatan for /kurasi to ask,
                                              # and auto-answers for the kinds switched on there
     python -m jejak.cli timeline <figure_id> # approved, publishable events
@@ -120,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("points")
     # Curation upkeep: draft what /kurasi left undone, learn from the curator.
     sub.add_parser("kurasi")
+    sub.add_parser("organizations")
     sub.add_parser("translate")
     sub.add_parser("run")
     p_bf = sub.add_parser("backfill")
@@ -237,6 +239,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "kurasi":
             from . import kurasi
             print("kurasi:", kurasi.run_stage(conn))
+        if args.cmd in ("kurasi", "organizations"):
+            # After curation upkeep, so offices edited or accepted since the
+            # last run are linked before anything reads them.
+            from . import organizations
+            print("organizations:", organizations.run(conn))
+            if args.cmd == "organizations":
+                for org, n in organizations.unlinked(conn)[:40]:
+                    print(f"  unlinked: {org} ({n})")
         if args.cmd == "curation-report":
             print(curation_suggest.report(conn))
         if args.cmd == "timeline":

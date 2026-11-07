@@ -292,7 +292,10 @@ export async function editOrganization(formData: FormData): Promise<void> {
     if (id === null) throw new Error("org_id is required");
     await deleteOrganization(id);
   } else {
-    await saveOrganization(id, text(formData, "name", 200), text(formData, "short_name", 60) || null);
+    await saveOrganization(
+      id, text(formData, "name", 200), text(formData, "short_name", 60) || null,
+      text(formData, "aliases", 1000).split(";"), text(formData, "kind", 30) || null
+    );
   }
   revalidatePath("/kurasi", "layout");
 }
