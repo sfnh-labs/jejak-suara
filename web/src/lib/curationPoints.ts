@@ -1,4 +1,4 @@
-import { lquery as query, lqueryOne as queryOne, lrun, ltx, tableExists } from "./localDb";
+import { lquery as query, lqueryOne as queryOne, lrun, ltx, pipelineOp, tableExists } from "./localDb";
 import { setFollowupVerdict, setLinkVerdict, type LinkVerdict } from "./curation";
 
 /**
@@ -8,14 +8,16 @@ import { setFollowupVerdict, setLinkVerdict, type LinkVerdict } from "./curation
  * Each point is a view onto a row that already holds the answer —
  * record_links, followup_links, actor_reviews, event_quotes — so answering
  * writes there, through the same writers the rest of /kurasi uses, and the
- * point keeps what it changed so "Batalkan" can put it back. The answers on
+ * point keeps what it changed so "Batalkan" can put it back. A jabatan point
+ * (office_proposals) is answered by the pipeline's own code, through
+ * scripts/kurasi_ops.py, as auto-answering answers it. The answers on
  * the points are what confidence per kind is measured on.
  *
  * The table is the pipeline's; on a jejak.db the `points` stage has not run
  * on yet it does not exist, and everything here reads as "no points".
  */
 
-export type PointKind = "peristiwa" | "lini" | "pelaku" | "pembicara";
+export type PointKind = "peristiwa" | "lini" | "pelaku" | "pembicara" | "jabatan";
 export type PointAnswer = "ya" | "bukan" | "koreksi" | "lewati";
 export type PointStatus = PointAnswer | "open" | "auto" | "auto_wrong" | "settled";
 
@@ -24,6 +26,7 @@ export const KIND_LABEL: Record<PointKind, string> = {
   lini: "Lini cerita",
   pelaku: "Pelaku atau disebut",
   pembicara: "Pembicara kutipan",
+  jabatan: "Jabatan tokoh",
 };
 
 /** The auto-answer gate, as for auto-hide (jejak/curation_points.py). */
@@ -62,6 +65,13 @@ interface Proposal {
    * a speaker. Absent on the pipeline's own questions.
    */
   check?: "pelaku" | "usul" | "pembicara";
+  // jabatan: the office proposed, and the figure's label as it stands
+  proposal_id?: number;
+  role?: string;
+  org?: string;
+  /** The organisation is already on the list; otherwise a "Ya" adds it. */
+  org_known?: boolean;
+  current?: string;
 }
 
 export interface Point {
@@ -144,6 +154,8 @@ function effectOf(kind: PointKind, p: Proposal, groupSize: number): string {
       return p.figure_id
         ? `${groupSize} kutipan “${p.speaker}” menjadi milik ${p.name}, begitu juga “${p.speaker}” berikutnya${p.scope ? " di catatan sejenis" : ""}.`
         : `${groupSize} kutipan “${p.speaker}” ditandai bukan tokoh yang dilacak, dan tidak ditanyakan lagi.`;
+    case "jabatan":
+      return `jabatan utama ${p.name} di CV menjadi ${p.role} – ${p.org}${p.org_known ? "" : `, dan “${p.org}” masuk daftar organisasi`}.`;
   }
 }
 
@@ -405,13 +417,36 @@ async function inDateOrder(a: number, b: number): Promise<[number, number]> {
 /** "Koreksi" on a pembicara point with no tracked figure: the speaker is no one we follow. */
 export const NOT_TRACKED = "-";
 
+/** A jabatan correction, as answerPoint takes it: the office and its organisation. */
+export function officeCorrection(role: string, org: string): string {
+  return JSON.stringify({ role: role.trim(), org: org.trim() });
+}
+
+async function pointKind(pointId: number): Promise<PointKind | null> {
+  const row = await queryOne<{ kind: PointKind }>(`SELECT kind FROM curation_points WHERE id = ?`, [pointId]);
+  return row?.kind ?? null;
+}
+
+async function eventOf(pointId: number): Promise<number> {
+  const row = await queryOne<{ event_id: number }>(`SELECT event_id FROM curation_points WHERE id = ?`, [pointId]);
+  return row!.event_id;
+}
+
 /**
  * Answer a point. "koreksi" says what is right instead, and `correction`
  * names it: for pembicara the speaker's figure id (or NOT_TRACKED); for
  * pelaku the figure who acts instead; for peristiwa the peristiwa id the
- * record belongs to; for lini the event id it continues or is continued by.
+ * record belongs to; for lini the event id it continues or is continued by;
+ * for jabatan the office, as officeCorrection writes it.
  */
 export async function answerPoint(pointId: number, answer: PointAnswer, correction: string | null): Promise<number> {
+  if ((await pointKind(pointId)) === "jabatan") {
+    const office = answer === "koreksi" ? (JSON.parse(correction || "{}") as { role?: string; org?: string }) : {};
+    if (answer === "koreksi" && !(office.role && office.org)) throw new Error("isi jabatan dan organisasinya");
+    await pipelineOp("jabatan-answer", String(pointId), answer,
+                     ...(answer === "koreksi" ? ["--role", office.role!, "--org", office.org!] : []));
+    return eventOf(pointId);
+  }
   const p = await queryOne<{ id: number; kind: PointKind; event_id: number; status: string; proposal: string }>(
     `SELECT id, kind, event_id, status, proposal FROM curation_points WHERE id = ?`, [pointId]
   );
@@ -665,6 +700,10 @@ function readUndo(answer: string | null): Undo {
 
 /** Put a curator's answer back as it was, and ask the point again. */
 export async function undoPoint(pointId: number): Promise<number> {
+  if ((await pointKind(pointId)) === "jabatan") {
+    await pipelineOp("jabatan-undo", String(pointId));
+    return eventOf(pointId);
+  }
   const p = await queryOne<{ event_id: number; kind: PointKind; status: string; answer: string | null; answered_by: string | null; proposal: string }>(
     `SELECT event_id, kind, status, answer, answered_by, proposal FROM curation_points WHERE id = ?`, [pointId]
   );
@@ -686,6 +725,10 @@ export async function undoPoint(pointId: number): Promise<number> {
  * confidence, and against its spot checks, which switches auto off.
  */
 export async function salahPoint(pointId: number): Promise<number> {
+  if ((await pointKind(pointId)) === "jabatan") {
+    await pipelineOp("jabatan-undo", String(pointId), "--salah");
+    return eventOf(pointId);
+  }
   const p = await queryOne<{ event_id: number; kind: PointKind; status: string; answer: string | null; proposal: string }>(
     `SELECT event_id, kind, status, answer, proposal FROM curation_points WHERE id = ?`, [pointId]
   );

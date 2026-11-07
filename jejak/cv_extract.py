@@ -17,6 +17,8 @@ import urllib.error
 import urllib.request
 
 from . import summarize
+from . import offices, organizations
+from .offices import ORG_RULE
 
 SYSTEM = """You extract biographical facts about ONE person from news articles,
 for a public accountability archive's CV of that person.
@@ -34,9 +36,11 @@ Return JSON only, exactly this shape:
   "facts": [{{"label": "...", "value": "..."}}],
   "education": [{{"year": "...", "detail": "..."}}]}}
 
-- positions: offices {name} holds or held. role = the office ("Sekretaris"),
-  org = the body ("Dinas PMD Sumatera Utara"), period = years as written, or
-  "" when not stated. A new appointment is "<year> – kini".
+- positions: offices {name} holds or held, period = years as written, or ""
+  when not stated. A new appointment is "<year> – kini". An electoral
+  district goes nowhere: a DPR member's office is "Anggota" of "Dewan
+  Perwakilan Rakyat".
+  """ + ORG_RULE + """
 - facts: short label/value pairs ("Lahir", "Partai"). A relative is labelled
   by what they are TO {name}, value = who they are: {{"label": "Ayah",
   "value": "<nama>, <jabatannya bila disebut>"}} means that person is
@@ -220,11 +224,17 @@ def _sentences(text: str) -> list[str]:
     return [x.lower() for x in re.split(r"(?<=[.!?])\s+|\n+", text) if x.strip()]
 
 
-def ground(draft: dict, text: str) -> dict:
+def ground(draft: dict, text: str, spellings: dict[str, list[str]] | None = None) -> dict:
     """Only what the articles actually say: every entry's distinctive words
     must be in the text, and a fact's label (a relation, "Ayah") must share a
     sentence with its value. A small model fills a CV form from memory when the
     articles are thin, and these entries go onto a public CV unreviewed.
+
+    An office also counts as stated when its role is and its organisation is
+    named any way the list knows it (`spellings`, by folded name: "DPR" for
+    Dewan Perwakilan Rakyat), or by its distinctive words ("Gubernur Bali" for
+    Gubernur of Pemerintah Provinsi Bali). An "org" that is no organisation
+    (a dapil, an election, a period) is dropped and the role kept.
     """
     low = text.lower()
     present = set(_WORD.findall(low))
@@ -236,7 +246,12 @@ def ground(draft: dict, text: str) -> dict:
 
     out = {"positions": [], "facts": [], "education": []}
     for p in draft.get("positions", []):
-        if not _PLACEHOLDER.search(p["role"]) and stated(f"{p['role']} {p['org']}", 0.75):
+        if p["org"] and not offices.is_org(p["org"]):
+            p = {**p, "org": ""}
+        if _PLACEHOLDER.search(p["role"]):
+            continue
+        if stated(f"{p['role']} {p['org']}", 0.75) or (p["org"] and offices.grounded(
+                p["role"], p["org"], text, (spellings or {}).get(offices.fold(p["org"]), []))):
             out["positions"].append(p)
     for f in draft.get("facts", []):
         if (_PLACEHOLDER.search(f["value"]) or _RELATIVE_LABEL.match(f["label"].strip())
@@ -274,7 +289,9 @@ def draft_cv(conn: sqlite3.Connection, event_id: int, figure_id: str,
          + "\n\n" + PROMPT.format(name=name, note=extra)},
     ])
     text = "\n".join(" ".join(x for x in (a["title"], a["summary"], a["body"]) if x) for a in articles)
-    out = ground(_clean(raw), text)
+    index = organizations.index(conn)
+    known = offices._spellings(conn)
+    out = ground(_clean(raw), text, {k: known.get(i, []) for k, i in index.items()})
     out["sources"] = [{"label": f"{a['source']}: {a['title']}", "url": a["url"]}
                       for a in articles if a["url"]][:3]
     return out

@@ -386,6 +386,28 @@ CREATE TABLE IF NOT EXISTS organizations (
     updated_at  TEXT NOT NULL
 );
 
+-- A figure's main office as the pipeline proposes it (jejak/offices.py), for
+-- the figures whose first office on their CV names no linked organisation.
+-- Each becomes a "jabatan" curation point; the answer is kept here, and a
+-- "Ya" or a correction writes the office to figures.positions[0].
+CREATE TABLE IF NOT EXISTS office_proposals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    figure_id   TEXT NOT NULL,
+    role        TEXT NOT NULL,     -- "Ketua Umum"
+    org         TEXT NOT NULL,     -- "Partai Demokrat": the institution, never a dapil or election
+    band        TEXT NOT NULL,     -- dari label | model, dikenal | model, baru
+    event_id    INTEGER,           -- the catatan the evidence is from
+    article_id  TEXT,
+    paragraph   TEXT,
+    hl_start    INTEGER,
+    hl_end      INTEGER,
+    model       TEXT,              -- NULL when read off the figure's own label
+    verdict     TEXT,              -- confirmed | rejected | corrected | settled, NULL = waiting
+    created_at  TEXT NOT NULL,
+    decided_at  TEXT,
+    UNIQUE (figure_id, role, org)
+);
+
 -- "Jadikan info CV" in /kurasi: what an article says about someone's
 -- offices, background and education, drafted by the local model
 -- (jejak/cv_extract.py) for the curator to check, edit and accept onto that
@@ -485,11 +507,12 @@ CREATE TABLE IF NOT EXISTS stage_failures (
 -- The pipeline's open questions about a catatan, one per row, for /kurasi to
 -- ask one at a time (jejak/curation_points.py). Each is a view onto a row that
 -- already holds the answer (record_links.verdict, followup_links.verdict,
--- actor_reviews.decision, event_quotes.figure_id): answering writes there,
--- and the answers here are what confidence per kind is measured on. Local only.
+-- actor_reviews.decision, event_quotes.figure_id, office_proposals.verdict):
+-- answering writes there, and the answers here are what confidence per kind
+-- is measured on. Local only.
 CREATE TABLE IF NOT EXISTS curation_points (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind        TEXT NOT NULL,     -- peristiwa | lini | pelaku | pembicara
+    kind        TEXT NOT NULL,     -- peristiwa | lini | pelaku | pembicara | jabatan
     key         TEXT NOT NULL UNIQUE,  -- what it asks about: 'peristiwa:<record>:<peristiwa>', ...
     event_id    INTEGER NOT NULL,  -- the catatan it is listed on
     group_size  INTEGER NOT NULL DEFAULT 1,  -- rows one answer settles (quotes, for pembicara)

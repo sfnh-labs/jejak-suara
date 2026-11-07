@@ -16,6 +16,8 @@
     python -m jejak.cli suggest [--auto-hide] # guess curator verdicts from /kurasi labels
     python -m jejak.cli curation-report      # what the /kurasi labels say, for rule-writing
     python -m jejak.cli organizations        # link every office to its organisation (organizations.toml)
+    python -m jejak.cli offices [--no-model] # propose a main office (role – organisation) for the
+                                             # figures whose first office names no linked one
     python -m jejak.cli points               # open questions per catatan for /kurasi to ask,
                                              # and auto-answers for the kinds switched on there
     python -m jejak.cli timeline <figure_id> # approved, publishable events
@@ -122,6 +124,10 @@ def main(argv: list[str] | None = None) -> int:
     # Curation upkeep: draft what /kurasi left undone, learn from the curator.
     sub.add_parser("kurasi")
     sub.add_parser("organizations")
+    p_of = sub.add_parser("offices")
+    p_of.add_argument("--no-model", action="store_true",
+                      help="only the proposals read off a figure's own label")
+    p_of.add_argument("--limit", type=int, default=None, help="model calls this run")
     sub.add_parser("translate")
     sub.add_parser("run")
     p_bf = sub.add_parser("backfill")
@@ -247,6 +253,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.cmd == "organizations":
                 for org, n in organizations.unlinked(conn)[:40]:
                     print(f"  unlinked: {org} ({n})")
+        if args.cmd == "offices":
+            from . import offices
+            print("offices:", offices.propose(conn, use_model=not args.no_model,
+                                              limit=args.limit or offices.MODEL_LIMIT))
         if args.cmd == "curation-report":
             print(curation_suggest.report(conn))
         if args.cmd == "timeline":

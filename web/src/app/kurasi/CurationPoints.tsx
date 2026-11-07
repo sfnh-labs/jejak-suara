@@ -259,6 +259,20 @@ function Correction({ point: p, nearby, liniChoices, listId, liniPanel }: {
       </form>
     );
   }
+  if (p.kind === "jabatan") {
+    return (
+      <form action={answerCurationPoint} style={box}>
+        <PointHidden id={p.id} answer="koreksi" />
+        {head("Bukan, jabatannya ini")}
+        <span style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <input name="office_role" required maxLength={200} defaultValue={x.role} aria-label="Jabatan" placeholder="Jabatan, mis. Gubernur" style={{ ...input, flex: "1 1 160px" }} />
+          <input name="office_org" required maxLength={300} defaultValue={x.org} aria-label="Organisasi" placeholder="Organisasi, mis. Pemerintah Provinsi Bali" style={{ ...input, flex: "2 1 240px" }} />
+          {go("Simpan jabatan")}
+        </span>
+        {saves(<>Disimpan sebagai jabatan utama {x.name}. Organisasi ditulis lengkap, bukan dapil, pemilu atau periode; yang belum ada di daftar ditambahkan.</>)}
+      </form>
+    );
+  }
   return null;
 }
 
@@ -286,6 +300,8 @@ function noEffect(p: Point): string {
       return p.proposal.check === "pelaku"
         ? `${p.proposal.name} pindah ke Disebut.`
         : `${p.proposal.name} tetap di Disebut; pelakunya tidak berubah.`;
+    case "jabatan":
+      return `CV ${p.proposal.name} tetap${p.proposal.current ? ` “${p.proposal.current}”` : ""}; jabatannya ditanyakan lagi dari berita yang lebih baru.`;
     default:
       return "tidak ada yang berubah.";
   }
@@ -410,7 +426,7 @@ function subjectPanel(p: Point, liniPanel: "catatan" | "peristiwa"): { panel: st
     const other = x.later_id === p.event_id ? x.earlier_id : x.later_id;
     return { panel: `${liniPanel}:${other}`, label: liniPanel === "catatan" ? "lihat catatannya" : "lihat peristiwanya" };
   }
-  if ((p.kind === "pelaku" || p.kind === "pembicara") && x.figure_id) return { panel: `tokoh:${x.figure_id}`, label: "lihat tokohnya" };
+  if ((p.kind === "pelaku" || p.kind === "pembicara" || p.kind === "jabatan") && x.figure_id) return { panel: `tokoh:${x.figure_id}`, label: "lihat tokohnya" };
   return null;
 }
 

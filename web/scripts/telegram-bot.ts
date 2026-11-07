@@ -25,6 +25,7 @@ import {
   undoPoint,
   KIND_LABEL,
   NOT_TRACKED,
+  officeCorrection,
   type Point,
   type PointAnswer,
   type PointKind,
@@ -181,6 +182,7 @@ function noEffect(p: Point): string {
       return p.proposal.check === "pelaku"
         ? `${p.proposal.name} pindah ke Disebut.`
         : `${p.proposal.name} tetap di Disebut; pelakunya tidak berubah.`;
+    case "jabatan": return "CV-nya tetap; jabatannya ditanyakan lagi dari berita yang lebih baru.";
     default: return "tidak ada yang berubah.";
   }
 }
@@ -234,6 +236,7 @@ async function cardText(p: Point): Promise<string> {
   } else {
     lines.push(`<b>${esc(x.claim)}</b>`);
     if (p.kind === "pelaku" && x.figure_id) lines.push(`Tokoh: ${who(x.figure_id, x.name ?? x.figure_id)}`);
+    if (p.kind === "jabatan") lines.push(`Sekarang tertulis: ${x.current ? esc(x.current) : "<i>kosong</i>"}`);
     lines.push(`<b>Jika Ya:</b> ${esc(p.effect)}`);
     lines.push(`<b>Jika Bukan:</b> ${esc(noEffect(p))}`);
   }
@@ -319,7 +322,7 @@ async function topUp(s: State): Promise<void> {
 }
 
 /** The kinds take turns, in this order; a kind with nothing open is passed over. */
-const ROTATION: PointKind[] = ["peristiwa", "pembicara", "pelaku", "lini"];
+const ROTATION: PointKind[] = ["peristiwa", "pembicara", "pelaku", "jabatan", "lini"];
 
 /** The newest open point of the kind after the last one sent. */
 async function nextPoint(s: State): Promise<Point | null> {
@@ -460,14 +463,16 @@ async function showFigures(s: State, p: Point, msgId: number, typed: string): Pr
 
 /** Ask for a name or title as a reply to the card; the reply comes back to onMessage. */
 async function prompt(s: State, p: Point, msgId: number): Promise<void> {
-  const ask = figureKind(p)
+  const ask = p.kind === "jabatan"
+    ? "Ketik jabatan dan organisasinya, dipisah koma: <i>jabatan, organisasi</i> (mis. <i>Gubernur, Pemerintah Provinsi Bali</i>). Organisasinya lembaga, bukan dapil atau pemilu."
+    : figureKind(p)
     ? p.kind === "pembicara"
       ? "Ketik nama tokohnya. Untuk tokoh baru, tambahkan jabatan dan organisasi, dipisah koma: <i>Nama Lengkap, jabatan, organisasi</i> (mis. <i>Nanik S Deyang, Wakil Kepala, Badan Gizi Nasional</i>)"
       : "Ketik nama tokoh yang menjadi pelaku."
     : "Ketik sebagian judul untuk dicari.";
   const id = await send(ask, undefined, {
     reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
-    reply_markup: { force_reply: true, input_field_placeholder: figureKind(p) ? "Nama tokoh" : "Judul" },
+    reply_markup: { force_reply: true, input_field_placeholder: p.kind === "jabatan" ? "Jabatan, organisasi" : figureKind(p) ? "Nama tokoh" : "Judul" },
   });
   s.prompts[id] = p.id;
 }
@@ -493,12 +498,33 @@ async function onReply(s: State, replyTo: number, text: string, own: number): Pr
     await drop(own);
     return true;
   }
-  if (figureKind(p)) await showFigures(s, p, card, text.trim());
+  if (p.kind === "jabatan") await correctOffice(s, p, card, text);
+  else if (figureKind(p)) await showFigures(s, p, card, text.trim());
   else await showEvents(s, p, card, 0, text.trim().slice(0, 100));
   // Keep the chat to the card: the question and the typed answer have done their job.
   if (promptId) await drop(promptId);
   await drop(own);
   return true;
+}
+
+/** "Jabatan, organisasi" typed for a jabatan card: saved as the correction, or said what is missing. */
+async function correctOffice(s: State, p: Point, card: number, typed: string): Promise<void> {
+  const at = typed.indexOf(",");
+  const role = at < 0 ? "" : typed.slice(0, at).trim();
+  const org = at < 0 ? "" : typed.slice(at + 1).trim();
+  if (!role || !org) {
+    await send("Tulis keduanya, dipisah koma: <i>jabatan, organisasi</i>. Balas kartunya lagi.");
+    return;
+  }
+  try {
+    await answerPoint(p.id, "koreksi", officeCorrection(role, org));
+  } catch (e) {
+    await send(esc(e instanceof Error ? e.message : String(e)));
+    return;
+  }
+  await forget(s, p.id);
+  const done = (await getPoint(p.id))!;
+  await edit(card, await answeredText(done), [[{ text: "Batalkan", callback_data: `u:${p.id}` }]]);
 }
 
 /** A card is done: drop what it kept, and take its extra messages (📄 paragraphs) out of the chat. */
@@ -548,8 +574,8 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
       note = "Dibatalkan";
     } else if (kind === "k" || kind === "s") {
       if (!open) throw new Error("Sudah dijawab.");
-      // Figures have no list to start from: ask for a name straight away.
-      if (kind === "s" || figureKind(p)) await prompt(s, p, msg.message_id);
+      // Figures and offices have no list to start from: ask for them typed.
+      if (kind === "s" || figureKind(p) || p.kind === "jabatan") await prompt(s, p, msg.message_id);
       else await showEvents(s, p, msg.message_id, Number(code) || 0);
     } else if (kind === "p") {
       const pick = s.picks[p.id]?.[Number(code)];
