@@ -12,6 +12,8 @@ page calls this script the moment the curator decides:
     python scripts/kurasi_ops.py rework <request-id>     # draft a rework (Ollama)
     python scripts/kurasi_ops.py rework-accept <request-id>
     python scripts/kurasi_ops.py cv-draft <proposal-id>    # draft CV entries (Ollama)
+    python scripts/kurasi_ops.py jabatan-answer <point-id> <ya|bukan|koreksi|lewati> [--role R --org O]
+    python scripts/kurasi_ops.py jabatan-undo <point-id> [--salah]
 
 Prints one line saying what happened. Exits 1, with the reason on stderr,
 when the decision cannot be carried out (a page address already taken, an
@@ -30,7 +32,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import apply_candidate_verdicts as verdicts  # noqa: E402
-from jejak import candidate_queue, db, summarize  # noqa: E402,F401  (summarize: tests patch it)
+from jejak import candidate_queue, db, offices, summarize  # noqa: E402,F401  (summarize: tests patch it)
 from jejak.kurasi import (  # noqa: E402
     Refused, _now, accept_rework, draft_cv, run_rework,
 )
@@ -184,6 +186,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("rework-accept").add_argument("request_id", type=int)
     sub.add_parser("cv-draft").add_argument("proposal_id", type=int)
     sub.add_parser("open-checks").add_argument("event_id", type=int)
+    ja = sub.add_parser("jabatan-answer")
+    ja.add_argument("point_id", type=int)
+    ja.add_argument("answer", choices=("ya", "bukan", "koreksi", "lewati"))
+    ja.add_argument("--role")
+    ja.add_argument("--org")
+    ju = sub.add_parser("jabatan-undo")
+    ju.add_argument("point_id", type=int)
+    ju.add_argument("--salah", action="store_true")
     args = ap.parse_args(argv)
 
     db.init_db(args.db)
@@ -206,10 +216,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "open-checks":
             from jejak.curation_points import open_checks
             line = f"{open_checks(conn, args.event_id)} points opened"
+        elif args.cmd == "jabatan-answer":
+            line = offices.answer(conn, args.point_id, args.answer, args.role, args.org)
+        elif args.cmd == "jabatan-undo":
+            line = offices.undo(conn, args.point_id, args.salah)
         else:
             line = f"{candidate_queue.refresh(conn)} names in the queue"
         conn.commit()
-    except Refused as e:
+    except (Refused, offices.Refused) as e:
         conn.rollback()
         print(str(e), file=sys.stderr)
         return 1

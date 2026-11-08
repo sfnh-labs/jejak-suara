@@ -123,9 +123,10 @@ try {
     Invoke-Stage "kurasi" @("-m", "jejak.cli", "kurasi")
 
     # participants after quotes: who is quoted in a record decides its Pelaku /
-    # Disebut list and the pelaku points "points" asks about.
+    # Disebut list and the pelaku points "points" asks about. offices before
+    # points: its proposals are the jabatan points.
     foreach ($stage in @("cluster", "link", "quotes", "participants", "translate", "summarize",
-                         "sentiment", "buzzer", "suggest", "points")) {
+                         "sentiment", "buzzer", "suggest", "offices", "points")) {
         Invoke-Stage $stage @("-m", "jejak.cli", $stage)
     }
 
