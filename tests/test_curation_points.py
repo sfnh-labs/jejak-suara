@@ -75,6 +75,18 @@ def test_peristiwa_link_becomes_a_point_with_its_evidence(conn):
     assert p["paragraph"][p["hl_start"]:p["hl_end"]] == "Penyidik menindak beras oplosan di gudang."
 
 
+def test_evidence_falls_back_to_the_headline(conn):
+    # The link's words are in the headline; the body is a teaser without them.
+    _event(conn, 1, "suyudi", "Poster Gibran mundur atau dimundurkan muncul",
+           "Isu hak menyatakan pendapat mencuat di berbagai fraksi.")
+    _event(conn, 2, None, "PDIP dorong Gibran mundur")
+    conn.execute("INSERT INTO record_links (record_id, peristiwa_id, score, evidence, created_at) "
+                 "VALUES (1, 2, 0.45, ?, ?)", (json.dumps(["poster", "dimundurkan"]), NOW))
+    cp.run(conn)
+    p = _points(conn, "peristiwa")["peristiwa:1:2"]
+    assert p["paragraph"] == "Poster Gibran mundur atau dimundurkan muncul"
+
+
 def test_rerun_neither_duplicates_nor_touches_an_answer(conn):
     _event(conn, 1, "suyudi", body="oplosan gudang")
     _event(conn, 2, None)
