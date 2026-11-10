@@ -110,17 +110,21 @@ def _term_evidence(conn: sqlite3.Connection, event_id: int, terms: list[str]):
     """The paragraph of the event's coverage that shares the most of `terms`.
 
     `terms` are link.py's evidence words, tokenised as cluster._tokens does.
-    Returns (article_id, paragraph, hl_start, hl_end) or None.
+    They are often taken from the headline or lead, and a body can be a
+    short teaser, so those are searched too, after the body: on a tie the
+    body paragraph wins. Returns (article_id, paragraph, hl_start, hl_end)
+    or None.
     """
     want = set(terms)
     if not want:
         return None
     best = None
     for art in conn.execute(
-        "SELECT id, body FROM articles WHERE event_id = ? AND body IS NOT NULL "
+        "SELECT id, title, summary, body FROM articles WHERE event_id = ? "
         "ORDER BY published_at", (event_id,)
     ):
-        for para in _paragraphs(art["body"]):
+        for para in [*_paragraphs(art["body"]), *_paragraphs(art["summary"]),
+                     *_paragraphs(art["title"])]:
             hits = len(_tokens(para) & want)
             if hits and (best is None or hits > best[0]):
                 best = (hits, art["id"], para)
