@@ -1,5 +1,5 @@
 import { lquery as query, lqueryOne as queryOne, lrun, ltx, pipelineOp, tableExists } from "./localDb";
-import { setFollowupVerdict, setLinkVerdict, syncAbout, type LinkVerdict } from "./curation";
+import { setCuration, setFollowupVerdict, setLinkVerdict, syncAbout, type LinkVerdict, type ReasonCode, type Verdict } from "./curation";
 
 /**
  * Curation points: the pipeline's open questions about a catatan, asked one
@@ -241,6 +241,7 @@ export async function getNextOpenPoint(kind: PointKind, exclude: number[] = []):
       `${POINT_SELECT}
         LEFT JOIN events e ON e.id = p.event_id
         WHERE p.status = 'open' AND p.kind = ? AND p.id NOT IN (SELECT value FROM json_each(?))
+          AND e.curated IS NOT 'rejected'
         ORDER BY e.event_date DESC, a.published_at DESC, p.id DESC
         LIMIT 1`,
       [kind, exclude]
@@ -705,6 +706,42 @@ async function revert(eventId: number, prop: Proposal, undo: Undo): Promise<void
 
 function readUndo(answer: string | null): Undo {
   return (answer ? (JSON.parse(answer) as { undo?: Undo }).undo : null) ?? { kind: "none" };
+}
+
+/** A catatan taken down from one of its cards, as restoreRecord puts it back. */
+export interface Takedown {
+  event_id: number;
+  prev: Verdict | null;
+  settled: number[];
+}
+
+/**
+ * Take a catatan down from a card: it is off the site, as /kurasi's
+ * takedown does, and its open points are settled, since nothing about a
+ * removed catatan is worth asking. The pipeline stops proposing them too.
+ */
+export async function rejectRecord(eventId: number, reason: ReasonCode): Promise<Takedown> {
+  const ev = await queryOne<{ curated: Verdict | null }>(`SELECT curated FROM events WHERE id = ?`, [eventId]);
+  if (!ev) throw new Error(`unknown event: ${eventId}`);
+  const open = await query<{ id: number }>(
+    `SELECT id FROM curation_points WHERE event_id = ? AND status IN ('open', 'lewati')`, [eventId]
+  );
+  await setCuration(eventId, "rejected", [reason]);
+  await lrun(
+    `UPDATE curation_points SET status = 'settled' WHERE id IN (SELECT value FROM json_each(?))`,
+    [JSON.stringify(open.map((r) => r.id))]
+  );
+  return { event_id: eventId, prev: ev.curated === "rejected" ? null : ev.curated, settled: open.map((r) => r.id) };
+}
+
+/** Undo rejectRecord: the catatan back as it was, and its points asked again. */
+export async function restoreRecord(t: Takedown): Promise<void> {
+  await setCuration(t.event_id, t.prev);
+  await lrun(
+    `UPDATE curation_points SET status = 'open'
+      WHERE status = 'settled' AND id IN (SELECT value FROM json_each(?))`,
+    [JSON.stringify(t.settled)]
+  );
 }
 
 /** Put a curator's answer back as it was, and ask the point again. */

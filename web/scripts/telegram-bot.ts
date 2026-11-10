@@ -16,12 +16,14 @@
  */
 import { existsSync } from "node:fs";
 import { localDbPath, lquery, lqueryOne, lrun, pipelineOp } from "@/lib/localDb";
-import { getFigureOptions, getFollowupCandidates, getItem, type FigureOption } from "@/lib/curation";
+import { getFigureOptions, getFollowupCandidates, getItem, REASONS, reasonLabel, type FigureOption, type ReasonCode } from "@/lib/curation";
 import {
   answerPoint,
   getKindStats,
   getNextOpenPoint,
   getPoint,
+  rejectRecord,
+  restoreRecord,
   undoPoint,
   KIND_LABEL,
   NOT_TRACKED,
@@ -29,6 +31,7 @@ import {
   type Point,
   type PointAnswer,
   type PointKind,
+  type Takedown,
 } from "@/lib/curationPoints";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
@@ -116,6 +119,8 @@ interface State {
   newFig: Record<string, { name: string; role: string; org?: string }>;
   /** Messages sent alongside a card (📄 paragraphs), deleted once it is answered. */
   extras: Record<string, number[]>;
+  /** Catatan taken down from a card (card's point -> takedown), for its Batalkan. */
+  takedowns: Record<string, Takedown>;
 }
 
 async function loadState(): Promise<State> {
@@ -130,9 +135,10 @@ async function loadState(): Promise<State> {
       prompts: s.prompts && typeof s.prompts === "object" ? s.prompts : {},
       newFig: s.newFig && typeof s.newFig === "object" ? s.newFig : {},
       extras: s.extras && typeof s.extras === "object" ? s.extras : {},
+      takedowns: s.takedowns && typeof s.takedowns === "object" ? s.takedowns : {},
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {} };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {} };
   }
 }
 
@@ -261,6 +267,7 @@ function cardKeyboard(p: Point): Keyboard {
     { text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` },
     { text: "⏭ Lewati", callback_data: a("lewati") },
   ]);
+  rows.push([{ text: "🗑 Tolak catatan", callback_data: `r:${p.id}:` }]);
   // The article on its outlet's site, in Telegram's own browser.
   if (p.article_url && /^https?:\/\//.test(p.article_url)) {
     rows.push([{ text: `📰 Baca berita${p.source ? ` · ${clip(p.source, 28)}` : ""}`, url: p.article_url }]);
@@ -278,6 +285,23 @@ async function answeredText(p: Point): Promise<string> {
     `<b>${head}</b> · ${esc(KIND_LABEL[p.kind])}`,
     `<i>${esc(ev?.title ?? `Catatan #${p.event_id}`)}</i>`,
     esc(p.kind === "pembicara" ? `“${p.proposal.speaker ?? ""}”` : p.proposal.claim),
+  ].join("\n");
+}
+
+/** Why the catatan comes down: /kurasi's takedown reasons, but for "Lainnya", which needs a note. */
+function reasonKeyboard(p: Point): Keyboard {
+  return [
+    ...REASONS.filter((r) => r.code !== "other").map((r) => [{ text: r.label, callback_data: `r:${p.id}:${r.code}` }]),
+    [{ text: "← Kembali", callback_data: `b:${p.id}` }],
+  ];
+}
+
+async function takenDownText(p: Point, reason: string): Promise<string> {
+  const ev = await lqueryOne<{ title: string | null }>(`SELECT title FROM events WHERE id = ?`, [p.event_id]);
+  return [
+    `<b>🗑 Catatan ditolak</b> · ${esc(reasonLabel(reason))}`,
+    `<i>${esc(ev?.title ?? `Catatan #${p.event_id}`)}</i>`,
+    "Tidak tampil di situs; poin-poinnya ditutup.",
   ].join("\n");
 }
 
@@ -575,6 +599,31 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
       const out = await pipelineOp("new-figure", fig.name, ...(fig.role ? ["--role", fig.role] : []), ...(fig.org ? ["--org", fig.org] : []));
       await answer("koreksi", out.split("\n").pop()!.trim());
       note = `Tokoh baru dibuat: ${fig.name}`;
+    } else if (kind === "r") {
+      if (!open) throw new Error("Sudah dijawab.");
+      if (!code) {
+        await edit(msg.message_id, `${await cardText(p)}\n\n<b>🗑 Tolak catatan ini? Alasannya:</b>`, reasonKeyboard(p));
+      } else {
+        if (!REASONS.some((r) => r.code === code && code !== "other")) throw new Error("Alasan tidak dikenal.");
+        const t = await rejectRecord(p.event_id, code as ReasonCode);
+        await forget(s, p.id);
+        s.takedowns[p.id] = t;
+        await edit(msg.message_id, await takenDownText(p, code), [[{ text: "Batalkan", callback_data: `x:${p.id}` }]]);
+        note = "Catatan ditolak";
+      }
+    } else if (kind === "x") {
+      const t = s.takedowns[p.id];
+      if (!t) throw new Error("Penolakan ini tidak bisa dibatalkan dari sini; buka /kurasi.");
+      await restoreRecord(t);
+      delete s.takedowns[p.id];
+      const back = (await getPoint(p.id))!;
+      if (back.status === "open") {
+        s.sent[p.id] = msg.message_id;
+        await edit(msg.message_id, await cardText(back), cardKeyboard(back));
+      } else {
+        await edit(msg.message_id, await answeredText(back));
+      }
+      note = "Catatan dipulihkan";
     } else if (kind === "b") {
       if (!open) throw new Error("Sudah dijawab.");
       delete s.picks[p.id];
