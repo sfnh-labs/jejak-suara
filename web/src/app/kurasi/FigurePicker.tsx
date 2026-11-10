@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { setQuoteSpeaker } from "./actions";
+import { setQuoteAbout, setQuoteSpeaker } from "./actions";
 import { MUTED, RULE, SURFACE, button, input } from "./ui";
 
 /** `title`: the main office, role – organisation, as the roster carries it. */
@@ -238,6 +238,36 @@ export function SpeakerEditor({ quoteId, listId, canClear }: { quoteId: number; 
       <input type="hidden" name="quote_id" value={quoteId} />
       <FigurePicker listId={listId} required autoFocus placeholder="Cari tokoh yang berbicara: nama, alias, atau jabatan" />
       <button type="submit" name="op" value="assign" style={button("ink")}>Simpan</button>
+      <button type="button" onClick={() => setEditing(false)} style={button("quiet")}>Batal</button>
+    </form>
+  );
+}
+
+/**
+ * "+ tentang": add a figure the quote is about. Closed until asked for, as a
+ * quote is about no one more often than not.
+ */
+export function AboutEditor({ quoteId, listId }: { quoteId: number; listId: string }) {
+  const [editing, setEditing] = useState(false);
+  if (!editing) {
+    return (
+      <button type="button" onClick={() => setEditing(true)} style={{ ...button("quiet"), minHeight: 28, padding: "3px 10px", fontSize: 12 }}>
+        + tentang
+      </button>
+    );
+  }
+  return (
+    <form
+      action={setQuoteAbout}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") setEditing(false);
+      }}
+      style={{ display: "flex", gap: 6, alignItems: "center", flex: "1 1 100%" }}
+    >
+      <input type="hidden" name="quote_id" value={quoteId} />
+      <input type="hidden" name="on" value="1" />
+      <FigurePicker listId={listId} required autoFocus placeholder="Kutipan ini tentang siapa: nama, alias, atau jabatan" />
+      <button type="submit" style={button("ink")}>Simpan</button>
       <button type="button" onClick={() => setEditing(false)} style={button("quiet")}>Batal</button>
     </form>
   );

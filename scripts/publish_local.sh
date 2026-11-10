@@ -133,8 +133,8 @@ run_stage "mentions" -m jejak.cli mentions --limit 1000
 # Curation upkeep (jejak/kurasi.py): draft any rework or CV request /kurasi
 # left undone, learn from the curator's decisions, rebuild the names queue.
 run_stage "kurasi" -m jejak.cli kurasi
-# participants after quotes: who is quoted in a record decides its Pelaku /
-# Disebut list and the pelaku points `points` asks about. offices before
+# participants after quotes: who speaks in a record, and whom their quotes are
+# about, make its Terkait list and the tentang points `points` asks about. offices before
 # points: its proposals are the jabatan points.
 for stage in cluster link quotes participants translate summarize sentiment buzzer suggest offices points; do
     run_stage "$stage" -m jejak.cli "$stage"

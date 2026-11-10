@@ -1,12 +1,12 @@
 import { lquery as query, lqueryOne as queryOne, lrun, ltx, pipelineOp, tableExists } from "./localDb";
-import { setFollowupVerdict, setLinkVerdict, type LinkVerdict } from "./curation";
+import { setFollowupVerdict, setLinkVerdict, syncAbout, type LinkVerdict } from "./curation";
 
 /**
  * Curation points: the pipeline's open questions about a catatan, asked one
  * at a time (jejak/curation_points.py writes them).
  *
  * Each point is a view onto a row that already holds the answer —
- * record_links, followup_links, actor_reviews, event_quotes — so answering
+ * record_links, followup_links, record_figures, quote_subjects, event_quotes — so answering
  * writes there, through the same writers the rest of /kurasi uses, and the
  * point keeps what it changed so "Batalkan" can put it back. A jabatan point
  * (office_proposals) is answered by the pipeline's own code, through
@@ -17,15 +17,19 @@ import { setFollowupVerdict, setLinkVerdict, type LinkVerdict } from "./curation
  * on yet it does not exist, and everything here reads as "no points".
  */
 
-export type PointKind = "peristiwa" | "lini" | "pelaku" | "pembicara" | "jabatan";
+export type PointKind = "peristiwa" | "lini" | "terkait" | "tentang" | "pembicara" | "jabatan";
 export type PointAnswer = "ya" | "bukan" | "koreksi" | "lewati";
 export type PointStatus = PointAnswer | "open" | "auto" | "auto_wrong" | "settled";
+
+/** The kinds asked now; 'pelaku' points from before the Terkait list are history. */
+const KINDS_NOW = (): PointKind[] => Object.keys(KIND_LABEL) as PointKind[];
 
 export const KIND_LABEL: Record<PointKind, string> = {
   peristiwa: "Catatan → peristiwa",
   lini: "Lini cerita",
-  pelaku: "Pelaku atau disebut",
-  pembicara: "Pembicara kutipan",
+  terkait: "Tokoh terkait",
+  tentang: "Kutipan tentang siapa",
+  pembicara: "Siapa yang bicara",
   jabatan: "Jabatan tokoh",
 };
 
@@ -46,12 +50,16 @@ interface Proposal {
   earlier_id?: number;
   later_id?: number;
   title?: string;
-  // pelaku, pembicara
+  // terkait, tentang, pembicara
   figure_id?: string | null;
   name?: string | null;
-  owner_id?: string;
-  quotes?: number;
-  // pembicara
+  // terkait: why the pipeline listed them (owner | derived)
+  source?: string;
+  // tentang: the quote, and who said it
+  quote_id?: number;
+  quote?: string;
+  speaker_name?: string | null;
+  // pembicara (and tentang: the speaker as written)
   speaker?: string;
   candidates?: { id: string; name: string }[];
   quote_ids?: number[];
@@ -60,11 +68,10 @@ interface Proposal {
   scope?: string;
   /**
    * A decision the pipeline made without asking, opened to be checked
-   * (open_checks in jejak/curation_points.py): "pelaku" a Pelaku it set,
-   * "usul" a quoted figure it left out of Pelaku, "pembicara" quotes it gave
-   * a speaker. Absent on the pipeline's own questions.
+   * (open_checks in jejak/curation_points.py): "pembicara" quotes it gave a
+   * speaker. Absent on the pipeline's own questions.
    */
-  check?: "pelaku" | "usul" | "pembicara";
+  check?: "pembicara";
   // jabatan: the office proposed, and the figure's label as it stands
   proposal_id?: number;
   role?: string;
@@ -145,10 +152,10 @@ function effectOf(kind: PointKind, p: Proposal, groupSize: number): string {
       return `tautan ke “${p.title}” dikonfirmasi dan tampil di situs.`;
     case "lini":
       return `catatan ini tersambung sebagai kelanjutan “${p.title}” dalam lini cerita.`;
-    case "pelaku":
-      return p.check === "pelaku"
-        ? `${p.name} tetap Pelaku, ditandai sudah dicek.`
-        : `${p.name} masuk Pelaku catatan ini, di samping yang sudah ada.`;
+    case "terkait":
+      return `${p.name} tetap di daftar Terkait catatan ini, ditandai sudah dicek.`;
+    case "tentang":
+      return `kutipan ini tercatat tentang ${p.name}, dan ${p.name} ada di daftar Terkait.`;
     case "pembicara":
       if (p.check) return `${groupSize} kutipan “${p.speaker}” tetap atas nama ${p.name}, ditandai sudah dicek.`;
       return p.figure_id
@@ -201,11 +208,11 @@ export async function getPoints(eventId: number): Promise<Point[]> {
   const [rows, cal] = await Promise.all([
     query<Row>(
       `${POINT_SELECT}
-        WHERE p.event_id = ? AND p.status <> 'settled'
+        WHERE p.event_id = ? AND p.status <> 'settled' AND p.kind IN (SELECT value FROM json_each(?))
         ORDER BY CASE p.status WHEN 'open' THEN 0 WHEN 'lewati' THEN 1 ELSE 2 END,
                  CASE WHEN p.status IN ('open', 'lewati') THEN -p.group_size END,
                  p.answered_at DESC, p.id`,
-      [eventId]
+      [eventId, KINDS_NOW()]
     ),
     calibration(),
   ]);
@@ -215,7 +222,10 @@ export async function getPoints(eventId: number): Promise<Point[]> {
 /** One point, whatever its status; null if there is no such point. */
 export async function getPoint(pointId: number): Promise<Point | null> {
   if (!(await pointsReady())) return null;
-  const [row, cal] = await Promise.all([queryOne<Row>(`${POINT_SELECT} WHERE p.id = ?`, [pointId]), calibration()]);
+  const [row, cal] = await Promise.all([
+    queryOne<Row>(`${POINT_SELECT} WHERE p.id = ? AND p.kind IN (SELECT value FROM json_each(?))`, [pointId, KINDS_NOW()]),
+    calibration(),
+  ]);
   return row ? toPoint(row, cal) : null;
 }
 
@@ -241,17 +251,14 @@ export async function getNextOpenPoint(kind: PointKind, exclude: number[] = []):
 }
 
 /**
- * The catatan's automatic decisions not yet open as points: Pelaku and quoted
- * figures from record_figures, and quotes given a speaker, one per figure and
- * speaker as written — what open_checks would open.
+ * The catatan's automatic decisions not yet open as points: quotes given a
+ * speaker, one per figure and speaker as written — what open_checks would open.
  */
 export async function getUncheckedCount(eventId: number): Promise<number> {
-  if (!(await pointsReady()) || !(await tableExists("record_figures"))) return 0;
+  if (!(await pointsReady())) return 0;
   const row = await queryOne<{ decisions: number; opened: number }>(
     `SELECT
-       (SELECT count(*) FROM record_figures
-         WHERE event_id = ?1 AND coalesce(assigned_by, 'auto') = 'auto' AND role IN ('actor', 'quoted'))
-     + (SELECT count(*) FROM (SELECT DISTINCT figure_id, lower(trim(coalesce(speaker, ''))) FROM event_quotes
+       (SELECT count(*) FROM (SELECT DISTINCT figure_id, lower(trim(coalesce(speaker, ''))) FROM event_quotes
          WHERE event_id = ?1 AND figure_id IS NOT NULL AND coalesce(assigned_by, 'auto') = 'auto')) AS decisions,
        (SELECT count(*) FROM curation_points
          WHERE event_id = ?1 AND key LIKE 'cek:%' AND status IN ('open', 'lewati')) AS opened`,
@@ -371,11 +378,15 @@ export async function setAutoKind(kind: PointKind, on: boolean): Promise<void> {
 type Undo =
   | { kind: "pair"; table: "record_links" | "followup_links"; pairs: { a: number; b: number; prev: LinkVerdict | null }[] }
   | {
-      kind: "pelaku";
-      /** The figure whose row changed, when a correction made someone else the actor. */
-      figure?: string;
-      prev: { role: string; source: string; quotes: number; assigned_by: string } | null;
-      review: string | null;
+      kind: "terkait";
+      /** Each figure whose Terkait row changed, and the row before. */
+      rows: { figure: string; prev: { role: string; source: string; quotes: number; assigned_by: string } | null }[];
+    }
+  | {
+      kind: "tentang";
+      quote_id: number;
+      /** Each figure whose quote_subjects row changed, and the row before. */
+      rows: { figure: string; prev: { status: string; band: string | null; assigned_by: string; created_at: string } | null }[];
     }
   | {
       kind: "quotes";
@@ -435,7 +446,8 @@ async function eventOf(pointId: number): Promise<number> {
 /**
  * Answer a point. "koreksi" says what is right instead, and `correction`
  * names it: for pembicara the speaker's figure id (or NOT_TRACKED); for
- * pelaku the figure who acts instead; for peristiwa the peristiwa id the
+ * terkait the figure the record concerns instead; for tentang the figure the
+ * quote is about instead; for peristiwa the peristiwa id the
  * record belongs to; for lini the event id it continues or is continued by;
  * for jabatan the office, as officeCorrection writes it.
  */
@@ -462,7 +474,7 @@ export async function answerPoint(pointId: number, answer: PointAnswer, correcti
     const ev = await queryOne<{ kind: string; title: string | null }>(`SELECT kind, title FROM events WHERE id = ?`, [target]);
     if (!ev || ev.kind !== (p.kind === "peristiwa" ? "peristiwa" : here?.kind)) throw new Error("choose another event");
     label = ev.title ?? `#${target}`;
-  } else if (answer === "koreksi" && p.kind === "pelaku") {
+  } else if (answer === "koreksi" && (p.kind === "terkait" || p.kind === "tentang")) {
     const fig = correction ? await queryOne<{ name: string }>(`SELECT name FROM figures WHERE id = ? AND active = 1`, [correction]) : null;
     if (!fig || correction === prop.figure_id) throw new Error("choose another figure");
     label = fig.name;
@@ -510,59 +522,47 @@ async function apply(
     return { kind: "pair", table, pairs };
   }
 
-  if (kind === "pelaku" && answer === "koreksi") {
-    // Not this figure but another: the proposed one stays under Disebut, the
-    // one named instead becomes an actor beside the owner.
-    const fig = correction!;
-    const prev = await queryOne<{ role: string; source: string; quotes: number; assigned_by: string }>(
-      `SELECT role, source, quotes, assigned_by FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, fig]
-    );
-    const review = await queryOne<{ decision: string | null }>(`SELECT decision FROM actor_reviews WHERE event_id = ?`, [eventId]);
-    await lrun(
-      `INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
-       VALUES (?, ?, 'actor', 'curator', 0, 'curator')
-       ON CONFLICT (event_id, figure_id) DO UPDATE SET role = 'actor', source = 'curator', assigned_by = 'curator'`,
-      [eventId, fig]
-    );
-    await lrun(`UPDATE actor_reviews SET decision = 'keep', decided_at = ? WHERE event_id = ? AND suggested_id = ?`,
-               [new Date().toISOString(), eventId, prop.figure_id]);
-    return { kind: "pelaku", figure: fig, prev, review: review?.decision ?? null };
-  }
-
-  if (kind === "pelaku" && prop.check === "pelaku" && answer === "bukan") {
-    // A Pelaku the pipeline set, wrongly: moved to Disebut, by the curator.
-    const fig = prop.figure_id!;
-    const prev = await queryOne<{ role: string; source: string; quotes: number; assigned_by: string }>(
-      `SELECT role, source, quotes, assigned_by FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, fig]
-    );
-    // Kept so undoing puts back any actor_reviews decision exactly as it was.
-    const review = await queryOne<{ decision: string | null }>(
-      `SELECT decision FROM actor_reviews WHERE event_id = ? AND suggested_id = ?`, [eventId, fig]
-    );
-    await lrun(`UPDATE record_figures SET role = 'quoted', source = 'curator', assigned_by = 'curator' WHERE event_id = ? AND figure_id = ?`,
-               [eventId, fig]);
-    return { kind: "pelaku", prev, review: review?.decision ?? null };
-  }
-
-  if (kind === "pelaku") {
-    const fig = prop.figure_id!;
-    const prev = await queryOne<{ role: string; source: string; quotes: number; assigned_by: string }>(
-      `SELECT role, source, quotes, assigned_by FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, fig]
-    );
-    const review = await queryOne<{ decision: string | null }>(`SELECT decision FROM actor_reviews WHERE event_id = ?`, [eventId]);
-    if (answer === "ya") {
-      // The curator's row: participants.py rebuilds only the automatic ones.
+  if (kind === "terkait") {
+    // Ya keeps them, as checked; Bukan takes them off; Koreksi takes them
+    // off and puts the one named instead on. Every row becomes the curator's,
+    // so the participants stage leaves it as decided.
+    const rows: Extract<Undo, { kind: "terkait" }>["rows"] = [];
+    const put = async (fig: string, role: "related" | "removed") => {
+      const prev = await queryOne<{ role: string; source: string; quotes: number; assigned_by: string }>(
+        `SELECT role, source, quotes, assigned_by FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, fig]
+      );
+      rows.push({ figure: fig, prev: prev ?? null });
       await lrun(
         `INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
-         VALUES (?, ?, 'actor', 'curator', ?, 'curator')
-         ON CONFLICT (event_id, figure_id) DO UPDATE SET role = 'actor', source = 'curator', assigned_by = 'curator'`,
-        [eventId, fig, prop.quotes ?? 0]
+         VALUES (?, ?, ?, 'curator', 0, 'curator')
+         ON CONFLICT (event_id, figure_id) DO UPDATE SET role = excluded.role, assigned_by = 'curator'`,
+        [eventId, fig, role]
       );
-    }
-    // 'actor': a second actor beside the owner, not a change of owner.
-    await lrun(`UPDATE actor_reviews SET decision = ?, decided_at = ? WHERE event_id = ? AND suggested_id = ?`,
-               [answer === "ya" ? "actor" : "keep", new Date().toISOString(), eventId, fig]);
-    return { kind: "pelaku", prev, review: review?.decision ?? null };
+    };
+    await put(prop.figure_id!, answer === "ya" ? "related" : "removed");
+    if (answer === "koreksi") await put(correction!, "related");
+    return { kind: "terkait", rows };
+  }
+
+  if (kind === "tentang") {
+    const quoteId = prop.quote_id!;
+    const rows: Extract<Undo, { kind: "tentang" }>["rows"] = [];
+    const put = async (fig: string, status: "confirmed" | "rejected") => {
+      const prev = await queryOne<{ status: string; band: string | null; assigned_by: string; created_at: string }>(
+        `SELECT status, band, assigned_by, created_at FROM quote_subjects WHERE quote_id = ? AND figure_id = ?`, [quoteId, fig]
+      );
+      rows.push({ figure: fig, prev: prev ?? null });
+      await lrun(
+        `INSERT INTO quote_subjects (quote_id, figure_id, status, assigned_by, created_at)
+         VALUES (?, ?, ?, 'curator', ?)
+         ON CONFLICT (quote_id, figure_id) DO UPDATE SET status = excluded.status, assigned_by = 'curator'`,
+        [quoteId, fig, status, new Date().toISOString()]
+      );
+      await syncAbout(eventId, fig);
+    };
+    await put(prop.figure_id!, answer === "ya" ? "confirmed" : "rejected");
+    if (answer === "koreksi") await put(correction!, "confirmed");
+    return { kind: "tentang", quote_id: quoteId, rows };
   }
 
   // pembicara: every quote of the group still waiting. A quote the curator
@@ -664,16 +664,25 @@ async function teachSpeaker(prop: Proposal, figureId: string | null, pointId: nu
 async function revert(eventId: number, prop: Proposal, undo: Undo): Promise<void> {
   if (undo.kind === "pair") {
     for (const x of undo.pairs) await setPair(undo.table, x.a, x.b, x.prev);
-  } else if (undo.kind === "pelaku") {
-    const fig = undo.figure ?? prop.figure_id!;
-    if (undo.prev) {
-      await lrun(`UPDATE record_figures SET role = ?, source = ?, quotes = ?, assigned_by = ? WHERE event_id = ? AND figure_id = ?`,
-                 [undo.prev.role, undo.prev.source, undo.prev.quotes, undo.prev.assigned_by, eventId, fig]);
-    } else {
-      await lrun(`DELETE FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, fig]);
+  } else if (undo.kind === "terkait") {
+    for (const r of [...undo.rows].reverse()) {
+      if (r.prev) {
+        await lrun(`UPDATE record_figures SET role = ?, source = ?, quotes = ?, assigned_by = ? WHERE event_id = ? AND figure_id = ?`,
+                   [r.prev.role, r.prev.source, r.prev.quotes, r.prev.assigned_by, eventId, r.figure]);
+      } else {
+        await lrun(`DELETE FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, r.figure]);
+      }
     }
-    await lrun(`UPDATE actor_reviews SET decision = ?, decided_at = NULL WHERE event_id = ? AND suggested_id = ?`,
-               [undo.review, eventId, prop.figure_id]);
+  } else if (undo.kind === "tentang") {
+    for (const r of [...undo.rows].reverse()) {
+      if (r.prev) {
+        await lrun(`UPDATE quote_subjects SET status = ?, band = ?, assigned_by = ?, created_at = ? WHERE quote_id = ? AND figure_id = ?`,
+                   [r.prev.status, r.prev.band, r.prev.assigned_by, r.prev.created_at, undo.quote_id, r.figure]);
+      } else {
+        await lrun(`DELETE FROM quote_subjects WHERE quote_id = ? AND figure_id = ?`, [undo.quote_id, r.figure]);
+      }
+      await syncAbout(eventId, r.figure);
+    }
   } else if (undo.kind === "quotes") {
     for (let i = 0; i < undo.ids.length; i++) {
       await lrun(`UPDATE event_quotes SET figure_id = ?, assigned_by = ? WHERE id = ?`,
@@ -720,7 +729,8 @@ export async function undoPoint(pointId: number): Promise<number> {
 
 /**
  * "Salah" on an auto answer: put back what it changed and rule the other way —
- * the link or follow-up rejected, the figure kept out of Pelaku, the quotes
+ * the link or follow-up rejected, the figure off the Terkait list or the
+ * quote not about them, the quotes
  * waiting again with the lesson unlearnt. It counts against the kind's
  * confidence, and against its spot checks, which switches auto off.
  */
@@ -740,9 +750,21 @@ export async function salahPoint(pointId: number): Promise<number> {
     await revert(p.event_id, prop, undo);
     if (undo.kind === "pair") {
       for (const x of undo.pairs) await setPair(undo.table, x.a, x.b, "rejected");
-    } else if (undo.kind === "pelaku") {
-      await lrun(`UPDATE actor_reviews SET decision = 'keep', decided_at = ? WHERE event_id = ? AND suggested_id = ?`,
-                 [new Date().toISOString(), p.event_id, prop.figure_id]);
+    } else if (undo.kind === "terkait" || p.kind === "terkait") {
+      await lrun(
+        `INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
+         VALUES (?, ?, 'removed', 'curator', 0, 'curator')
+         ON CONFLICT (event_id, figure_id) DO UPDATE SET role = 'removed', assigned_by = 'curator'`,
+        [p.event_id, prop.figure_id]
+      );
+    } else if (undo.kind === "tentang" || p.kind === "tentang") {
+      await lrun(
+        `INSERT INTO quote_subjects (quote_id, figure_id, status, assigned_by, created_at)
+         VALUES (?, ?, 'rejected', 'curator', ?)
+         ON CONFLICT (quote_id, figure_id) DO UPDATE SET status = 'rejected', assigned_by = 'curator'`,
+        [prop.quote_id, prop.figure_id, new Date().toISOString()]
+      );
+      await syncAbout(p.event_id, prop.figure_id!);
     }
     await lrun(`UPDATE curation_points SET status = 'auto_wrong', answered_by = 'curator', answered_at = ? WHERE id = ?`,
                [new Date().toISOString(), pointId]);

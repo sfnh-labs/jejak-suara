@@ -18,7 +18,8 @@ import {
   setFollowupVerdict,
   setLinkVerdict,
   setRelatedFigure,
-  setActor,
+  setRelated,
+  setQuoteSubject,
   requestRework,
   removeNotAPerson,
   setLessonActive,
@@ -228,12 +229,12 @@ export async function relateFigure(formData: FormData): Promise<void> {
   done(id);
 }
 
-/** Add a Pelaku to a record ("on"), or move one back to Disebut. */
-export async function setRecordActor(formData: FormData): Promise<void> {
+/** Add a figure to a record's Terkait list ("on"), or take them off it. */
+export async function setRecordRelated(formData: FormData): Promise<void> {
   const id = eventId(formData);
   const figureId = text(formData, "figure_id", 120).toLowerCase();
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
-  await setActor(id, figureId, formData.get("on") === "1");
+  await setRelated(id, figureId, formData.get("on") === "1");
   done(id);
 }
 
@@ -316,6 +317,14 @@ export async function setQuoteSpeaker(formData: FormData): Promise<void> {
   done(await assignQuote(quoteId, figureId));
 }
 
+/** Say whom a quote is about ("on"), or that it is not about them. */
+export async function setQuoteAbout(formData: FormData): Promise<void> {
+  const quoteId = eventId(formData, "quote_id");
+  const figureId = text(formData, "figure_id", 120).toLowerCase();
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(figureId)) throw new Error("choose a figure");
+  done(await setQuoteSubject(quoteId, figureId, formData.get("on") === "1"));
+}
+
 /** A quote the curator adds by hand; the figure is optional (unplaced). */
 export async function newQuote(formData: FormData): Promise<void> {
   const id = eventId(formData);
@@ -342,7 +351,7 @@ export async function pickQuote(formData: FormData): Promise<void> {
 /**
  * Ya / Bukan / Koreksi / Lewati on a curation point; the answer lands on the
  * row it asks about. A peristiwa or lini point is corrected to another event
- * (`event_target`), a Pelaku point to another figure. A speaker can be corrected to a figure from the roster,
+ * (`event_target`); a terkait or tentang point to another figure. A speaker can be corrected to a figure from the roster,
  * to "not a tracked figure" (figure_id "-"), or to a figure created right
  * here from `new_name` — through the pipeline's own promote, as the names
  * queue does.

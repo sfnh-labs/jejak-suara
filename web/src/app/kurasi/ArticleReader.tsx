@@ -8,7 +8,7 @@ import { INK, MUTED, RULE, SURFACE, day } from "./ui";
 /** A name to mark in the text, and why it is there. */
 export interface ReaderTerm {
   text: string;
-  /** owner: one of the record's Pelaku · figure: another tracked one · candidate: a new name */
+  /** owner: on the record's Terkait list · figure: another tracked one · candidate: a new name */
   kind: "owner" | "figure" | "candidate";
   /** Who it marks, for the hover title. */
   label: string;
@@ -21,7 +21,7 @@ const MARK: Record<ReaderTerm["kind"], React.CSSProperties> = {
 };
 
 const KIND_LABEL: Record<ReaderTerm["kind"], string> = {
-  owner: "pelaku",
+  owner: "terkait",
   figure: "tokoh terlacak",
   candidate: "nama baru",
 };

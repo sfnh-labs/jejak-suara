@@ -113,10 +113,10 @@ function PointCard({ index, total, point: p, figures, nearby, liniChoices, listI
         </span>
         {p.proposal.check ? (
           <span
-            title={p.proposal.check === "usul" ? "Pipeline mencatatnya hanya dikutip, tanpa bertanya." : "Pipeline sudah memutuskan ini tanpa bertanya; jawabanmu mengukur ketepatannya."}
+            title="Pipeline sudah memutuskan ini tanpa bertanya; jawabanmu mengukur ketepatannya."
             style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", padding: "1px 7px", borderRadius: 2, border: `1px solid ${INK}`, color: INK }}
           >
-            {p.proposal.check === "usul" ? "Dari kutipan" : "Keputusan otomatis"}
+            Keputusan otomatis
           </span>
         ) : null}
         {p.status === "lewati" ? <span style={{ fontSize: 12, color: MUTED }}>dilewati</span> : null}
@@ -143,6 +143,10 @@ function PointCard({ index, total, point: p, figures, nearby, liniChoices, listI
             </span>
           ) : null}
           <Highlighted text={p.paragraph} start={p.hl_start} end={p.hl_end} />
+        </blockquote>
+      ) : p.kind === "tentang" && p.proposal.quote ? (
+        <blockquote style={{ margin: 0, padding: "1px 0 1px 14px", borderLeft: `3px solid ${RULE}`, fontFamily: "var(--font-serif)", fontSize: 15, lineHeight: 1.6, color: "var(--color-mud)" }}>
+          “{p.proposal.quote}” — {p.proposal.speaker_name ?? p.proposal.speaker ?? "(tanpa nama)"}
         </blockquote>
       ) : (
         <p style={{ fontSize: 12.5, color: MUTED, margin: 0 }}>Paragrafnya tidak ditemukan di teks artikel.</p>
@@ -171,16 +175,16 @@ function PointCard({ index, total, point: p, figures, nearby, liniChoices, listI
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <form action={answerCurationPoint}>
               <PointHidden id={p.id} answer="ya" />
-              <button type="submit" style={{ ...button("accept"), padding: "8px 20px" }}>{p.kind === "pelaku" ? `Ya, ${p.proposal.name} pelaku` : "Ya"}</button>
+              <button type="submit" style={{ ...button("accept"), padding: "8px 20px" }}>Ya</button>
             </form>
             <form action={answerCurationPoint}>
               <PointHidden id={p.id} answer="bukan" />
-              <button type="submit" style={{ ...button("quiet"), padding: "8px 20px", color: "var(--color-clay)", borderColor: "var(--color-clay)" }}>{p.kind === "pelaku" ? "Bukan, hanya disebut" : "Bukan"}</button>
+              <button type="submit" style={{ ...button("quiet"), padding: "8px 20px", color: "var(--color-clay)", borderColor: "var(--color-clay)" }}>Bukan</button>
             </form>
             <span style={{ flex: 1 }} />
             <SkipForm point={p} />
           </div>
-          {p.proposal.check === "pelaku" ? null : <Correction point={p} nearby={nearby} liniChoices={liniChoices} listId={listId} liniPanel={liniPanel} />}
+          <Correction point={p} nearby={nearby} liniChoices={liniChoices} listId={listId} liniPanel={liniPanel} />
         </>
       )}
     </div>
@@ -189,8 +193,9 @@ function PointCard({ index, total, point: p, figures, nearby, liniChoices, listI
 
 /**
  * "Bukan, tapi …": the right answer instead of the proposed one, saved in the
- * same step — another peristiwa, another event in the lini, another figure as
- * Pelaku. Each says what it saves.
+ * same step — another peristiwa, another event in the lini, another figure
+ * the record concerns or the quote is about, from the roster or created here.
+ * Each says what it saves.
  */
 function Correction({ point: p, nearby, liniChoices, listId, liniPanel }: {
   point: Point; nearby: EventChoice[]; liniChoices: EventChoice[]; listId: string; liniPanel: "catatan" | "peristiwa";
@@ -246,17 +251,31 @@ function Correction({ point: p, nearby, liniChoices, listId, liniPanel }: {
       </form>
     );
   }
-  if (p.kind === "pelaku") {
+  if (p.kind === "terkait" || p.kind === "tentang") {
+    const what = p.kind === "terkait" ? "catatan ini terkait tokoh lain" : "kutipan ini tentang tokoh lain";
+    const saved = p.kind === "terkait"
+      ? <>Disimpan: {x.name} dihapus dari Terkait; tokoh yang kamu pilih masuk Terkait.</>
+      : <>Disimpan: kutipan ini bukan tentang {x.name}, melainkan tokoh yang kamu pilih; dia masuk Terkait.</>;
     return (
-      <form action={answerCurationPoint} style={box}>
-        <PointHidden id={p.id} answer="koreksi" />
-        {head("Bukan, pelakunya tokoh lain")}
-        <span style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <FigurePicker listId={listId} required placeholder="Cari tokoh yang sebenarnya pelaku" />
-          {go("Jadikan pelaku")}
-        </span>
-        {saves(<>Disimpan: {x.name} tetap di Disebut; tokoh yang kamu pilih masuk Pelaku catatan ini, di samping yang sudah ada.</>)}
-      </form>
+      <div style={box}>
+        {head(`Bukan, ${what}`)}
+        <form action={answerCurationPoint} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <PointHidden id={p.id} answer="koreksi" />
+          <FigurePicker listId={listId} required placeholder="Cari tokoh: nama, alias, atau jabatan" />
+          {go("Pilih")}
+        </form>
+        <details>
+          <summary style={{ cursor: "pointer", fontSize: 12.5, color: "var(--color-mud)" }}>Tokoh baru, belum dilacak</summary>
+          <form action={answerCurationPoint} style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+            <PointHidden id={p.id} answer="koreksi" />
+            <input name="new_name" required maxLength={200} aria-label="Nama lengkap tokoh baru" placeholder="Nama lengkap" style={{ ...input, flex: "1 1 180px" }} />
+            <input name="new_role" maxLength={300} aria-label="Jabatan tokoh baru" placeholder="Jabatan, mis. Wakil Ketua Komisi XII" style={{ ...input, flex: "1 1 160px" }} />
+            <input name="new_org" maxLength={300} aria-label="Organisasi tokoh baru" placeholder="Organisasi, mis. DPR" style={{ ...input, flex: "1 1 200px" }} />
+            {go("Buat & pilih")}
+          </form>
+        </details>
+        {saves(saved)}
+      </div>
     );
   }
   if (p.kind === "jabatan") {
@@ -296,10 +315,10 @@ function noEffect(p: Point): string {
       return "usulan tautan ditolak dan tidak ditanyakan lagi; tautkan peristiwa yang benar lewat “Tautkan” di Relasi.";
     case "lini":
       return "usulan lini ditolak dan tidak ditanyakan lagi; sambungkan yang benar lewat “Sambungkan” di Relasi.";
-    case "pelaku":
-      return p.proposal.check === "pelaku"
-        ? `${p.proposal.name} pindah ke Disebut.`
-        : `${p.proposal.name} tetap di Disebut; pelakunya tidak berubah.`;
+    case "terkait":
+      return `${p.proposal.name} dihapus dari daftar Terkait catatan ini.`;
+    case "tentang":
+      return `kutipan ini tercatat bukan tentang ${p.proposal.name}, dan tidak ditanyakan lagi.`;
     case "jabatan":
       return `CV ${p.proposal.name} tetap${p.proposal.current ? ` “${p.proposal.current}”` : ""}; jabatannya ditanyakan lagi dari berita yang lebih baru.`;
     default:
@@ -426,7 +445,7 @@ function subjectPanel(p: Point, liniPanel: "catatan" | "peristiwa"): { panel: st
     const other = x.later_id === p.event_id ? x.earlier_id : x.later_id;
     return { panel: `${liniPanel}:${other}`, label: liniPanel === "catatan" ? "lihat catatannya" : "lihat peristiwanya" };
   }
-  if ((p.kind === "pelaku" || p.kind === "pembicara" || p.kind === "jabatan") && x.figure_id) return { panel: `tokoh:${x.figure_id}`, label: "lihat tokohnya" };
+  if ((p.kind === "terkait" || p.kind === "tentang" || p.kind === "pembicara" || p.kind === "jabatan") && x.figure_id) return { panel: `tokoh:${x.figure_id}`, label: "lihat tokohnya" };
   return null;
 }
 

@@ -336,21 +336,21 @@ CREATE TABLE IF NOT EXISTS quote_scans (
     PRIMARY KEY (article_id, event_id)
 );
 
--- Everyone taking part in a record, not just the figure it is filed under
--- (jejak/participants.py). events.figure_id stays the record's main actor
--- for display; this says who else is in it and how:
---   'actor'    does or says the act ("Menolak Menu MBG")
---   'subject'  the record is about them but they did not do it (framing 'about')
---   'target'   the act is aimed at them; set by a curator only
---   'quoted'   speaks in the coverage without being the actor
--- One row per figure per record, the strongest role winning. Rows with
--- assigned_by other than 'auto' (a curator's, or an auto-answered point's)
--- are never touched by the stage.
+-- Everyone a record concerns (jejak/participants.py): one plain list,
+-- "Terkait" in /kurasi. Who acts and who only speaks is not told apart; the
+-- quotes say who said what, and quote_subjects whom it was about.
+--   role 'related'  in the list
+--   role 'removed'  a curator took them out; the stage never puts them back
+-- source says why the stage put them there: 'owner' (the figure the record is
+-- filed under), 'quote' (their words in the coverage), 'about' (a quote is
+-- about them), 'derived' (a statement of theirs copied into a record of their
+-- own); 'curator' or 'point' when a person or an answered point did.
+-- Rows with assigned_by other than 'auto' are never touched by the stage.
 CREATE TABLE IF NOT EXISTS record_figures (
     event_id    INTEGER NOT NULL,
     figure_id   TEXT NOT NULL,
-    role        TEXT NOT NULL,      -- actor | subject | target | quoted
-    source      TEXT NOT NULL,      -- owner | quote | derived | curator | point
+    role        TEXT NOT NULL,      -- related | removed
+    source      TEXT NOT NULL,      -- owner | quote | about | derived | curator | point
     quotes      INTEGER NOT NULL DEFAULT 0,  -- their quotes in the record's coverage
     assigned_by TEXT NOT NULL DEFAULT 'auto',
     PRIMARY KEY (event_id, figure_id),
@@ -358,6 +358,23 @@ CREATE TABLE IF NOT EXISTS record_figures (
 );
 CREATE INDEX IF NOT EXISTS idx_record_figures_figure ON record_figures(figure_id);
 
+-- Whom a quote is about: tracked figures its words name ("Pak Surya pun
+-- syok"), other than its speaker (jejak/subjects.py). A quote may be about
+-- several. 'auto' rows the stage found and rebuilds; 'confirmed' and
+-- 'rejected' are a curator's (or an answered point's) and stay.
+CREATE TABLE IF NOT EXISTS quote_subjects (
+    quote_id    INTEGER NOT NULL,
+    figure_id   TEXT NOT NULL,
+    status      TEXT NOT NULL,      -- auto | confirmed | rejected
+    band        TEXT,               -- how the quote names them: nama lengkap | alias | sapaan
+    assigned_by TEXT NOT NULL DEFAULT 'auto',
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (quote_id, figure_id),
+    FOREIGN KEY (quote_id) REFERENCES event_quotes(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_quote_subjects_figure ON quote_subjects(figure_id);
+
+-- Retired 2026-11: the actor/quoted split it fed is gone (see record_figures).
 -- Records whose filed actor is probably wrong: they are never quoted in the
 -- coverage and exactly one other figure is, as when an article about the
 -- President's programme carries only the BGN head's words. A curator moves
@@ -787,7 +804,21 @@ def migrate(conn: sqlite3.Connection) -> None:
     for stmt in _INDEXES:
         conn.execute(stmt)
     _backfill_last_seen(conn)
+    _one_related_list(conn)
     conn.commit()
+
+
+def _one_related_list(conn: sqlite3.Connection) -> None:
+    """record_figures once told Pelaku ('actor', 'subject', 'target') from the
+    merely quoted; now a record has one list. The old 'pelaku' points asked
+    that question, so open ones go."""
+    conn.execute("UPDATE record_figures SET role = 'related' "
+                 "WHERE role IN ('actor', 'subject', 'target', 'quoted')")
+    has_points = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'curation_points'").fetchone()
+    if has_points:
+        conn.execute("UPDATE curation_points SET status = 'settled' "
+                      "WHERE kind = 'pelaku' AND status IN ('open', 'lewati')")
 
 
 def _backfill_last_seen(conn: sqlite3.Connection) -> None:

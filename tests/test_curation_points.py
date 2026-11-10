@@ -122,33 +122,54 @@ def test_rejected_catatan_get_no_points(conn):
 
 
 # ---------------------------------------------------------------------------
-# pelaku
+# terkait and tentang
 
 
-def test_actor_review_points_at_the_paragraph_naming_them(conn):
-    _event(conn, 1, "suyudi", "Satgas tegaskan stok aman",
+def _related(conn, eid, fid, source="owner", by="auto"):
+    conn.execute("INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by) "
+                 "VALUES (?, ?, 'related', ?, 0, ?)", (eid, fid, source, by))
+
+
+def test_a_figure_related_on_no_quote_is_asked_with_the_paragraph_naming_them(conn):
+    _event(conn, 1, "amran", "Satgas tegaskan stok aman",
            "Satgas meninjau pasar.\nMenteri Amran menegaskan stok beras aman sampai akhir tahun.")
-    conn.execute("INSERT INTO actor_reviews (event_id, owner_id, suggested_id, quotes, found_at) "
-                 "VALUES (1, 'suyudi', 'amran', 2, ?)", (NOW,))
+    _event(conn, 2, "suyudi", "Lain", "Tidak ada nama di sini.")
+    _related(conn, 1, "amran")
+    _related(conn, 2, "suyudi")
+    _related(conn, 2, "dasco", source="quote")  # their quotes are asked instead
+    _related(conn, 2, "budi-a", by="curator")   # the curator's own
     cp.run(conn)
-    p = _points(conn, "pelaku")["pelaku:1:amran"]
-    assert p["bucket"] == "2-3 kutipan"
-    assert json.loads(p["proposal"])["claim"] == "Andi Amran Sulaiman ikut menjadi pelaku, bukan hanya disebut"
+    pts = _points(conn, "terkait")
+    assert set(pts) == {"terkait:1:amran", "terkait:2:suyudi"}
+    p = pts["terkait:1:amran"]
+    assert p["bucket"] == "disebut di liputan"
+    assert json.loads(p["proposal"])["claim"] == "Catatan ini terkait Andi Amran Sulaiman"
     assert "Amran menegaskan" in p["paragraph"][p["hl_start"]:p["hl_end"]]
+    assert pts["terkait:2:suyudi"]["bucket"] == "tak disebut di liputan"
 
 
-def test_actor_review_unnamed_in_the_text_points_at_their_quote(conn):
+def test_unnamed_in_the_text_points_at_their_quote(conn):
     # The coverage names someone else with the same first name; only the
     # quotes filed under the figure lead back to the paragraph.
     _event(conn, 1, "suyudi", "Syok",
            "Wakil Ketua Sufmi Hartono bicara.\n\"Kami syok sekali,\" kata Sufmi di Jakarta.")
     _quote(conn, 1, "Sufmi", "Kami syok sekali,", figure="dasco")
-    conn.execute("INSERT INTO actor_reviews (event_id, owner_id, suggested_id, quotes, found_at) "
-                 "VALUES (1, 'suyudi', 'dasco', 1, ?)", (NOW,))
+    fig = next(f for f in cp.load_figures(conn) if f.id == "dasco")
+    ev = cp._actor_evidence(conn, 1, fig)
+    assert ev[0] == "a1" and "kata Sufmi" in ev[1][ev[2]:ev[3]]
+
+
+def test_whom_a_quote_is_about_is_asked_per_quote(conn):
+    _event(conn, 1, "suyudi", "Syok", '"Pak Amran pun syok," kata Sufmi.')
+    _quote(conn, 1, "Sufmi", "Pak Amran pun syok,", figure="dasco")
+    conn.execute("INSERT INTO quote_subjects (quote_id, figure_id, status, band, created_at) "
+                 "VALUES (1, 'amran', 'auto', 'sapaan', ?)", (NOW,))
     cp.run(conn)
-    p = _points(conn, "pelaku")["pelaku:1:dasco"]
-    assert p["article_id"] == "a1"
-    assert "kata Sufmi" in p["paragraph"][p["hl_start"]:p["hl_end"]]
+    p = _points(conn, "tentang")["tentang:1:amran"]
+    prop = json.loads(p["proposal"])
+    assert p["bucket"] == "sapaan" and prop["claim"] == "Kutipan ini tentang Andi Amran Sulaiman"
+    assert prop["speaker_name"] == "Sufmi Dasco Ahmad"
+    assert "Pak Amran" in p["paragraph"][p["hl_start"]:p["hl_end"]]
 
 
 # ---------------------------------------------------------------------------
@@ -336,67 +357,26 @@ def test_checks_from_before_it_was_switched_on_do_not_count(conn):
     assert cp.run(conn)["auto_peristiwa"] == 1
 
 
-def test_pelaku_auto_answer_is_kept_by_participants(conn):
-    _event(conn, 1, "suyudi", body="Menteri Amran menegaskan stok beras aman.")
-    conn.execute("INSERT INTO actor_reviews (event_id, owner_id, suggested_id, quotes, found_at) "
-                 "VALUES (1, 'suyudi', 'amran', 2, ?)", (NOW,))
-    _proven(conn, "pelaku", "2-3 kutipan")
-    _switch_on(conn, "pelaku")
+def test_terkait_and_tentang_auto_answers_are_kept_by_their_stages(conn):
+    from jejak import participants, subjects
+    _event(conn, 1, "amran", body='Menteri Amran menegaskan stok aman. "Pak Suyudi setuju," kata Amran.')
+    _quote(conn, 1, "Amran", "Pak Suyudi setuju,", figure="amran")
+    subjects.backfill(conn)
+    participants.backfill(conn)
+    _proven(conn, "tentang", "sapaan")
+    _event(conn, 2, "suyudi", body="Suyudi Ario Seto meninjau pasar.")
+    participants.backfill(conn)
+    _proven(conn, "terkait", "disebut di liputan")
+    _switch_on(conn, "terkait", "tentang")
     cp.run(conn)
-    row = conn.execute("SELECT role, assigned_by FROM record_figures "
-                       "WHERE event_id = 1 AND figure_id = 'amran'").fetchone()
-    assert tuple(row) == ("actor", "point")
-    assert conn.execute("SELECT decision FROM actor_reviews").fetchone()[0] == "actor"
-
-
-def test_pembicara_auto_answer_teaches_the_speaker(conn):
-    from jejak import quotes
-
-    for eid in (1, 2):
-        _event(conn, eid, "suyudi", body="x")
-        for i in range(2):
-            _quote(conn, eid, "Dasco", f"Kalimat {eid}-{i} yang cukup panjang untuk kutipan")
-    # Record 1 shows one of them as its owner's words.
-    conn.execute("UPDATE events SET quote = 'Kalimat 1-0 yang cukup panjang untuk kutipan' WHERE id = 1")
-    _quote(conn, 1, "Suyudi", "Kalimat milik pemilik catatan yang cukup panjang", figure="suyudi")
-    _proven(conn, "pembicara", "satu kata")
-    _switch_on(conn, "pembicara")
-    cp.run(conn)
-
-    p = _points(conn, "pembicara")["pembicara:dasco:dasco:suyudi"]
-    assert p["status"] == "auto"
-    assigned = conn.execute("SELECT DISTINCT figure_id, assigned_by FROM event_quotes "
-                            "WHERE speaker = 'Dasco'").fetchall()
-    assert [tuple(r) for r in assigned] == [("dasco", "point")]
-    assert conn.execute("SELECT quote FROM events WHERE id = 1").fetchone()[0] == \
-        "Kalimat milik pemilik catatan yang cukup panjang"
-    lesson = conn.execute("SELECT speaker, scope, figure_id, taught_by FROM speaker_lessons").fetchone()
-    assert tuple(lesson) == ("dasco", "suyudi", "dasco", "auto")
-
-    # The next scrape assigns "Dasco" in Suyudi's catatan from the lesson, and
-    # leaves him to name matching elsewhere.
-    _event(conn, 3, "suyudi", body="“Kalimat baru yang cukup panjang untuk sebuah kutipan,” kata Dasco.")
-    _event(conn, 4, "amran", body="“Kalimat lain yang cukup panjang untuk sebuah kutipan,” kata Dasco.")
-    quotes.collect_quotes(conn, event_ids=[3, 4])
-    got = {r[0]: (r[1], r[2]) for r in conn.execute(
-        "SELECT event_id, figure_id, assigned_by FROM event_quotes WHERE event_id IN (3, 4)")}
-    assert got == {3: ("dasco", "lesson"), 4: (None, "auto")}
-
-
-def test_a_lesson_settles_quotes_waiting_from_before(conn):
-    _event(conn, 1, "suyudi", body="x")
-    for i in range(3):
-        _quote(conn, 1, "Kabareskrim", f"Kalimat ke-{i} yang cukup panjang dari kabareskrim")
-    conn.execute("INSERT INTO speaker_lessons (speaker, scope, figure_id, taught_by, created_at) "
-                 "VALUES ('kabareskrim', '', 'suyudi', 'curator', ?)", (NOW,))
-    assert cp.run(conn)["taught"] == 3
-    assert _points(conn, "pembicara") == {}
-    assert {tuple(r) for r in conn.execute("SELECT figure_id, assigned_by FROM event_quotes")} == \
-        {("suyudi", "lesson")}
-
-
-# ---------------------------------------------------------------------------
-# checks: automatic decisions opened as points
+    assert conn.execute("SELECT status, assigned_by FROM quote_subjects").fetchone()[:] == ("confirmed", "point")
+    assert tuple(conn.execute("SELECT role, assigned_by FROM record_figures "
+                              "WHERE event_id = 2 AND figure_id = 'suyudi'").fetchone()) == ("related", "point")
+    subjects.backfill(conn)
+    participants.backfill(conn)
+    assert conn.execute("SELECT status FROM quote_subjects").fetchone()[0] == "confirmed"
+    assert conn.execute("SELECT assigned_by FROM record_figures "
+                        "WHERE event_id = 2 AND figure_id = 'suyudi'").fetchone()[0] == "point"
 
 
 def _figure_row(conn, eid, fid, role, quotes=0, by="auto"):
@@ -404,28 +384,22 @@ def _figure_row(conn, eid, fid, role, quotes=0, by="auto"):
                  "VALUES (?, ?, ?, 'owner', ?, ?)", (eid, fid, role, quotes, by))
 
 
-def test_open_checks_turns_automatic_decisions_into_points(conn):
+def test_open_checks_turns_automatic_speakers_into_points(conn):
     _event(conn, 1, "suyudi", "Satgas tegaskan stok aman",
            'Suyudi Ario Seto meninjau pasar.\n"Stok aman," kata Amran.\n"Kami kooperatif," kata Juru Bicara KPK Budi Prasetyo.')
-    _figure_row(conn, 1, "suyudi", "actor")
-    _figure_row(conn, 1, "amran", "quoted", quotes=1)
-    _figure_row(conn, 1, "dasco", "actor", by="curator")  # the curator's own: not re-checked
     _quote(conn, 1, "Amran", "Stok aman,", "amran")
     _quote(conn, 1, "Juru Bicara KPK Budi Prasetyo", "Kami kooperatif,", "budi-b")
-    _quote(conn, 1, "Dasco", "Sudah,", "dasco", by="curator")
+    _quote(conn, 1, "Dasco", "Sudah,", "dasco", by="curator")  # the curator's own: not re-checked
 
-    assert cp.open_checks(conn, 1) == 4
-    pel, spk = _points(conn, "pelaku"), _points(conn, "pembicara")
-    assert set(pel) == {"cek:pelaku:1:suyudi", "cek:usul:1:amran"}
-    assert pel["cek:pelaku:1:suyudi"]["bucket"] == "otomatis · tak dikutip"
-    assert pel["cek:usul:1:amran"]["bucket"] == "1 kutipan"  # pooled with actor_reviews points
+    assert cp.open_checks(conn, 1) == 2
+    spk = _points(conn, "pembicara")
     assert {p["bucket"] for p in spk.values()} == {"otomatis · satu kata", "otomatis · nama lengkap"}
-    assert json.loads(pel["cek:pelaku:1:suyudi"]["proposal"])["check"] == "pelaku"
+    assert {json.loads(p["proposal"])["check"] for p in spk.values()} == {"pembicara"}
 
     # The run asks nothing of these and must not settle them; opening again is a no-op.
     cp.run(conn)
     assert {r[0] for r in conn.execute("SELECT status FROM curation_points WHERE key LIKE 'cek:%'")} == {"open"}
-    assert conn.execute("SELECT count(*) FROM curation_points WHERE key LIKE 'cek:%'").fetchone()[0] == 4
+    assert conn.execute("SELECT count(*) FROM curation_points WHERE key LIKE 'cek:%'").fetchone()[0] == 2
 
 
 def test_an_office_alone_is_its_own_band(conn):

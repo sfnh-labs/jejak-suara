@@ -59,7 +59,7 @@ def merge_figure(conn: sqlite3.Connection, dup: str, real: str) -> list[str]:
 
 
 def _merge_participants(conn: sqlite3.Connection, dup: str, real: str) -> list[str]:
-    """record_figures and actor_reviews: the duplicate's places become `real`'s.
+    """record_figures, quote_subjects and actor_reviews: the duplicate's places become `real`'s.
 
     Where both were in a record, one row stays: a curator's or an answered
     point's over the stage's own (which participants.py rebuilds anyway).
@@ -81,6 +81,15 @@ def _merge_participants(conn: sqlite3.Connection, dup: str, real: str) -> list[s
         done.append(f"record_figures: {moved} rows {dup} -> {real}"
                     + (f", {left} already there" + (f" ({kept} curator's kept)" if kept else "")
                        if left else ""))
+
+    subj = conn.execute("UPDATE OR IGNORE quote_subjects SET figure_id = ? WHERE figure_id = ?",
+                        (real, dup)).rowcount
+    conn.execute("DELETE FROM quote_subjects WHERE figure_id = ?", (dup,))
+    # A quote is not about its own speaker.
+    conn.execute("DELETE FROM quote_subjects WHERE figure_id = ? AND quote_id IN "
+                 "(SELECT id FROM event_quotes WHERE figure_id = ?)", (real, real))
+    if subj:
+        done.append(f"quote_subjects: {subj} rows {dup} -> {real}")
 
     n = conn.execute("UPDATE actor_reviews SET owner_id = ? WHERE owner_id = ?", (real, dup)).rowcount
     n += conn.execute("UPDATE actor_reviews SET suggested_id = ? WHERE suggested_id = ?",

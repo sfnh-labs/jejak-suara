@@ -26,7 +26,7 @@ export interface FigureRow {
   name: string;
   role: string | null;
   positions: Position[];
-  /** Records it acts in: filed under it, or a Pelaku by record_figures. */
+  /** Records it is in: filed under it, or on their Terkait list (record_figures). */
   records: number;
   quotes: number;
   last_seen: string | null;
@@ -36,7 +36,7 @@ export interface FigureRow {
 export async function getFigureList(q = ""): Promise<FigureRow[]> {
   const actors = await tableExists("record_figures");
   const acts = actors
-    ? `SELECT figure_id, event_id FROM record_figures WHERE role = 'actor'
+    ? `SELECT figure_id, event_id FROM record_figures WHERE role = 'related'
         UNION SELECT figure_id, id FROM events WHERE kind = 'record' AND figure_id IS NOT NULL`
     : `SELECT figure_id, id AS event_id FROM events WHERE kind = 'record' AND figure_id IS NOT NULL`;
   const like = `%${q.trim().toLowerCase()}%`;
@@ -89,7 +89,7 @@ export interface FigureRecord {
   title: string | null;
   event_date: string | null;
   curated: Verdict | null;
-  /** Filed under this figure, rather than a Pelaku added beside another. */
+  /** Filed under this figure, rather than on the Terkait list of another's. */
   filed: boolean;
   open_points: number;
 }
@@ -124,14 +124,14 @@ export async function getFigureFull(id: string): Promise<FigureFull | null> {
          FROM events e
         WHERE e.kind = 'record'
           AND (e.figure_id = ?1
-               ${actors ? "OR e.id IN (SELECT event_id FROM record_figures WHERE figure_id = ?1 AND role = 'actor')" : ""})
+               ${actors ? "OR e.id IN (SELECT event_id FROM record_figures WHERE figure_id = ?1 AND role = 'related')" : ""})
         ORDER BY e.event_date DESC, e.id DESC
         LIMIT 60`,
       [id]
     ),
     queryOne<{ records: number; quotes: number }>(
       `SELECT (SELECT count(*) FROM events e WHERE e.kind = 'record'
-                 AND (e.figure_id = ?1 ${actors ? "OR e.id IN (SELECT event_id FROM record_figures WHERE figure_id = ?1 AND role = 'actor')" : ""})) AS records,
+                 AND (e.figure_id = ?1 ${actors ? "OR e.id IN (SELECT event_id FROM record_figures WHERE figure_id = ?1 AND role = 'related')" : ""})) AS records,
               (SELECT count(*) FROM event_quotes WHERE figure_id = ?1) AS quotes`,
       [id]
     ),

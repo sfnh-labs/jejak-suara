@@ -216,7 +216,7 @@ export function Pill({ tone = "neutral", title, children }: { tone?: PillTone; t
 }
 
 /**
- * A name as the site's outline pill: Disebut, Tokoh terkait. A new name,
+ * A name as the site's outline pill: Nama di liputan, Tokoh terkait. A new name,
  * not yet a figure, has a dashed edge; "+n lainnya" is the clay one.
  */
 export function Chip({ href, tone = "neutral", children, title }: { href: string; tone?: "neutral" | "pending" | "outline"; children: React.ReactNode; title?: string }) {

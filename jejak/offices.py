@@ -211,7 +211,7 @@ def _evidence(conn: sqlite3.Connection, fig, limit: int = 3) -> list[dict]:
     out = []
     for r in conn.execute(
         """SELECT id FROM events
-            WHERE (figure_id = ? OR id IN (SELECT event_id FROM record_figures WHERE figure_id = ?))
+            WHERE (figure_id = ? OR id IN (SELECT event_id FROM record_figures WHERE figure_id = ? AND role = 'related'))
               AND curated IS NOT 'rejected'
             ORDER BY event_date DESC, id DESC LIMIT 8""", (fig.id, fig.id)
     ):
@@ -227,7 +227,7 @@ def _evidence(conn: sqlite3.Connection, fig, limit: int = 3) -> list[dict]:
 def _latest_event(conn: sqlite3.Connection, figure_id: str) -> int | None:
     row = conn.execute(
         """SELECT id FROM events
-            WHERE (figure_id = ? OR id IN (SELECT event_id FROM record_figures WHERE figure_id = ?))
+            WHERE (figure_id = ? OR id IN (SELECT event_id FROM record_figures WHERE figure_id = ? AND role = 'related'))
               AND curated IS NOT 'rejected'
             ORDER BY event_date DESC, id DESC LIMIT 1""", (figure_id, figure_id)).fetchone()
     return row[0] if row else None

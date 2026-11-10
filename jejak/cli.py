@@ -8,7 +8,7 @@
                                              # statements become articles of theirs (actors.py)
     python -m jejak.cli cluster              # articles -> events
     python -m jejak.cli link                 # propose record -> peristiwa links
-    python -m jejak.cli participants         # everyone in each record, not only its owner
+    python -m jejak.cli participants         # whom each quote is about, then everyone each record concerns
     python -m jejak.cli summarize            # grounded drafts for new events
     python -m jejak.cli sentiment            # public-reaction scores for approved events
     python -m jejak.cli figure-stance        # stance toward the figure, from comments naming them
@@ -42,7 +42,7 @@ from datetime import date
 from . import backfill as backfill_mod
 from . import cluster as cluster_mod
 from . import buzzer as buzzer_mod
-from . import actors, db, fetch, figure_stance, ingest, link, mentions, participants, quotes, sentiment, summarize, timeline as timeline_mod
+from . import actors, db, fetch, figure_stance, ingest, link, mentions, participants, quotes, sentiment, subjects, summarize, timeline as timeline_mod
 from . import translate
 from . import curation_points, curation_suggest
 from . import youtube_ingest
@@ -198,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd in ("quotes", "run"):
             print("quotes:", quotes.quote_pending(conn, full=getattr(args, "full", False)))
         if args.cmd in ("participants", "run"):
+            # Whom each quote is about first: they are Terkait too.
+            print("subjects:", subjects.backfill(conn))
             print("participants:", participants.backfill(conn))
         if args.cmd in ("summarize", "run"):
             try:

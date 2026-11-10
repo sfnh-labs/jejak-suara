@@ -140,7 +140,7 @@ export interface QueueRow {
   /** Takedown reasons, for a rejected row. */
   reasons: ReasonCode[];
   suggestion: Suggestion | null;
-  /** Records: the Pelaku (record_figures actors), comma-separated; else the filed figure. */
+  /** Records: the Terkait list (record_figures), comma-separated; else the filed figure. */
   actor_names: string | null;
 }
 
@@ -200,7 +200,7 @@ export async function getQueue(
   if (!(await availableFilters()).includes(filter)) return [];
   const actors = (await tableExists("record_figures"))
     ? `(SELECT group_concat(af.name, ', ') FROM record_figures rf JOIN figures af ON af.id = rf.figure_id
-          WHERE rf.event_id = e.id AND rf.role = 'actor')`
+          WHERE rf.event_id = e.id AND rf.role = 'related')`
     : "NULL";
   const rows = await query<Omit<QueueRow, "reasons" | "suggestion"> & SuggestionColumns & { reasons: string | null }>(
     `SELECT e.id AS event_id, e.kind, e.figure_id, f.name AS figure_name, ${actors} AS actor_names,
@@ -459,6 +459,14 @@ export interface QuoteRow {
   assigned_by: "auto" | "curator" | null;
   url: string | null;
   source: string | null;
+  /** Whom the quote is about (quote_subjects): found by the pipeline, or confirmed. */
+  about: QuoteSubject[];
+}
+
+export interface QuoteSubject {
+  id: string;
+  name: string;
+  status: "auto" | "confirmed";
 }
 
 /** CV entries drafted from an event's articles (jejak/cv_extract.py). */
@@ -898,16 +906,30 @@ export async function getItem(eventId: number): Promise<Item | null> {
 
 async function getQuotes(eventId: number, ownerId: string | null): Promise<QuoteRow[]> {
   // The owner's words first, then other figures', then the unplaced.
-  return query<QuoteRow>(
-    `SELECT q.id, q.quote, q.speaker, q.figure_id, f.name AS figure_name, q.assigned_by, q.url,
-            a.source
-       FROM event_quotes q
-       LEFT JOIN figures f ON f.id = q.figure_id
-       LEFT JOIN articles a ON a.id = q.article_id
-      WHERE q.event_id = ?1
-      ORDER BY q.figure_id IS ?2 DESC, q.figure_id IS NULL, f.name, length(q.quote) DESC`,
-    [eventId, ownerId]
-  );
+  const [rows, about] = await Promise.all([
+    query<Omit<QuoteRow, "about">>(
+      `SELECT q.id, q.quote, q.speaker, q.figure_id, f.name AS figure_name, q.assigned_by, q.url,
+              a.source
+         FROM event_quotes q
+         LEFT JOIN figures f ON f.id = q.figure_id
+         LEFT JOIN articles a ON a.id = q.article_id
+        WHERE q.event_id = ?1
+        ORDER BY q.figure_id IS ?2 DESC, q.figure_id IS NULL, f.name, length(q.quote) DESC`,
+      [eventId, ownerId]
+    ),
+    (await tableExists("quote_subjects"))
+      ? query<QuoteSubject & { quote_id: number }>(
+          `SELECT s.quote_id, f.id, f.name, s.status
+             FROM quote_subjects s JOIN event_quotes q ON q.id = s.quote_id JOIN figures f ON f.id = s.figure_id
+            WHERE q.event_id = ? AND s.status <> 'rejected'
+            ORDER BY f.name`,
+          [eventId]
+        )
+      : Promise.resolve([]),
+  ]);
+  const by = new Map<number, QuoteSubject[]>();
+  for (const { quote_id, ...s } of about) by.set(quote_id, [...(by.get(quote_id) ?? []), s]);
+  return rows.map((r) => ({ ...r, about: by.get(r.id) ?? [] }));
 }
 
 /**
@@ -1534,35 +1556,37 @@ export async function setRelatedFigure(
 }
 
 // ---------------------------------------------------------------------------
-// Pelaku: who acts in a record
+// Terkait: everyone a record concerns
 
 /**
- * A record's actors: one or more figures, none of them "the" owner
- * (record_figures, jejak/participants.py). events.figure_id stays as the
+ * A record's Terkait list (record_figures, jejak/participants.py): who speaks
+ * in it, whom its quotes are about, and the figure it is filed under. One
+ * plain list; no one in it is "the" actor. events.figure_id stays the
  * record's address on the site and is never moved from here.
  */
-export interface Actor {
+export interface Related {
   id: string;
   name: string;
   role: string | null;
   positions: Position[];
   /** How many quotes of theirs the coverage holds. */
   quotes: number;
+  /** Why they are listed: owner | quote | about | derived | curator | point. */
+  source: string;
   /** The figure the record is filed under (its address on the site). */
   filed: boolean;
-  /** 'curator' when a curator made them an actor. */
+  /** 'curator' when a curator put them there. */
   assigned_by: string;
 }
 
-export async function getActors(eventId: number, filedId: string | null): Promise<Actor[]> {
-  // Everyone involved, the most quoted first. No one leads the list for being
-  // the figure the record is filed under: a record has Pelaku, not an owner,
-  // and may have none until the curator names them.
+export async function getRelated(eventId: number, filedId: string | null): Promise<Related[]> {
+  // The most quoted first; no one leads the list for being the figure the
+  // record is filed under.
   const rows = (await tableExists("record_figures"))
-    ? await query<Omit<Actor, "positions" | "filed"> & { positions: string | null }>(
-        `SELECT f.id, f.name, f.role, f.positions, rf.quotes, rf.assigned_by
+    ? await query<Omit<Related, "positions" | "filed"> & { positions: string | null }>(
+        `SELECT f.id, f.name, f.role, f.positions, rf.quotes, rf.source, rf.assigned_by
            FROM record_figures rf JOIN figures f ON f.id = rf.figure_id
-          WHERE rf.event_id = ? AND rf.role = 'actor'
+          WHERE rf.event_id = ? AND rf.role = 'related'
           ORDER BY rf.quotes DESC, f.name`,
         [eventId]
       )
@@ -1571,25 +1595,71 @@ export async function getActors(eventId: number, filedId: string | null): Promis
 }
 
 /**
- * Make a figure an actor of a record, or move them back to Disebut. Either
- * way the row becomes the curator's, so the participants stage (which
- * rebuilds only its own rows) keeps it. Any Pelaku can go, the last one too:
- * a record need not be anyone's.
+ * Add a figure to a record's Terkait list, or take them off it. Either way
+ * the row becomes the curator's, so the participants stage (which rebuilds
+ * only its own rows) neither drops nor puts back what the curator decided.
+ * Anyone can go, the last one too.
  */
-export async function setActor(eventId: number, figureId: string, actor: boolean): Promise<void> {
+export async function setRelated(eventId: number, figureId: string, on: boolean): Promise<void> {
   const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ?`, [figureId]);
   if (!fig) throw new Error(`unknown figure: ${figureId}`);
   const ev = await queryOne<{ kind: string }>(`SELECT kind FROM events WHERE id = ?`, [eventId]);
-  if (ev?.kind !== "record") throw new Error("only a record has actors");
+  if (ev?.kind !== "record") throw new Error("only a record has a Terkait list");
   const quotes = await queryOne<{ n: number }>(
     `SELECT count(*) AS n FROM event_quotes WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]
   );
   await lrun(
     `INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
      VALUES (?, ?, ?, 'curator', ?, 'curator')
-     ON CONFLICT (event_id, figure_id) DO UPDATE SET role = excluded.role, source = 'curator', assigned_by = 'curator'`,
-    [eventId, figureId, actor ? "actor" : "quoted", Number(quotes?.n ?? 0)]
+     ON CONFLICT (event_id, figure_id) DO UPDATE SET role = excluded.role, assigned_by = 'curator'`,
+    [eventId, figureId, on ? "related" : "removed", Number(quotes?.n ?? 0)]
   );
+}
+
+/**
+ * Say a quote is about a figure ("Pak Surya pun syok"), or is not. The
+ * curator's say: jejak/subjects.py rebuilds only its own rows. The figure
+ * joins the record's Terkait list at once, as the participants stage would
+ * put them there; one taken off every quote leaves it, unless something else
+ * keeps them there.
+ */
+export async function setQuoteSubject(quoteId: number, figureId: string, on: boolean): Promise<number> {
+  const q = await queryOne<{ event_id: number; figure_id: string | null }>(
+    `SELECT event_id, figure_id FROM event_quotes WHERE id = ?`, [quoteId]
+  );
+  if (!q) throw new Error(`unknown quote: ${quoteId}`);
+  const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ?`, [figureId]);
+  if (!fig) throw new Error(`unknown figure: ${figureId}`);
+  if (on && q.figure_id === figureId) throw new Error("a quote is not about its own speaker");
+  await ltx(async () => {
+    await lrun(
+      `INSERT INTO quote_subjects (quote_id, figure_id, status, assigned_by, created_at)
+       VALUES (?, ?, ?, 'curator', ?)
+       ON CONFLICT (quote_id, figure_id) DO UPDATE SET status = excluded.status, assigned_by = 'curator'`,
+      [quoteId, figureId, on ? "confirmed" : "rejected", new Date().toISOString()]
+    );
+    await syncAbout(q.event_id, figureId);
+  });
+  return q.event_id;
+}
+
+/** The stage's own 'about' row for a figure in a record, as participants.py would leave it. */
+export async function syncAbout(eventId: number, figureId: string): Promise<void> {
+  const still = await queryOne(
+    `SELECT 1 FROM quote_subjects s JOIN event_quotes q ON q.id = s.quote_id
+      WHERE q.event_id = ? AND s.figure_id = ? AND s.status <> 'rejected' LIMIT 1`,
+    [eventId, figureId]
+  );
+  if (still) {
+    await lrun(
+      `INSERT OR IGNORE INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
+       VALUES (?, ?, 'related', 'about', 0, 'auto')`,
+      [eventId, figureId]
+    );
+  } else {
+    await lrun(`DELETE FROM record_figures WHERE event_id = ? AND figure_id = ? AND assigned_by = 'auto' AND source = 'about'`,
+               [eventId, figureId]);
+  }
 }
 
 // ---------------------------------------------------------------------------
