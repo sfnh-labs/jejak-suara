@@ -122,8 +122,8 @@ try {
     # Curation upkeep: undone drafts, learning from the curator, names queue.
     Invoke-Stage "kurasi" @("-m", "jejak.cli", "kurasi")
 
-    # participants after quotes: who is quoted in a record decides its Pelaku /
-    # Disebut list and the pelaku points "points" asks about. offices before
+    # participants after quotes: who speaks in a record, and whom their quotes
+    # are about, make its Terkait list and the tentang points "points" asks about. offices before
     # points: its proposals are the jabatan points.
     foreach ($stage in @("cluster", "link", "quotes", "participants", "translate", "summarize",
                          "sentiment", "buzzer", "suggest", "offices", "points")) {

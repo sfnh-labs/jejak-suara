@@ -178,10 +178,8 @@ function noEffect(p: Point): string {
   switch (p.kind) {
     case "peristiwa": return "usulan tautan ditolak dan tidak ditanyakan lagi.";
     case "lini": return "usulan lini ditolak dan tidak ditanyakan lagi.";
-    case "pelaku":
-      return p.proposal.check === "pelaku"
-        ? `${p.proposal.name} pindah ke Disebut.`
-        : `${p.proposal.name} tetap di Disebut; pelakunya tidak berubah.`;
+    case "terkait": return `${p.proposal.name} dihapus dari daftar Terkait catatan ini.`;
+    case "tentang": return `kutipan ini tercatat bukan tentang ${p.proposal.name}.`;
     case "jabatan": return "CV-nya tetap; jabatannya ditanyakan lagi dari berita yang lebih baru.";
     default: return "tidak ada yang berubah.";
   }
@@ -197,8 +195,7 @@ function meter(p: Point): string {
  * /kurasi): said on the card, since Ya there confirms what is already done.
  */
 function checkTag(p: Point): string {
-  if (!p.proposal.check) return "";
-  return p.proposal.check === "usul" ? " · dari kutipan" : " · keputusan otomatis";
+  return p.proposal.check ? " · keputusan otomatis" : "";
 }
 
 /** The other figures a pembicara point offers, as /kurasi lists them. */
@@ -217,6 +214,8 @@ async function cardText(p: Point): Promise<string> {
   if (p.paragraph) {
     const src = [p.source, day(p.published_at)].filter(Boolean).join(" · ");
     lines.push(`<blockquote>${src ? `<b>${esc(src)}</b>\n` : ""}${excerpt(p)}</blockquote>`);
+  } else if (p.kind === "tentang" && x.quote) {
+    lines.push(`<blockquote>“${esc(x.quote)}” — ${esc(x.speaker_name ?? x.speaker ?? "tanpa nama")}</blockquote>`);
   } else {
     lines.push("<i>Paragrafnya tidak ditemukan di teks artikel.</i>");
   }
@@ -235,7 +234,8 @@ async function cardText(p: Point): Promise<string> {
     if (p.group_size > 1) lines.push(`Jawabanmu berlaku untuk ${p.group_size} kutipan sekaligus.`);
   } else {
     lines.push(`<b>${esc(x.claim)}</b>`);
-    if (p.kind === "pelaku" && x.figure_id) lines.push(`Tokoh: ${who(x.figure_id, x.name ?? x.figure_id)}`);
+    if ((p.kind === "terkait" || p.kind === "tentang") && x.figure_id) lines.push(`Tokoh: ${who(x.figure_id, x.name ?? x.figure_id)}`);
+    if (p.kind === "tentang" && (x.speaker_name || x.speaker)) lines.push(`Yang bicara: ${esc(x.speaker_name ?? x.speaker ?? "")}`);
     if (p.kind === "jabatan") lines.push(`Sekarang tertulis: ${x.current ? esc(x.current) : "<i>kosong</i>"}`);
     lines.push(`<b>Jika Ya:</b> ${esc(p.effect)}`);
     lines.push(`<b>Jika Bukan:</b> ${esc(noEffect(p))}`);
@@ -254,16 +254,11 @@ function cardKeyboard(p: Point): Keyboard {
     // long one gets a row to itself, short ones go at most two to a row.
     rows.push([{ text: "Bukan tokoh yang dilacak", callback_data: a("nt") }]);
     if (x.figure_id) rows.push([{ text: `Bukan ${x.name ?? "dia"}, belum tahu siapa`, callback_data: a("bukan") }]);
-  } else if (p.kind === "pelaku") {
-    rows.push([{ text: `Ya, ${p.proposal.name} pelaku`, callback_data: a("ya") }]);
-    rows.push([{ text: "Bukan, hanya disebut", callback_data: a("bukan") }]);
   } else {
     rows.push([{ text: "Ya", callback_data: a("ya") }, { text: "Bukan", callback_data: a("bukan") }]);
   }
-  // A Pelaku the pipeline set is kept or moved to Disebut; who else acts is
-  // added in /kurasi, as there.
   rows.push([
-    ...(p.proposal.check === "pelaku" ? [] : [{ text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` }]),
+    { text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` },
     { text: "⏭ Lewati", callback_data: a("lewati") },
   ]);
   // The article on its outlet's site, in Telegram's own browser.
@@ -322,7 +317,7 @@ async function topUp(s: State): Promise<void> {
 }
 
 /** The kinds take turns, in this order; a kind with nothing open is passed over. */
-const ROTATION: PointKind[] = ["peristiwa", "pembicara", "pelaku", "jabatan", "lini"];
+const ROTATION: PointKind[] = ["peristiwa", "pembicara", "tentang", "terkait", "jabatan", "lini"];
 
 /** The newest open point of the kind after the last one sent. */
 async function nextPoint(s: State): Promise<Point | null> {
@@ -339,14 +334,14 @@ async function nextPoint(s: State): Promise<Point | null> {
 // Corrections: the right answer instead, saved as /kurasi's "koreksi".
 //
 // Peristiwa and lini list the events /kurasi offers, on the card itself; a
-// typed reply searches titles. Pelaku and pembicara ask for a name as a
-// Telegram reply and list the figures it matches; pembicara can also create
-// the figure, as "Tokoh baru" does in /kurasi.
+// typed reply searches titles. Terkait, tentang and pembicara ask for a name
+// as a Telegram reply and list the figures it matches, or create the figure,
+// as "Tokoh baru" does in /kurasi.
 
 const PAGE = 6;
 const FOUND = 8;
 
-const figureKind = (p: Point) => p.kind === "pelaku" || p.kind === "pembicara";
+const figureKind = (p: Point) => p.kind === "terkait" || p.kind === "tentang" || p.kind === "pembicara";
 
 const clip = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
@@ -435,27 +430,27 @@ async function showEvents(s: State, p: Point, msgId: number, page: number, q = "
   await edit(msgId, `${await cardText(p)}\n\n${body}`, rows);
 }
 
-/** The card with the figures a typed name matched, and for pembicara a new one to create. */
+/** The card with the figures a typed name matched, and a new one to create. */
 async function showFigures(s: State, p: Point, msgId: number, typed: string): Promise<void> {
   // "Nama Lengkap, jabatan, organisasi": the last two only matter for a new figure.
   const [rawName, rawRole = "", ...rest] = typed.split(",");
   const name = rawName.trim().slice(0, 200);
   const role = rawRole.trim().slice(0, 300);
   const org = rest.join(",").trim().slice(0, 300);
-  const found = findFigures(await getFigureOptions(), name, p.kind === "pelaku" ? p.proposal.figure_id : null);
+  const found = findFigures(await getFigureOptions(), name, p.kind === "pembicara" ? null : p.proposal.figure_id);
   s.picks[p.id] = found.map((f) => f.id);
   // Name – Role – Organisation in the text, numbered; the button only needs the number and name.
   const list = found.map((f, i) => `<b>${i + 1}.</b> <b>${esc(f.name)}</b>${f.title ? ` – ${esc(f.title)}` : ""}`).join("\n");
   const rows: Keyboard = found.map((f, i) => [{ text: clip(`${i + 1}. ${f.name}`, 30), callback_data: `p:${p.id}:${i}` }]);
-  const fresh = p.kind === "pembicara" && name.length >= 3 ? { name, role, org } : null;
+  const fresh = name.length >= 3 ? { name, role, org } : null;
   if (fresh) {
     s.newFig[p.id] = fresh;
     rows.push([{ text: "➕ Buat tokoh baru", callback_data: `n:${p.id}` }]);
   }
   rows.push([{ text: "🔎 Cari lagi", callback_data: `s:${p.id}` }, { text: "← Kembali", callback_data: `b:${p.id}` }]);
-  const who = p.kind === "pelaku" ? "pelakunya" : `“${esc(p.proposal.speaker ?? "")}”`;
+  const ask = p.kind === "pembicara" ? `Siapa “${esc(p.proposal.speaker ?? "")}”?` : p.kind === "tentang" ? "Tentang siapa kutipannya?" : "Catatan ini terkait siapa?";
   const body = (found.length
-    ? `<b>✏️ Siapa ${who}?</b> Hasil “${esc(name)}”:\n${list}`
+    ? `<b>✏️ ${ask}</b> Hasil “${esc(name)}”:\n${list}`
     : `<b>✏️ Tidak ada tokoh yang cocok dengan “${esc(name)}”.</b>${fresh ? "" : " Cari lagi, atau Kembali."}`)
     + (fresh ? `\n\n➕ <b>Tokoh baru:</b> ${[fresh.name, fresh.role, fresh.org].filter(Boolean).map(esc).join(" – ")}${fresh.role && fresh.org ? "" : "\n<i>Lengkapi jabatan dan organisasinya: Cari lagi, lalu ketik Nama, jabatan, organisasi.</i>"}` : "");
   await edit(msgId, `${await cardText(p)}\n\n${body}`, rows);
@@ -466,9 +461,7 @@ async function prompt(s: State, p: Point, msgId: number): Promise<void> {
   const ask = p.kind === "jabatan"
     ? "Ketik jabatan dan organisasinya, dipisah koma: <i>jabatan, organisasi</i> (mis. <i>Gubernur, Pemerintah Provinsi Bali</i>). Organisasinya lembaga, bukan dapil atau pemilu."
     : figureKind(p)
-    ? p.kind === "pembicara"
-      ? "Ketik nama tokohnya. Untuk tokoh baru, tambahkan jabatan dan organisasi, dipisah koma: <i>Nama Lengkap, jabatan, organisasi</i> (mis. <i>Nanik S Deyang, Wakil Kepala, Badan Gizi Nasional</i>)"
-      : "Ketik nama tokoh yang menjadi pelaku."
+    ? `Ketik nama ${p.kind === "tentang" ? "tokoh yang dibicarakan" : "tokohnya"}. Untuk tokoh baru, tambahkan jabatan dan organisasi, dipisah koma: <i>Nama Lengkap, jabatan, organisasi</i> (mis. <i>Nanik S Deyang, Wakil Kepala, Badan Gizi Nasional</i>)`
     : "Ketik sebagian judul untuk dicari.";
   const id = await send(ask, undefined, {
     reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
@@ -491,11 +484,6 @@ async function onReply(s: State, replyTo: number, text: string, own: number): Pr
   if (promptId) delete s.prompts[promptId];
   if (!p || p.status !== "open" || !card) {
     await send("Kartu itu sudah dijawab.");
-    return true;
-  }
-  if (p.proposal.check === "pelaku") {
-    await send("Kartu ini hanya Ya atau Bukan; tambahkan pelaku lain di /kurasi.");
-    await drop(own);
     return true;
   }
   if (p.kind === "jabatan") await correctOffice(s, p, card, text);

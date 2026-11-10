@@ -5,7 +5,7 @@ import { parsePositions, type Kind, type LinkVerdict, type Position } from "./cu
  * What the record page's drawer shows: another event or a figure, read where
  * the curator already is instead of on a page of its own, or one of the
  * record's own forms. The panel is named in the URL (?panel=peristiwa:12,
- * catatan:34, tokoh:<slug>, nama:<slug>, pelaku, disebut, tautkan, lini, isi,
+ * catatan:34, tokoh:<slug>, nama:<slug>, terkait, disebut, tautkan, lini, isi,
  * sumber, kutipan, saran), so
  * like the reading pane it is server-rendered and needs no client script.
  */
@@ -14,13 +14,13 @@ export type PanelRef =
   | { kind: "peristiwa" | "catatan"; id: number }
   | { kind: "tokoh" | "nama"; id: string }
   /**
-   * The record's own forms and long reads: add a Pelaku, everyone named,
+   * The record's own forms and long reads: add to Terkait, everyone named,
    * peristiwa links, lini cerita, the full summary, every source, every
    * quote, and the examples behind a takedown suggestion.
    */
   | { kind: OwnPanel };
 
-const OWN_PANELS = ["pelaku", "disebut", "tautkan", "lini", "isi", "sumber", "kutipan", "saran"] as const;
+const OWN_PANELS = ["terkait", "disebut", "tautkan", "lini", "isi", "sumber", "kutipan", "saran"] as const;
 export type OwnPanel = (typeof OWN_PANELS)[number];
 
 export function parsePanel(raw: string | undefined): PanelRef | null {
@@ -61,7 +61,7 @@ export interface EventPeek {
   summary: string | null;
   quote: string | null;
   figure: { id: string; name: string; role: string | null } | null;
-  /** The record's other actors (record_figures), the filed one excluded. */
+  /** The rest of the record's Terkait list (record_figures), the filed one excluded. */
   actors: { id: string; name: string }[];
   sources: { source: string; url: string; title: string | null; published_at: string | null }[];
   /** A peristiwa's records, or the peristiwa a record belongs to; rejected links left out. */
@@ -89,7 +89,7 @@ export async function getEventPeek(eventId: number): Promise<EventPeek | null> {
     ev.kind === "record"
       ? query<{ id: string; name: string }>(
           `SELECT f.id, f.name FROM record_figures rf JOIN figures f ON f.id = rf.figure_id
-            WHERE rf.event_id = ? AND rf.role = 'actor' AND rf.figure_id IS NOT ?
+            WHERE rf.event_id = ? AND rf.role = 'related' AND rf.figure_id IS NOT ?
             ORDER BY rf.quotes DESC, f.name`,
           [eventId, ev.figure_id]
         )
@@ -140,7 +140,7 @@ export interface FigurePeek {
   active: boolean;
   records: number;
   quotes: number;
-  /** Its latest records, as filed figure or as an actor. */
+  /** Its latest records, as filed figure or on their Terkait list. */
   recent: (PeekEvent & { curated: string | null; as_actor: boolean })[];
   peristiwa: PeekEvent[];
 }
@@ -165,7 +165,7 @@ export async function getFigurePeek(figureId: string): Promise<FigurePeek | null
          FROM events e
         WHERE e.kind = 'record'
           AND (e.figure_id = ?1
-               OR e.id IN (SELECT event_id FROM record_figures WHERE figure_id = ?1 AND role = 'actor'))
+               OR e.id IN (SELECT event_id FROM record_figures WHERE figure_id = ?1 AND role = 'related'))
         ORDER BY e.event_date DESC, e.id DESC
         LIMIT ${RECENT}`,
       [figureId]

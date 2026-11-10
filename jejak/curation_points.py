@@ -10,7 +10,10 @@ row the question came from, so nothing downstream changes.
 
   peristiwa  record_links, verdict NULL       — is this catatan part of that peristiwa?
   lini       followup_links, verdict NULL     — does this catatan follow up that one?
-  pelaku     actor_reviews, decision NULL     — is this other figure an actor of the catatan?
+  terkait    record_figures, no quote of theirs — does this catatan concern the figure it
+             is filed under (or that one of its statements was copied from)? Who speaks
+             or is spoken about is asked on their quotes instead.
+  tentang    quote_subjects, status 'auto'      — is this quote about that figure?
   pembicara  event_quotes, figure_id NULL     — whose words are these? Grouped by the
              speaker as written, so one answer settles every quote that names them the
              same way and points the same way.
@@ -41,7 +44,7 @@ from .cluster import _tokens
 from .config import load_figures
 from .quotes import _terms, apply_lessons, lesson_scope, norm_speaker
 
-KINDS = ("peristiwa", "lini", "pelaku", "pembicara", "jabatan")
+KINDS = ("peristiwa", "lini", "terkait", "tentang", "pembicara", "jabatan")
 
 # The auto-answer gate, as for auto-hide (curation_suggest.py).
 AUTO_MIN_ANSWERS = 25
@@ -140,6 +143,20 @@ class _Writer:
         self.now = _now()
         self.seen: set[str] = set()
         self.stats: Counter = Counter()
+        self._kept: dict[str, tuple] | None = None
+
+    def kept_evidence(self, key: str):
+        """The evidence a point of this key already shows, () when it has none,
+        None when there is no such point: rereading every article for
+        thousands of standing points each run would cost minutes."""
+        if self._kept is None:
+            self._kept = {
+                r[0]: ((r[1], r[2], r[3], r[4]) if r[2] else ())
+                for r in self.conn.execute(
+                    "SELECT key, article_id, paragraph, hl_start, hl_end FROM curation_points "
+                    "WHERE kind IN ('terkait', 'tentang')")
+            }
+        return self._kept.get(key)
 
     def put(self, kind: str, key: str, event_id: int, proposal: dict, score: float | None,
             bucket: str, evidence=None, group_size: int = 1) -> None:
@@ -246,22 +263,63 @@ def _lini(conn: sqlite3.Connection, w: _Writer) -> None:
               _term_evidence(conn, r["later_id"], terms))
 
 
-def _pelaku(conn: sqlite3.Connection, w: _Writer) -> None:
+def _terkait(conn: sqlite3.Connection, w: _Writer) -> None:
+    """Figures in a record's Terkait list on no word of theirs or about them:
+    the one it is filed under, from its headline, or whose statement was
+    copied out of it. Banded by whether the coverage names them at all."""
     figures = {f.id: f for f in load_figures(conn)}
     rows = conn.execute(
-        """SELECT v.event_id, v.owner_id, v.suggested_id, v.quotes
-             FROM actor_reviews v JOIN events e ON e.id = v.event_id
-            WHERE v.decision IS NULL AND e.curated IS NOT 'rejected'"""
+        """SELECT rf.event_id, rf.figure_id, rf.source
+             FROM record_figures rf JOIN events e ON e.id = rf.event_id
+            WHERE rf.role = 'related' AND rf.assigned_by = 'auto'
+              AND rf.source IN ('owner', 'derived') AND e.curated IS NOT 'rejected'"""
     ).fetchall()
     for r in rows:
-        fig = figures.get(r["suggested_id"])
+        fig = figures.get(r["figure_id"])
         if fig is None:
             continue
-        w.put("pelaku", f"pelaku:{r['event_id']}:{r['suggested_id']}", r["event_id"],
-              {"figure_id": fig.id, "name": fig.name, "owner_id": r["owner_id"], "quotes": r["quotes"],
-               "claim": f"{fig.name} ikut menjadi pelaku, bukan hanya disebut"},
-              float(r["quotes"]), _band(r["quotes"], (2, 4), ("1 kutipan", "2-3 kutipan", "4+ kutipan")),
-              _actor_evidence(conn, r["event_id"], fig))
+        key = f"terkait:{r['event_id']}:{fig.id}"
+        evidence = w.kept_evidence(key)
+        if evidence is None:
+            evidence = _actor_evidence(conn, r["event_id"], fig) or ()
+        w.put("terkait", key, r["event_id"],
+              {"figure_id": fig.id, "name": fig.name, "source": r["source"],
+               "claim": f"Catatan ini terkait {fig.name}"},
+              1.0 if evidence else 0.0,
+              "disebut di liputan" if evidence else "tak disebut di liputan",
+              evidence or None)
+
+
+# Tentang bands, best first.
+_SUBJECT_BANDS = {"nama lengkap": 0.9, "alias": 0.7, "sapaan": 0.5}
+
+
+def _tentang(conn: sqlite3.Connection, w: _Writer) -> None:
+    """Each quote and a figure its words name, as subjects.py found them."""
+    names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM figures")}
+    rows = conn.execute(
+        """SELECT s.quote_id, s.figure_id, s.band, q.event_id, q.article_id, q.quote,
+                  q.speaker, q.figure_id AS speaker_id
+             FROM quote_subjects s JOIN event_quotes q ON q.id = s.quote_id
+             JOIN events e ON e.id = q.event_id
+            WHERE s.status = 'auto' AND e.curated IS NOT 'rejected'"""
+    ).fetchall()
+    for r in rows:
+        name = names.get(r["figure_id"])
+        if name is None:
+            continue
+        key = f"tentang:{r['quote_id']}:{r['figure_id']}"
+        evidence = w.kept_evidence(key)
+        if evidence is None:
+            evidence = _quote_evidence(conn, {"article_id": r["article_id"], "quote": r["quote"],
+                                              "speaker": r["speaker"] or ""}) or ()
+        band = r["band"] or "sapaan"
+        w.put("tentang", key, r["event_id"],
+              {"quote_id": r["quote_id"], "figure_id": r["figure_id"], "name": name,
+               "quote": r["quote"], "speaker": r["speaker"],
+               "speaker_name": names.get(r["speaker_id"]) if r["speaker_id"] else None,
+               "claim": f"Kutipan ini tentang {name}"},
+              _SUBJECT_BANDS.get(band, 0.5), band, evidence or None)
 
 
 def _actor_evidence(conn: sqlite3.Connection, event_id: int, fig):
@@ -472,15 +530,15 @@ def _jabatan(conn: sqlite3.Connection, w: _Writer) -> None:
                      [(_now(), i) for i in gone])
 
 
-PRODUCERS = {"peristiwa": _peristiwa, "lini": _lini, "pelaku": _pelaku, "pembicara": _pembicara,
-             "jabatan": _jabatan}
+PRODUCERS = {"peristiwa": _peristiwa, "lini": _lini, "terkait": _terkait, "tentang": _tentang,
+             "pembicara": _pembicara, "jabatan": _jabatan}
 
 
 # ---------------------------------------------------------------------------
 # Checks: the decisions the pipeline made without asking, opened as points
 #
 # The producers above ask only what the pipeline is unsure of. What it decided
-# on its own (the filed figure as Pelaku, quotes it gave a speaker) is never
+# on its own (quotes it gave a speaker) is never
 # asked, so nothing measures it. open_checks() turns one catatan's automatic
 # decisions into points, each in a band of its own, so the curator's answers
 # measure them and auto-answering can take a band over once it is proven.
@@ -503,33 +561,7 @@ def open_checks(conn: sqlite3.Connection, event_id: int) -> int:
     """Open a point for each automatic decision on the catatan; returns how many
     are open or were reopened. Answered ones are left as they are."""
     figures = {f.id: f for f in load_figures(conn)}
-    asked = {r[0] for r in conn.execute(
-        "SELECT key FROM curation_points WHERE event_id = ? AND status <> 'settled'", (event_id,))}
     w = _Writer(conn)
-
-    # Pelaku the pipeline set itself, and figures it only counted as quoted.
-    for r in conn.execute(
-        """SELECT figure_id, role, quotes FROM record_figures
-            WHERE event_id = ? AND COALESCE(assigned_by, 'auto') = 'auto'
-              AND role IN ('actor', 'quoted')""", (event_id,)
-    ).fetchall():
-        fig = figures.get(r["figure_id"])
-        if fig is None:
-            continue
-        quotes = r["quotes"] or 0
-        if r["role"] == "actor":
-            w.put("pelaku", f"cek:pelaku:{event_id}:{fig.id}", event_id,
-                  {"figure_id": fig.id, "name": fig.name, "quotes": quotes, "check": "pelaku",
-                   "claim": f"{fig.name} pelaku catatan ini"},
-                  float(quotes), "otomatis · dikutip" if quotes else "otomatis · tak dikutip",
-                  _actor_evidence(conn, event_id, fig))
-        elif f"pelaku:{event_id}:{fig.id}" not in asked:
-            # The same question actor_reviews asks, so the same bands.
-            w.put("pelaku", f"cek:usul:{event_id}:{fig.id}", event_id,
-                  {"figure_id": fig.id, "name": fig.name, "quotes": quotes, "check": "usul",
-                   "claim": f"{fig.name} ikut menjadi pelaku, bukan hanya disebut"},
-                  float(quotes), _band(quotes, (2, 4), ("1 kutipan", "2-3 kutipan", "4+ kutipan")),
-                  _actor_evidence(conn, event_id, fig))
 
     # Quotes the quotes stage gave a speaker, one point per figure and speaker as written.
     groups: dict[tuple[str, str], list] = defaultdict(list)
@@ -712,23 +744,31 @@ def _yes_lini(conn, event_id: int, prop: dict, point_id: int) -> dict:
                          prop["earlier_id"], prop["later_id"])
 
 
-def _yes_pelaku(conn, event_id: int, prop: dict, point_id: int) -> dict:
+def _yes_terkait(conn, event_id: int, prop: dict, point_id: int) -> dict:
     fig = prop["figure_id"]
     prev = conn.execute("SELECT role, source, quotes, assigned_by FROM record_figures "
                         "WHERE event_id = ? AND figure_id = ?", (event_id, fig)).fetchone()
-    review = conn.execute("SELECT decision FROM actor_reviews WHERE event_id = ?",
-                          (event_id,)).fetchone()
     # assigned_by 'point': participants.py rebuilds only its own 'auto' rows.
     conn.execute(
         """INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
-           VALUES (?, ?, 'actor', 'point', ?, 'point')
-           ON CONFLICT (event_id, figure_id) DO UPDATE SET
-               role = 'actor', source = 'point', assigned_by = 'point'""",
-        (event_id, fig, prop.get("quotes") or 0))
-    conn.execute("UPDATE actor_reviews SET decision = 'actor', decided_at = ? "
-                 "WHERE event_id = ? AND suggested_id = ?", (_now(), event_id, fig))
-    return {"kind": "pelaku", "prev": dict(prev) if prev else None,
-            "review": review[0] if review else None}
+           VALUES (?, ?, 'related', 'point', 0, 'point')
+           ON CONFLICT (event_id, figure_id) DO UPDATE SET role = 'related', assigned_by = 'point'""",
+        (event_id, fig))
+    # The shape curationPoints.ts reverts (Undo, kind "terkait").
+    return {"kind": "terkait", "rows": [{"figure": fig, "prev": dict(prev) if prev else None}]}
+
+
+def _yes_tentang(conn, event_id: int, prop: dict, point_id: int) -> dict:
+    q, fig = prop["quote_id"], prop["figure_id"]
+    prev = conn.execute("SELECT status, band, assigned_by, created_at FROM quote_subjects "
+                        "WHERE quote_id = ? AND figure_id = ?", (q, fig)).fetchone()
+    conn.execute(
+        """INSERT INTO quote_subjects (quote_id, figure_id, status, assigned_by, created_at)
+           VALUES (?, ?, 'confirmed', 'point', ?)
+           ON CONFLICT (quote_id, figure_id) DO UPDATE SET status = 'confirmed', assigned_by = 'point'""",
+        (q, fig, _now()))
+    return {"kind": "tentang", "quote_id": q,
+            "rows": [{"figure": fig, "prev": dict(prev) if prev else None}]}
 
 
 def replace_shown_quotes(conn: sqlite3.Connection, quote_ids: list[int],
@@ -795,8 +835,8 @@ def _yes_jabatan(conn, event_id: int, prop: dict, point_id: int) -> dict:
     return offices.auto_yes(conn, prop)
 
 
-_YES = {"peristiwa": _yes_peristiwa, "lini": _yes_lini, "pelaku": _yes_pelaku,
-        "pembicara": _yes_pembicara, "jabatan": _yes_jabatan}
+_YES = {"peristiwa": _yes_peristiwa, "lini": _yes_lini, "terkait": _yes_terkait,
+        "tentang": _yes_tentang, "pembicara": _yes_pembicara, "jabatan": _yes_jabatan}
 
 
 def auto_answer(conn: sqlite3.Connection) -> dict[str, int]:

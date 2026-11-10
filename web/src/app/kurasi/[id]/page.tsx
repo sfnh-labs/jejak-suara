@@ -1,15 +1,15 @@
 import Link from "next/link";
 import FigurePortrait from "@/components/FigurePortrait";
 import { notFound } from "next/navigation";
-import { REASONS, figureTitle, positionLine, getActors, getFigureOptions, getOrgChoices, getFollowupCandidates, getItem, getReading, reasonLabel, type Actor, type FigureOption, type FollowupCandidate, type FollowupRow, type Item, type Rework, type ReworkSnapshot, type LinkRow, type NamedPerson, type QuoteRow } from "@/lib/curation";
+import { REASONS, figureTitle, positionLine, getRelated, getFigureOptions, getOrgChoices, getFollowupCandidates, getItem, getReading, reasonLabel, type Related, type FigureOption, type FollowupCandidate, type FollowupRow, type Item, type Rework, type ReworkSnapshot, type LinkRow, type NamedPerson, type QuoteRow } from "@/lib/curation";
 import { decide } from "../kandidat/actions";
-import { FigurePicker, SpeakerEditor } from "../FigurePicker";
+import { AboutEditor, FigurePicker, SpeakerEditor } from "../FigurePicker";
 import { ArticleReader, type ReaderFocus, type ReaderTerm } from "../ArticleReader";
 import { EventPanel, FigurePanel, type Relation } from "../SidePanel";
 import { eventPanel, getEventPeek, getFigurePeek, parsePanel, type EventPeek, type FigurePeek, type PanelRef } from "@/lib/panels";
 import { PointList } from "../CurationPoints";
 import { AUTO_MIN_AGREEMENT, AUTO_MIN_ANSWERS, getPoints, getUncheckedCount } from "@/lib/curationPoints";
-import { addFollowup, curate, relateFigure, ruleFollowup, ruleLink, rework, decideRework, setQuoteSpeaker, pickQuote, newQuote, setRecordActor, openDecisionPoints } from "../actions";
+import { addFollowup, curate, relateFigure, ruleFollowup, ruleLink, rework, decideRework, setQuoteSpeaker, setQuoteAbout, pickQuote, newQuote, setRecordRelated, openDecisionPoints } from "../actions";
 import { storyImageSource, storylines } from "@/lib/data";
 import { EventBanner } from "../EventImage";
 import { placeGroups, provinceLabel, provincesIn } from "@/lib/places";
@@ -27,7 +27,7 @@ export const metadata = {
 };
 
 /**
- * The page is a summary; anything long is read in the drawer. Disebut shows
+ * The page is a summary; anything long is read in the drawer. Nama di liputan shows
  * this many names, Relasi this many peristiwa or lini rows, Isi this many
  * sources and Kutipan this many quotes; each drawer has the rest.
  */
@@ -66,7 +66,7 @@ export default async function KurasiItem({
     panelRef?.kind === "tokoh" ? getFigurePeek(panelRef.id)
       : panelRef?.kind === "peristiwa" || panelRef?.kind === "catatan" ? getEventPeek(panelRef.id)
       : null,
-    isRecord ? getActors(eventId, item.figure_id) : Promise.resolve([] as Actor[]),
+    isRecord ? getRelated(eventId, item.figure_id) : Promise.resolve([] as Related[]),
     getUncheckedCount(eventId),
   ]);
   const openPoints = points.filter((p) => p.status === "open" || p.status === "lewati").length;
@@ -137,10 +137,10 @@ export default async function KurasiItem({
           {item.last_seen && day(item.last_seen) !== day(item.event_date) ? ` – ${day(item.last_seen)}` : ""}
           {isRecord ? (
             actors.length ? (
-              <> · pelaku {actors.map((a, i) => (
+              <> · terkait {actors.map((a, i) => (
                 <span key={a.id}>{i ? ", " : ""}<Link href={open(`tokoh:${a.id}`)} scroll={false} className="link-subtle" style={{ color: INK, fontWeight: 600 }}>{a.name}</Link></span>
               ))}</>
-            ) : <> · belum ada pelaku</>
+            ) : <> · belum ada tokoh terkait</>
           ) : null}
           {` · ${outlets} media · ${item.sources.length} artikel`}
         </p>
@@ -272,15 +272,15 @@ function relationTo(item: Item, otherId: number): Relation | null {
  * tracked figures this coverage names, and the new names waiting for a
  * verdict. Two-letter terms are skipped; they would mark half of every page.
  */
-function readerTerms(item: Item, actors: Actor[]): ReaderTerm[] {
+function readerTerms(item: Item, actors: Related[]): ReaderTerm[] {
   const out: ReaderTerm[] = [];
   const add = (texts: string[], kind: ReaderTerm["kind"], label: string) => {
     for (const text of new Set(texts.map((t) => t.trim()))) {
       if (text.length > 2) out.push({ text, kind, label });
     }
   };
-  // Marked "pelaku" is whoever the record's Pelaku are, not the figure it is
-  // filed under; that one is just another tracked name unless also a Pelaku.
+  // Marked strongest is whoever is on the record's Terkait list, not the
+  // figure it is filed under; that one is just another tracked name unless listed.
   const pelaku = new Set(actors.map((a) => a.id));
   const seen = new Set<string>();
   const figure = (id: string, name: string, aliases: string[]) => {
@@ -352,8 +352,17 @@ function siteSources(item: Item) {
   return item.sources.map((a) => ({ source: a.source, url: a.url, title: a.title ?? "", published_at: a.published_at }));
 }
 
-/** Named figures that are not actors, most mentioned first; then new names. */
-function mentions(item: Item, actors: Actor[]): NamedPerson[] {
+/** Why a figure with no quote here is on the Terkait list. */
+const RELATED_WHY: Record<string, string> = {
+  owner: "dari judul berita",
+  about: "dibicarakan di kutipan",
+  derived: "pernyataannya dikutip ke catatan sendiri",
+  curator: "ditambahkan kurator",
+  point: "dikonfirmasi",
+};
+
+/** Named figures not on the Terkait list, most mentioned first; then new names. */
+function mentions(item: Item, actors: Related[]): NamedPerson[] {
   const actorIds = new Set(actors.map((a) => a.id));
   return item.named
     .filter((p) => !(p.kind === "figure" && actorIds.has(p.id)) && !(p.kind === "candidate" && p.verdict))
@@ -362,11 +371,11 @@ function mentions(item: Item, actors: Actor[]): NamedPerson[] {
 }
 
 /**
- * Everything the record relates to, as a summary: who acts in it, who else
- * is named, the peristiwa it belongs to and its lini cerita. Each heading's
+ * Everything the record relates to, as a summary: the figures it concerns,
+ * who else its coverage names, the peristiwa it belongs to and its lini cerita. Each heading's
  * action opens that data's own form in the drawer.
  */
-function Relasi({ item, actors, open }: { item: Item; actors: Actor[]; open: Open }) {
+function Relasi({ item, actors, open }: { item: Item; actors: Related[]; open: Open }) {
   const isRecord = item.kind === "record";
   const named = mentions(item, actors);
   const shown = named.slice(0, MENTIONS_SHOWN);
@@ -377,7 +386,7 @@ function Relasi({ item, actors, open }: { item: Item; actors: Actor[]; open: Ope
   return (
     <Card as="aside" title="Relasi" note="Ringkasan saja. Mengubahnya membuka form milik datanya." flush>
       {isRecord ? (
-        <Group label={`Pelaku · ${actors.length}`} action={<TextLink href={open("pelaku")}>+ Tambah pelaku</TextLink>}>
+        <Group label={`Terkait · ${actors.length}`} action={<TextLink href={open("terkait")}>+ Tambah</TextLink>}>
           {actors.length === 0 ? <div style={{ fontSize: 13, color: MUTED }}>Belum ada.</div> : null}
           {actors.map((a) => (
             <div key={a.id} style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -385,14 +394,13 @@ function Relasi({ item, actors, open }: { item: Item; actors: Actor[]; open: Ope
               <Link href={open(`tokoh:${a.id}`)} scroll={false} style={{ flex: 1, minWidth: 0, color: INK, textDecoration: "none" }}>
                 <span style={{ display: "block", fontSize: 14, fontWeight: 600 }}>{a.name}</span>
                 <span style={{ display: "block", fontSize: 12, color: MUTED }}>
-                  {figureTitle(a)}
-                  {a.quotes ? ` · ${a.quotes} kutipan` : ""}
+                  {[figureTitle(a), a.quotes ? `${a.quotes} kutipan` : RELATED_WHY[a.source] ?? null].filter(Boolean).join(" · ")}
                 </span>
               </Link>
-              <form action={setRecordActor}>
+              <form action={setRecordRelated}>
                   <Hidden fields={{ event_id: item.event_id, figure_id: a.id, on: "0" }} />
-                  <button type="submit" aria-label={`Pindahkan ${a.name} ke Disebut`} style={{ fontSize: 12, background: "none", border: "none", padding: "6px 0", cursor: "pointer", color: "var(--color-mud)", textDecoration: "underline", whiteSpace: "nowrap" }}>
-                    ke Disebut
+                  <button type="submit" aria-label={`Hapus ${a.name} dari Terkait`} style={{ fontSize: 12, background: "none", border: "none", padding: "6px 0", cursor: "pointer", color: "var(--color-mud)", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                    hapus
                   </button>
                 </form>
             </div>
@@ -401,7 +409,7 @@ function Relasi({ item, actors, open }: { item: Item; actors: Actor[]; open: Ope
       ) : null}
 
       <Group
-        label={`${isRecord ? "Disebut" : "Tokoh terkait"} · ${named.length}`}
+        label={`${isRecord ? "Nama di liputan" : "Tokoh terkait"} · ${named.length}`}
         action={named.length > shown.length ? <TextLink href={open("disebut")} tone="muted">semua</TextLink> : undefined}
       >
         {named.length === 0 ? <div style={{ fontSize: 13, color: MUTED }}>Tidak ada nama lain yang dikenali.</div> : (
@@ -500,7 +508,7 @@ function PanelDrawer({ panel, item, actors, figures, peek, candidates, search, o
   read: (article: string) => string;
   scattered: boolean;
   item: Item;
-  actors: Actor[];
+  actors: Related[];
   figures: FigureOption[];
   peek: EventPeek | FigurePeek | null;
   candidates: FollowupCandidate[];
@@ -555,16 +563,16 @@ function PanelDrawer({ panel, item, actors, figures, peek, candidates, search, o
         </Drawer>
       );
     }
-    case "pelaku":
+    case "terkait":
       return (
-        <Drawer crumb={<>{here} › Pelaku</>} title="Tambah pelaku" closeHref={closeHref}>
-          <AddActor item={item} actors={actors} figures={figures} />
+        <Drawer crumb={<>{here} › Terkait</>} title="Tambah tokoh terkait" closeHref={closeHref}>
+          <AddRelated item={item} actors={actors} figures={figures} />
         </Drawer>
       );
     case "disebut": {
       const named = mentions(item, actors);
       return (
-        <Drawer crumb={<>{here} › {isRecord ? "Disebut" : "Tokoh terkait"}</>} title={`${named.length} nama di liputan ini`} closeHref={closeHref}>
+        <Drawer crumb={<>{here} › {isRecord ? "Nama di liputan" : "Tokoh terkait"}</>} title={`${named.length} nama di liputan ini`} closeHref={closeHref}>
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {named.map((p, i) => (
               <li key={`${p.kind}-${p.id}`} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "9px 0", borderTop: i ? `1px solid ${RULE}` : "none" }}>
@@ -615,7 +623,7 @@ function PanelDrawer({ panel, item, actors, figures, peek, candidates, search, o
         <Drawer crumb={<>{here} › Kutipan</>} title={`${item.quotes.length} kutipan`} closeHref={closeHref} width={680}>
           <p style={{ fontSize: 12.5, color: MUTED, margin: 0, lineHeight: 1.5 }}>
             {isRecord
-              ? "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media. Betulkan tokohnya bila salah, dan pilih kutipan yang tampil di situs."
+              ? "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media, dan tokoh yang dibicarakannya. Betulkan bila salah, dan pilih kutipan yang tampil di situs."
               : "Kalimat langsung di artikelnya, dengan pembicara seperti yang ditulis media. Betulkan tokohnya bila salah."}
           </p>
           <AddQuote item={item} figures={figures} />
@@ -644,11 +652,11 @@ function PanelDrawer({ panel, item, actors, figures, peek, candidates, search, o
 }
 
 /**
- * A figure seen from this record: its part here (Pelaku or Disebut, or struck
+ * A figure seen from this record: whether it is on the Terkait list (or struck
  * from a peristiwa), its own form when the coverage names it, and where else
  * it appears.
  */
-function FigureDrawer({ item, actors, figures, peek: f, open }: { item: Item; actors: Actor[]; figures: FigureOption[]; peek: FigurePeek; open: Open }) {
+function FigureDrawer({ item, actors, figures, peek: f, open }: { item: Item; actors: Related[]; figures: FigureOption[]; peek: FigurePeek; open: Open }) {
   const isRecord = item.kind === "record";
   const person = item.named.find((p) => p.kind === "figure" && p.id === f.id);
   const isActor = actors.some((a) => a.id === f.id);
@@ -657,11 +665,11 @@ function FigureDrawer({ item, actors, figures, peek: f, open }: { item: Item; ac
       {isRecord ? (
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "10px 12px", borderRadius: 6, background: "var(--color-cream)", border: `1px solid ${RULE}` }}>
           <span style={{ flex: "1 1 220px", fontSize: 13, color: "var(--color-mud)" }}>
-            Di catatan ini: <strong style={{ color: INK }}>{isActor ? "pelaku" : person ? "disebut" : "tidak disebut"}</strong>
+            Di catatan ini: <strong style={{ color: INK }}>{isActor ? "terkait" : person ? "disebut di liputan, belum terkait" : "tidak disebut"}</strong>
           </span>
-          <form action={setRecordActor}>
+          <form action={setRecordRelated}>
             <Hidden fields={{ event_id: item.event_id, figure_id: f.id, on: isActor ? "0" : "1" }} />
-            <button type="submit" style={button(isActor ? "quiet" : "ink")}>{isActor ? "Pindahkan ke Disebut" : "Jadikan pelaku"}</button>
+            <button type="submit" style={button(isActor ? "quiet" : "ink")}>{isActor ? "Hapus dari Terkait" : "Tambahkan ke Terkait"}</button>
           </form>
         </div>
       ) : person ? (
@@ -696,10 +704,10 @@ function FigureDrawer({ item, actors, figures, peek: f, open }: { item: Item; ac
 }
 
 /**
- * "+ Tambah pelaku": who in this coverage could be an actor, then anyone on
- * the roster. A Pelaku is who does or says the act; the rest stay Disebut.
+ * "+ Tambah" on Terkait: who in this coverage is not listed yet, the quoted
+ * first, then anyone on the roster.
  */
-function AddActor({ item, actors, figures }: { item: Item; actors: Actor[]; figures: FigureOption[] }) {
+function AddRelated({ item, actors, figures }: { item: Item; actors: Related[]; figures: FigureOption[] }) {
   const actorIds = new Set(actors.map((a) => a.id));
   const quoted = new Map<string, number>();
   for (const q of item.quotes) if (q.figure_id) quoted.set(q.figure_id, (quoted.get(q.figure_id) ?? 0) + 1);
@@ -711,15 +719,15 @@ function AddActor({ item, actors, figures }: { item: Item; actors: Actor[]; figu
   return (
     <>
       <p style={{ fontSize: 13, color: "var(--color-mud)", lineHeight: 1.55, margin: 0 }}>
-        Pelaku adalah yang melakukan atau mengucapkan tindakannya. Yang hanya disebut atau dikutip tetap di Disebut.
-        Catatan boleh punya beberapa pelaku, atau belum punya sama sekali; tidak ada pelaku utama.
+        Terkait adalah tokoh yang dibahas catatan ini: yang berbicara, yang dibicarakan, atau yang melakukannya.
+        Satu daftar saja; tidak ada yang utama. Siapa mengatakan apa, tentang siapa, ada di kutipannya.
       </p>
       {fromCoverage.length ? (
         <>
           <div style={groupLabel}>Dari liputan ini</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {fromCoverage.map((p) => (
-              <form key={p.id} action={setRecordActor}>
+              <form key={p.id} action={setRecordRelated}>
                 <Hidden fields={{ event_id: item.event_id, figure_id: p.id, on: "1" }} />
                 <button type="submit" style={chip} title={`disebut di ${p.articles} artikel${quoted.get(p.id) ? `, ${quoted.get(p.id)} kutipan` : ""}`}>
                   + {p.name}
@@ -731,7 +739,7 @@ function AddActor({ item, actors, figures }: { item: Item; actors: Actor[]; figu
         </>
       ) : null}
       <div style={groupLabel}>Tokoh lain</div>
-      <form action={setRecordActor} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+      <form action={setRecordRelated} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
         <Hidden fields={{ event_id: item.event_id, on: "1" }} />
         <FigurePicker listId={FIGURE_LIST} required />
         <button type="submit" style={button("ink")}>Tambahkan</button>
@@ -896,7 +904,7 @@ function ReworkMenu({ item, figures }: { item: Item; figures: FigureOption[] }) 
  * appointments, profiles and the like are found, drafted and applied with no
  * curator step, and the record comes down as "Bahan CV". Shown so a wrong one
  * can be undone by hand: "Tayangkan lagi" restores the record, and the CV is
- * edited under "Pelaku" or on the figure's own record.
+ * edited under "Terkait" or on the figure's own record.
  */
 function CvNote({ item, figures }: { item: Item; figures: FigureOption[] }) {
   const p = item.cvProposals.find((r) => r.status === "accepted");
@@ -1347,7 +1355,7 @@ function figureLabel(figures: FigureOption[], id: string | null): string | null 
  * Kutipan on the page: the quote the site shows, then the actors' own words,
  * up to QUOTES_SHOWN. Every quote, adding one and choosing none are in the drawer.
  */
-function QuotePreview({ item, actors, figures, open }: { item: Item; actors: Actor[]; figures: FigureOption[]; open: Open }) {
+function QuotePreview({ item, actors, figures, open }: { item: Item; actors: Related[]; figures: FigureOption[]; open: Open }) {
   if (item.quotes.length === 0) {
     return (
       <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>
@@ -1364,7 +1372,7 @@ function QuotePreview({ item, actors, figures, open }: { item: Item; actors: Act
     <>
       {item.kind === "record" && !item.quote ? (
         <p style={{ fontSize: 12.5, color: MUTED, margin: "0 0 6px" }}>
-          {item.quote === "" ? "Tanpa kutipan: kamu memilih tidak menampilkannya." : "Belum ada kutipan pelaku yang tampil di catatan."}
+          {item.quote === "" ? "Tanpa kutipan: kamu memilih tidak menampilkannya." : "Belum ada kutipan yang tampil di catatan."}
         </p>
       ) : null}
       <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
@@ -1379,7 +1387,7 @@ function QuotePreview({ item, actors, figures, open }: { item: Item; actors: Act
   );
 }
 
-function QuoteList({ item, actors, figures, open }: { item: Item; actors: Actor[]; figures: FigureOption[]; open: Open }) {
+function QuoteList({ item, actors, figures, open }: { item: Item; actors: Related[]; figures: FigureOption[]; open: Open }) {
   const isRecord = item.kind === "record";
   const footer = (
     <>
@@ -1480,7 +1488,7 @@ function AddQuote({ item, figures }: { item: Item; figures: FigureOption[] }) {
           {item.kind === "record" && item.figure_id ? (
             <label style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}>
               <input type="checkbox" name="show" value="1" defaultChecked={!item.quote} />
-              Tampilkan di catatan (bila tokohnya pelaku catatan ini)
+              Tampilkan di catatan (bila tokohnya yang dicatat di sini)
             </label>
           ) : null}
           <button type="submit" style={button("ink")}>Tambah</button>
@@ -1490,7 +1498,7 @@ function AddQuote({ item, figures }: { item: Item; figures: FigureOption[] }) {
   );
 }
 
-function QuoteItem({ quote: q, item, actors, figures, first, open }: { quote: QuoteRow; item: Item; actors: Actor[]; figures: FigureOption[]; first: boolean; open: Open }) {
+function QuoteItem({ quote: q, item, actors, figures, first, open }: { quote: QuoteRow; item: Item; actors: Related[]; figures: FigureOption[]; first: boolean; open: Open }) {
   // The site shows a record's quote under the figure it is filed under, with
   // no name beside it; so only that figure's words can be the one shown.
   const own = Boolean(item.figure_id) && q.figure_id === item.figure_id;
@@ -1519,7 +1527,7 @@ function QuoteItem({ quote: q, item, actors, figures, first, open }: { quote: Qu
         )}
         {q.figure_id ? (
           <span style={{ fontSize: 12, color: MUTED }}>
-            {[title, actor ? "pelaku" : null, q.assigned_by === "curator" ? null : "dicocokkan otomatis"].filter(Boolean).join(" · ")}
+            {[title, q.assigned_by === "curator" ? null : "dicocokkan otomatis"].filter(Boolean).join(" · ")}
           </span>
         ) : null}
         {shown ? <Pill tone="accept">tampil di catatan</Pill> : null}
@@ -1532,13 +1540,32 @@ function QuoteItem({ quote: q, item, actors, figures, first, open }: { quote: Qu
         ) : null}
         <SpeakerEditor quoteId={q.id} listId={FIGURE_LIST} canClear={Boolean(q.figure_id) || q.assigned_by !== "curator"} />
       </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+        <span style={{ fontSize: 12, color: MUTED }}>tentang</span>
+        {q.about.length === 0 ? <span style={{ fontSize: 12, color: MUTED }}>–</span> : null}
+        {q.about.map((s) => (
+          <span key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+            <Link href={open(`tokoh:${s.id}`)} scroll={false} style={{ textDecoration: "none" }}>
+              <Pill tone={s.status === "confirmed" ? "ink" : "neutral"} title={s.status === "confirmed" ? "Dikonfirmasi" : "Ditemukan pipeline dari nama di kutipannya"}>
+                {s.name}{s.status === "confirmed" ? " ✓" : ""}
+              </Pill>
+            </Link>
+            <form action={setQuoteAbout}>
+              <Hidden fields={{ quote_id: q.id, figure_id: s.id, on: "0" }} />
+              <button type="submit" aria-label={`Kutipan ini bukan tentang ${s.name}`} title="Bukan tentang dia" style={{ fontSize: 13, lineHeight: 1, background: "none", border: "none", padding: "4px 6px", cursor: "pointer", color: MUTED }}>×</button>
+            </form>
+          </span>
+        ))}
+        {/* Keyed by the list, so a save closes it. */}
+        <AboutEditor key={q.about.map((s) => s.id).join()} quoteId={q.id} listId={FIGURE_LIST} />
+      </div>
     </li>
   );
 }
 
 /**
- * The decisions the pipeline made here without asking (Pelaku, quote
- * speakers), offered as points to check. Each answer counts toward the
+ * The decisions the pipeline made here without asking (quote speakers),
+ * offered as points to check. Each answer counts toward the
  * confidence of its band; a band past the gate can be answered automatically.
  */
 function CheckOffer({ eventId, count }: { eventId: number; count: number }) {
@@ -1549,7 +1576,7 @@ function CheckOffer({ eventId, count }: { eventId: number; count: number }) {
     >
       <input type="hidden" name="event_id" value={eventId} />
       <span style={{ flex: "1 1 320px", fontSize: 13, color: "var(--color-mud)", lineHeight: 1.5 }}>
-        <strong style={{ color: INK }}>{count} keputusan otomatis belum dicek</strong> di sini: Pelaku dan pembicara kutipan yang ditetapkan pipeline tanpa bertanya.
+        <strong style={{ color: INK }}>{count} keputusan otomatis belum dicek</strong> di sini: pembicara kutipan yang ditetapkan pipeline tanpa bertanya.
         Tiap jawabanmu mengukur ketepatannya; jenis yang mencapai {AUTO_MIN_ANSWERS} jawaban dengan ≥{Math.round(AUTO_MIN_AGREEMENT * 100)}% setuju bisa dikonfirmasi otomatis.
       </span>
       <button type="submit" style={{ ...button("ink"), padding: "8px 16px" }}>Buka sebagai poin</button>

@@ -41,7 +41,7 @@ export function EventPanel({ peek: e, open, relation, here }: {
       </div>
       {isRecord && e.figure ? (
         <div style={{ fontSize: 13, color: "var(--color-mud)", marginBottom: 8 }}>
-          Pelaku:{" "}
+          Terkait:{" "}
           {[e.figure, ...e.actors].map((f, i) => (
             <span key={f.id}>
               {i ? ", " : ""}
@@ -195,7 +195,7 @@ export function FigurePanel({ peek: f, open, here }: {
             <li key={r.event_id} style={{ padding: "7px 0", borderTop: i ? `1px solid ${RULE}` : "none", fontSize: 13.5, lineHeight: 1.45, opacity: r.curated === "rejected" ? 0.6 : 1 }}>
               <span style={{ fontSize: 11.5, color: MUTED }}>
                 {day(r.event_date)}
-                {r.as_actor ? " · sebagai pelaku" : ""}
+                {r.as_actor ? " · terkait" : ""}
                 {r.curated === "rejected" ? " · diturunkan" : ""}
               </span>
               <br />

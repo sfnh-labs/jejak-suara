@@ -16,7 +16,7 @@ export const metadata = {
 /**
  * One figure: its identity and offices, the same form the record page's
  * drawer opens; whether it is someone else already tracked; and the records
- * it acts in, filed under it or added as a Pelaku.
+ * it is in, filed under it or on their Terkait list.
  */
 export default async function TokohPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -61,7 +61,7 @@ export default async function TokohPage({ params }: { params: Promise<{ id: stri
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: "block", fontSize: 13.5, lineHeight: 1.4, color: INK, opacity: r.curated === "rejected" ? 0.6 : 1 }}>{r.title ?? `#${r.event_id}`}</span>
                     <span style={{ display: "block", fontSize: 12, color: MUTED }}>
-                      {day(r.event_date)}{r.filed ? "" : " · pelaku tambahan"}
+                      {day(r.event_date)}{r.filed ? "" : " · terkait"}
                       {r.open_points ? <span style={{ color: "#7a5a12", fontWeight: 600 }}> · {r.open_points} poin</span> : null}
                     </span>
                   </span>
