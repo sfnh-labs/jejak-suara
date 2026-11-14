@@ -19,20 +19,34 @@ import { localDbPath, lquery, lqueryOne, lrun, pipelineOp } from "@/lib/localDb"
 import { getCandidate, getCandidateCounts, getCandidates, setCandidateVerdict, type CandidateRow } from "@/lib/candidates";
 import {
   assignQuote,
+  canonicalOrg,
+  deleteOrganization,
   figureTitle,
   getFigureOptions,
   getFollowupCandidates,
   getItem,
+  getOrgChoices,
+  getOrganizations,
   getRelated,
+  getUnlinkedOrgs,
+  likelyDuplicates,
+  mergeFigure,
+  orgKey,
   positionTitle,
   REASONS,
   reasonLabel,
+  removeNotAPerson,
+  saveFigureEdit,
+  saveOrganization,
   setRelated,
   type FigureOption,
+  type Organization,
+  type Position,
   type QuoteRow,
   type ReasonCode,
   type Related,
 } from "@/lib/curation";
+import { getFigureFull } from "@/lib/kurasiLists";
 import {
   answerPoint,
   AUTO_MIN_AGREEMENT,
@@ -171,6 +185,29 @@ interface State {
   };
   /** Auto answers looked at from /otomatis lately, not offered again. */
   autoSeen: number[];
+  /** The /tokoh card: its message, the figure it shows, what is being typed
+   *  (and its prompt), a list it was opened from, choices, the name before a
+   *  rename and the other figure of a merge being confirmed. */
+  fig: {
+    msg?: number;
+    id?: string;
+    mode?: "name" | "alias" | "office" | "merge" | "search";
+    prompt?: number;
+    found?: string[];
+    picks?: string[];
+    oldName?: string;
+    target?: string;
+  };
+  /** The /organisasi card likewise; `draft` is a name not registered yet. */
+  org: {
+    msg?: number;
+    id?: number;
+    mode?: "name" | "short" | "alias" | "add" | "aliasOf" | "search";
+    prompt?: number;
+    found?: string[];
+    picks?: string[];
+    draft?: string;
+  };
 }
 
 async function loadState(): Promise<State> {
@@ -197,9 +234,11 @@ async function loadState(): Promise<State> {
         rejected: s.cand?.rejected && typeof s.cand.rejected === "object" ? s.cand.rejected : {},
       },
       autoSeen: Array.isArray(s.autoSeen) ? s.autoSeen.filter(Number.isInteger) : [],
+      fig: s.fig && typeof s.fig === "object" ? s.fig : {},
+      org: s.org && typeof s.org === "object" ? s.org : {},
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, cand: { skip: [], rejected: {} }, autoSeen: [] };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, cand: { skip: [], rejected: {} }, autoSeen: [], fig: {}, org: {} };
   }
 }
 
@@ -511,7 +550,7 @@ async function showView(s: State, p: Point, note = ""): Promise<void> {
   if (back) rows.push([{ text: `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }]);
   const unchecked = await getUncheckedCount(p.event_id);
   if (unchecked) rows.push([{ text: `🔍 Cek ${unchecked} keputusan otomatis`, callback_data: `vc:${p.id}` }]);
-  rows.push([{ text: "Tutup", callback_data: `vx:${p.id}` }]);
+  rows.push([{ text: "👤 Ubah data tokoh", callback_data: `vf:${p.id}` }, { text: "Tutup", callback_data: `vx:${p.id}` }]);
   const at = s.view[p.id];
   if (at) {
     await edit(at, v.text, rows);
@@ -587,6 +626,15 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
     s.viewUndo[p.id] = { id: fid, name };
     await showView(s, p, `✖ ${esc(name)} dihapus dari Terkait.`);
     return "Dihapus dari Terkait";
+  }
+  if (kind === "vf") {
+    const item = await getItem(p.event_id);
+    if (!item) throw new Error("Catatannya tidak ditemukan.");
+    const byId = new Map((await getFigureOptions()).map((f) => [f.id, f]));
+    const ids = [item.figure_id, ...(await getRelated(p.event_id, null)).map((r) => r.id), ...item.quotes.map((q) => q.figure_id)];
+    const figures = [...new Set(ids)].map((x) => (x ? byId.get(x) : undefined)).filter((f): f is FigureOption => Boolean(f)).slice(0, FOUND);
+    await figureList(s, "<b>👤 Tokoh di catatan ini</b>", figures);
+    return "";
   }
   if (kind === "vc") {
     await pipelineOp("open-checks", String(p.event_id));
@@ -907,6 +955,589 @@ async function onAuto(s: State, kind: string, arg: string, code: string | undefi
 }
 
 // ---------------------------------------------------------------------------
+// Tokoh and organisasi (/tokoh, /organisasi, 👤 on the 📋 view): a figure's
+// name, aliases and offices put right, a duplicate merged, a "figure" that is
+// no one retired; an organisation added, renamed, given a short name, aliases
+// and a kind. The same writers as /kurasi/tokoh and /kurasi/organisasi. One
+// card of each at a time: its buttons act on the figure or organisation the
+// card shows, so a tap on an older card is refused rather than misapplied.
+
+const ORG_KIND_LABEL: Record<string, string> = {
+  kementerian: "Kementerian", lembaga: "Lembaga", parlemen: "Parlemen", pemerintah: "Pemerintah daerah",
+  kabinet: "Kabinet", partai: "Partai", aparat: "Aparat", bumn: "BUMN", swasta: "Swasta", ormas: "Ormas",
+  kampus: "Kampus", media: "Media", olahraga: "Olahraga", internasional: "Internasional", lainnya: "Lainnya",
+};
+
+/** Splits a typed list: one per line, or separated by "|", ";" or commas. */
+const typedList = (t: string) => t.split(/[\n|;,]/).map((a) => a.replace(/\s+/g, " ").trim()).filter(Boolean);
+
+/**
+ * The organisation as offices should write it, and a line saying whether it
+ * matched one: the registry's, one other figures already use, or a new name.
+ */
+async function orgMatch(typed: string): Promise<{ org: string; note: string }> {
+  const [choices, registry] = await Promise.all([getOrgChoices(), getOrganizations()]);
+  // An alias names the registered organisation too ("Partai Gerindra"):
+  // the office is written with its registered name.
+  const key = orgKey(typed);
+  const byAlias = registry.find((o) => o.aliases.some((a) => orgKey(a) === key));
+  const org = byAlias ? byAlias.name : canonicalOrg(typed, choices);
+  const reg = registry.find((o) => orgKey(o.name) === orgKey(org));
+  if (reg) {
+    const as = orgKey(typed) !== orgKey(org) ? ` (dari “${esc(typed.trim())}”)` : "";
+    return { org, note: `🏢 Organisasi: <b>${esc(reg.name)}</b>${reg.short_name ? ` · ${esc(reg.short_name)}` : ""}${as} — terdaftar.` };
+  }
+  const used = choices.find((c) => orgKey(c.name) === orgKey(org));
+  return used && used.uses > 0
+    ? { org, note: `🏢 Organisasi: <b>${esc(org)}</b> — dipakai ${used.uses} tokoh, belum terdaftar. /organisasi ${esc(org)} untuk mendaftarkannya.` }
+    : { org, note: `🏢 Organisasi baru: <b>${esc(org)}</b> — belum dipakai tokoh lain. Kalau ini nama lain organisasi yang sudah ada, tambahkan sebagai alias lewat /organisasi.` };
+}
+
+// --- Tokoh
+
+async function figureCard(s: State, id: string, note = ""): Promise<[string, Keyboard]> {
+  const full = await getFigureFull(id);
+  if (!full) throw new Error("Tokoh ini tidak ditemukan.");
+  const f = full.person;
+  const options = await getFigureOptions();
+  const dups = f.active ? likelyDuplicates({ id: f.id, name: f.name, aliases: f.aliases }, options) : [];
+  s.fig.id = id;
+  s.fig.picks = dups.map((d) => d.figure.id);
+  const lines = [`<b>👤 TOKOH</b>${f.active ? "" : " · <i>nonaktif</i>"}`, `<b>${esc(f.name)}</b>`];
+  lines.push("", "<b>Jabatan</b>");
+  lines.push(f.positions.length
+    ? f.positions.map((p, i) => `${i + 1}. ${esc(positionTitle(p))}${p.period ? ` (${esc(p.period)})` : ""}${i === 0 ? " ⭐" : ""}`).join("\n")
+    : "<i>belum ada</i>");
+  lines.push("", `<b>Alias</b> ${f.aliases.length ? f.aliases.map((a, i) => `${i + 1}. ${esc(a)}`).join(" · ") : "<i>tidak ada</i>"}`);
+  lines.push("", `${full.recordCount} catatan · ${full.quoteCount} kutipan`);
+  if (dups.length) {
+    lines.push("", "<b>Mungkin orang yang sama</b>");
+    lines.push(dups.map((d, i) => `${i + 1}. <b>${esc(d.figure.name)}</b>${d.figure.title ? ` – ${esc(clip(d.figure.title, 50))}` : ""}\n    <i>${esc(d.why)}</i>`).join("\n"));
+  }
+  if (note) lines.push("", note);
+  const rows: Keyboard = [];
+  if (f.active) {
+    rows.push([{ text: "✏️ Nama", callback_data: "f:n" }, { text: "🏷 + Alias", callback_data: "f:a" }, { text: "💼 + Jabatan", callback_data: "f:j" }]);
+    if (s.fig.oldName && s.fig.oldName !== f.name && !f.aliases.some((a) => fold(a) === fold(s.fig.oldName!))) {
+      rows.push([{ text: `🏷 Simpan “${clip(s.fig.oldName, 22)}” sebagai alias`, callback_data: "f:ka" }]);
+    }
+    rows.push(...numbered(Math.min(f.aliases.length, 8), "✖ Alias", (i) => `f:ax:${i}`));
+    rows.push(...numbered(Math.min(f.positions.length, 8), "✖ Jab", (i) => `f:jx:${i}`));
+    const lift: Button[] = f.positions.slice(1, 8).map((_, i) => ({ text: `⭐ ${i + 2}`, callback_data: `f:jm:${i + 1}` }));
+    for (let i = 0; i < lift.length; i += 4) rows.push(lift.slice(i, i + 4));
+    dups.forEach((d, i) => rows.push([{ text: `🔀 Sama dengan ${clip(`${i + 1}. ${d.figure.name}`, 24)}`, callback_data: `f:m:${i}` }]));
+    rows.push([{ text: "🔀 Gabung dengan… (ketik)", callback_data: "f:mt" }, { text: "🚫 Bukan orang", callback_data: "f:b" }]);
+  }
+  rows.push([{ text: "Tutup", callback_data: "f:x" }]);
+  return [lines.join("\n"), rows];
+}
+
+/** A list of figures to open, as a new /tokoh message. */
+async function figureList(s: State, head: string, figures: { id: string; name: string; title?: string }[]): Promise<void> {
+  if (s.fig.msg) await drop(s.fig.msg);
+  s.fig = { found: figures.map((f) => f.id) };
+  const list = figures.map((f, i) => `<b>${i + 1}.</b> <b>${esc(f.name)}</b>${f.title ? ` – ${esc(clip(f.title, 60))}` : ""}`).join("\n");
+  const rows: Keyboard = figures.map((f, i) => [{ text: clip(`${i + 1}. ${f.name}`, 30), callback_data: `f:o:${i}` }]);
+  rows.push([{ text: "🔎 Cari tokoh", callback_data: "f:q" }, { text: "Tutup", callback_data: "f:x" }]);
+  s.fig.msg = await send(figures.length ? `${head}\n${list}` : `${head}\n<i>tidak ada</i>`, rows);
+}
+
+/** /tokoh [nama]: a search, or the newest figures the pipeline added (where junk shows up). */
+async function tokohCommand(s: State, q: string): Promise<void> {
+  if (q) {
+    const found = findFigures(await getFigureOptions(), q.slice(0, 200), null);
+    await figureList(s, `<b>👤 Tokoh “${esc(q)}”</b>`, found);
+    return;
+  }
+  const rows = await lquery<{ id: string }>(
+    `SELECT id FROM figures WHERE active AND origin = 'discovered' ORDER BY created_at DESC, id LIMIT ${FOUND}`
+  );
+  const byId = new Map((await getFigureOptions()).map((f) => [f.id, f]));
+  await figureList(s, "<b>👤 Tokoh terbaru dari pipeline</b> <i>(cari: /tokoh nama)</i>",
+    rows.map((r) => byId.get(r.id)).filter((f): f is FigureOption => Boolean(f)));
+}
+
+async function askFigure(s: State, mode: NonNullable<State["fig"]["mode"]>, msgId: number): Promise<void> {
+  const ask: Record<typeof mode, [string, string]> = {
+    name: ["Ketik nama yang benar.", "Nama tokoh"],
+    alias: ["Ketik alias yang ditambahkan, dipisah koma (mis. <i>Pak Bas, Basuki</i>). Minimal 3 huruf.", "Alias"],
+    office: ["Ketik jabatannya: <i>jabatan, organisasi</i>, boleh ditambah periode (mis. <i>Menteri, Kementerian Perdagangan, 2024–</i>). Jadi jabatan utama.", "Jabatan, organisasi"],
+    merge: ["Ketik nama tokoh yang sama dengan ini.", "Nama tokoh"],
+    search: ["Ketik nama tokoh yang dicari.", "Nama tokoh"],
+  };
+  s.fig.mode = mode;
+  s.fig.prompt = await send(ask[mode][0], undefined, {
+    reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
+    reply_markup: { force_reply: true, input_field_placeholder: ask[mode][1] },
+  });
+}
+
+/** Saves the figure with one thing changed, keeping the rest as it is. */
+async function saveFigure(id: string, change: (f: { name: string; aliases: string[]; positions: Position[] }) => void): Promise<void> {
+  const full = await getFigureFull(id);
+  if (!full) throw new Error("Tokoh ini tidak ditemukan.");
+  const f = { name: full.person.name, aliases: [...full.person.aliases], positions: [...full.person.positions] };
+  change(f);
+  const role = f.positions.length ? positionTitle(f.positions[0]) : null;
+  await saveFigureEdit(id, f.name, role, f.aliases, full.person.active !== false, f.positions, null);
+}
+
+async function redrawFigure(s: State, note = ""): Promise<void> {
+  if (!s.fig.id || !s.fig.msg) return;
+  await edit(s.fig.msg, ...(await figureCard(s, s.fig.id, note)));
+}
+
+async function onFigureReply(s: State, typed: string): Promise<void> {
+  const mode = s.fig.mode;
+  s.fig.mode = undefined;
+  const id = s.fig.id;
+  const t = typed.replace(/\s+/g, " ").trim();
+  if (mode === "search") return tokohCommand(s, t);
+  if (!id || !s.fig.msg) throw new Error("Kartu tokohnya sudah ditutup; buka lagi dengan /tokoh.");
+  if (mode === "name") {
+    if (t.length < 3 || t.length > 120) throw new Error("Nama 3–120 huruf.");
+    const before = (await getFigureFull(id))?.person.name;
+    await saveFigure(id, (f) => {
+      f.name = t;
+      f.aliases = f.aliases.filter((a) => fold(a) !== fold(t));
+    });
+    s.fig.oldName = before;
+    await redrawFigure(s, `✏️ Nama diganti: ${esc(before ?? "")} → <b>${esc(t)}</b>.`);
+  } else if (mode === "alias") {
+    const add = typedList(t);
+    const short = add.find((a) => a.length < 3);
+    if (short) throw new Error(`Alias terlalu pendek untuk dicocokkan dengan aman: ${short}`);
+    const others = (await getFigureOptions()).filter((f) => f.id !== id);
+    const clash = add.flatMap((a) => others.filter((f) => [f.name, ...f.aliases].some((x) => fold(x) === fold(a))).map((f) => `“${a}” juga ${f.name}`));
+    await saveFigure(id, (f) => {
+      for (const a of add) if (fold(a) !== fold(f.name) && !f.aliases.some((x) => fold(x) === fold(a))) f.aliases.push(a);
+    });
+    await redrawFigure(s, `🏷 Alias ditambahkan: ${add.map(esc).join(", ")}.${clash.length ? `\n⚠️ ${esc(clash.join("; "))} — nama itu jadi rebutan dua tokoh.` : ""}`);
+  } else if (mode === "office") {
+    const [role = "", orgTyped = "", ...rest] = t.split(",").map((x) => x.trim());
+    if (!role || !orgTyped) throw new Error("Tulis keduanya, dipisah koma: jabatan, organisasi. Ketuk 💼 lagi.");
+    const { org, note } = await orgMatch(orgTyped);
+    await saveFigure(id, (f) => {
+      f.positions = [{ role, org, period: rest.join(", ") }, ...f.positions.filter((p) => !(fold(p.role) === fold(role) && orgKey(p.org) === orgKey(org)))].slice(0, 20);
+    });
+    await redrawFigure(s, `💼 Jabatan utama: <b>${esc(role)} – ${esc(org)}</b>.\n${note}`);
+  } else if (mode === "merge") {
+    const found = findFigures(await getFigureOptions(), t, id).slice(0, 6);
+    s.fig.picks = found.map((f) => f.id);
+    const rows: Keyboard = found.map((f, i) => [{ text: clip(`🔀 ${i + 1}. ${f.name}`, 30), callback_data: `f:m:${i}` }]);
+    rows.push([{ text: "← Kembali", callback_data: "f:r" }]);
+    const list = found.map((f, i) => `<b>${i + 1}.</b> <b>${esc(f.name)}</b>${f.title ? ` – ${esc(f.title)}` : ""}`).join("\n");
+    await edit(s.fig.msg, found.length ? `<b>🔀 Sama dengan siapa?</b> Hasil “${esc(t)}”:\n${list}` : `<b>🔀 Tidak ada tokoh yang cocok dengan “${esc(t)}”.</b>`, rows);
+  }
+}
+
+/** The 👤 buttons ("f:…"); returns the note for the tap. */
+async function onFigure(s: State, action: string, arg: string | undefined, msgId: number): Promise<string> {
+  if (action === "x") {
+    await drop(msgId);
+    if (msgId === s.fig.msg) s.fig = {};
+    return "";
+  }
+  if (action === "q") {
+    s.fig.msg = msgId;
+    await askFigure(s, "search", msgId);
+    return "";
+  }
+  if (msgId !== s.fig.msg) throw new Error("Kartu ini sudah diganti; buka lagi dengan /tokoh.");
+  const i = Number(arg);
+  if (action === "o") {
+    const id = s.fig.found?.[i];
+    if (!id) throw new Error("Daftar ini sudah kedaluwarsa; cari lagi.");
+    s.fig.oldName = undefined;
+    await edit(msgId, ...(await figureCard(s, id)));
+    return "";
+  }
+  const id = s.fig.id;
+  if (!id) throw new Error("Pilih tokohnya lagi.");
+  if (action === "r") {
+    await redrawFigure(s);
+    return "";
+  }
+  if (action === "n" || action === "a" || action === "j" || action === "mt") {
+    await askFigure(s, action === "n" ? "name" : action === "a" ? "alias" : action === "j" ? "office" : "merge", msgId);
+    return "";
+  }
+  if (action === "ka") {
+    const old = s.fig.oldName;
+    if (!old) throw new Error("Tidak ada nama lama.");
+    await saveFigure(id, (f) => {
+      if (old.length >= 3 && !f.aliases.some((a) => fold(a) === fold(old))) f.aliases.push(old);
+    });
+    s.fig.oldName = undefined;
+    await redrawFigure(s, `🏷 “${esc(old)}” disimpan sebagai alias.`);
+    return "Disimpan";
+  }
+  if (action === "ax" || action === "jx" || action === "jm") {
+    let what = "";
+    await saveFigure(id, (f) => {
+      if (action === "ax") {
+        what = f.aliases[i] ?? "";
+        if (!what) throw new Error("Alias ini sudah tidak ada.");
+        f.aliases.splice(i, 1);
+      } else {
+        const p = f.positions[i];
+        if (!p) throw new Error("Jabatan ini sudah tidak ada.");
+        what = positionTitle(p);
+        f.positions.splice(i, 1);
+        if (action === "jm") f.positions.unshift(p);
+      }
+    });
+    await redrawFigure(s, action === "ax" ? `✖ Alias “${esc(what)}” dihapus.` : action === "jx" ? `✖ Jabatan “${esc(what)}” dihapus.` : `⭐ Jabatan utama: ${esc(what)}.`);
+    return "Disimpan";
+  }
+  if (action === "m") {
+    const other = s.fig.picks?.[i];
+    if (!other) throw new Error("Pilihan ini sudah kedaluwarsa.");
+    const all = new Map((await getFigureOptions()).map((f) => [f.id, f]));
+    const a = all.get(id);
+    const b = all.get(other);
+    if (!a || !b) throw new Error("Salah satu tokoh sudah tidak aktif.");
+    s.fig.target = other;
+    // Catatan as the card counts them: their own and those they are Terkait in.
+    const [na, nb] = await Promise.all([getFigureFull(id), getFigureFull(other)]).then((x) => x.map((f) => f?.recordCount ?? 0));
+    const [keep, fold_] = nb > na ? [b, a] : [a, b];
+    await edit(msgId, [
+      "<b>🔀 Jadikan satu tokoh?</b>",
+      `• <b>${esc(a.name)}</b>${a.title ? ` – ${esc(a.title)}` : ""} · ${na} catatan`,
+      `• <b>${esc(b.name)}</b>${b.title ? ` – ${esc(b.title)}` : ""} · ${nb} catatan`,
+      "",
+      "Catatan, kutipan dan namanya pindah ke yang dipertahankan; nama yang lain jadi alias, tokohnya dinonaktifkan. <b>Tidak bisa dibatalkan.</b>",
+      `<i>Saran: pertahankan ${esc(keep.name)}, yang catatannya lebih banyak; ${esc(fold_.name)} digabung ke sana.</i>`,
+    ].join("\n"), [
+      [{ text: clip(`✅ Pertahankan ${a.name}`, 32), callback_data: "f:mk:0" }],
+      [{ text: clip(`✅ Pertahankan ${b.name}`, 32), callback_data: "f:mk:1" }],
+      [{ text: "← Batal", callback_data: "f:r" }],
+    ]);
+    return "";
+  }
+  if (action === "mk") {
+    const other = s.fig.target;
+    if (!other) throw new Error("Pilih tokohnya lagi.");
+    const [from, into] = arg === "1" ? [id, other] : [other, id];
+    await mergeFigure(from, into);
+    s.fig.target = undefined;
+    s.fig.oldName = undefined;
+    await edit(msgId, ...(await figureCard(s, into, "🔀 Digabung: sekarang satu tokoh.")));
+    return "Digabung";
+  }
+  if (action === "b") {
+    const full = await getFigureFull(id);
+    if (!full) throw new Error("Tokoh ini tidak ditemukan.");
+    const own = full.records.filter((r) => r.filed && r.curated !== "rejected").length;
+    await edit(msgId, [
+      `<b>🚫 “${esc(full.person.name)}” bukan orang?</b>`,
+      "Untuk tempat, jabatan, lembaga atau potongan judul yang terbaca sebagai tokoh.",
+      `Dinonaktifkan, dilepas dari semua peristiwa${own ? `, dan ${own}${own >= 60 ? "+" : ""} catatannya diturunkan` : ""}. Namanya tidak ditawarkan lagi. <b>Tidak bisa dibatalkan dari sini.</b>`,
+    ].join("\n"), [[{ text: "🚫 Ya, bukan orang", callback_data: "f:by" }, { text: "← Batal", callback_data: "f:r" }]]);
+    return "";
+  }
+  if (action === "by") {
+    const name = (await getFigureFull(id))?.person.name ?? id;
+    const out = await removeNotAPerson(id);
+    s.fig = {};
+    const taken = /(\d+) records taken down/.exec(out)?.[1];
+    await edit(msgId, `🚫 <b>${esc(name)}</b>: bukan orang, dinonaktifkan${taken && taken !== "0" ? `; ${taken} catatan diturunkan` : ""}.`);
+    return "Dinonaktifkan";
+  }
+  throw new Error("Tombol tidak dikenal.");
+}
+
+// --- Organisasi
+
+type OrgHit = { kind: "r"; org: Organization } | { kind: "u"; name: string; figures: number };
+
+async function orgCard(s: State, id: number, note = ""): Promise<[string, Keyboard]> {
+  const org = (await getOrganizations()).find((o) => o.id === id);
+  if (!org) throw new Error("Organisasi ini sudah tidak ada.");
+  s.org.id = id;
+  s.org.draft = undefined;
+  const lines = [
+    "<b>🏢 ORGANISASI</b>",
+    `<b>${esc(org.name)}</b>${org.short_name ? ` · ${esc(org.short_name)}` : ""}`,
+    `Jenis: ${org.kind ? esc(ORG_KIND_LABEL[org.kind] ?? org.kind) : "<i>belum</i>"} · ${org.figures} tokoh`,
+    `Alias: ${org.aliases.length ? org.aliases.map((a, i) => `${i + 1}. ${esc(a)}`).join(" · ") : "<i>tidak ada</i>"}`,
+    "<i>Perubahan dipakai pipeline di proses berikutnya.</i>",
+  ];
+  if (note) lines.push("", note);
+  const rows: Keyboard = [
+    [{ text: "✏️ Nama lengkap", callback_data: "g:n" }, { text: "✏️ Singkatan", callback_data: "g:s" }],
+    [{ text: "🏷 + Alias", callback_data: "g:a" }, { text: "📂 Jenis", callback_data: "g:k" }],
+    ...numbered(Math.min(org.aliases.length, 8), "✖ Alias", (i) => `g:ax:${i}`),
+  ];
+  if (org.short_name) rows.push([{ text: `✖ Singkatan ${clip(org.short_name, 20)}`, callback_data: "g:sx" }]);
+  rows.push([{ text: "🗑 Hapus", callback_data: "g:d" }, { text: "Tutup", callback_data: "g:x" }]);
+  return [lines.join("\n"), rows];
+}
+
+/** An organisation name offices use that the registry does not know yet. */
+function unlinkedCard(s: State, name: string, figures: number, note = ""): [string, Keyboard] {
+  s.org.id = undefined;
+  s.org.draft = name;
+  const text = [
+    "<b>🏢 ORGANISASI</b> · <i>belum terdaftar</i>",
+    `<b>${esc(name)}</b> · dipakai ${figures} tokoh`,
+    "",
+    "Daftarkan apa adanya, dengan nama lengkap dan singkatan yang benar, atau jadikan alias organisasi yang sudah terdaftar (mis. <i>Kemendag</i> → Kementerian Perdagangan). Kalau bukan organisasi (dapil, komisi, bidang), perbaiki jabatan tokoh yang memakainya.",
+    ...(note ? ["", note] : []),
+  ].join("\n");
+  return [text, [
+    [{ text: clip(`➕ Daftarkan “${name}”`, 32), callback_data: "g:add" }],
+    [{ text: "✏️ Daftarkan: nama, singkatan", callback_data: "g:addt" }],
+    [{ text: "🏷 Alias dari…", callback_data: "g:al" }],
+    // "Dapil Banten III", "Komisi IV": not an organisation; the offices need putting right.
+    [{ text: "👤 Tokoh yang memakainya", callback_data: "g:u" }],
+    [{ text: "Tutup", callback_data: "g:x" }],
+  ]];
+}
+
+async function findOrgs(q: string): Promise<OrgHit[]> {
+  const t = fold(q);
+  const [registry, unlinked] = await Promise.all([getOrganizations(), getUnlinkedOrgs()]);
+  const hits: { hit: OrgHit; n: number }[] = [];
+  for (const o of registry) {
+    const names = [o.name, o.short_name ?? "", ...o.aliases].map(fold).filter(Boolean);
+    const n = names.includes(t) ? 100 : names.some((x) => x.startsWith(t)) ? 80 : names.some((x) => x.includes(t)) ? 60 : 0;
+    if (n) hits.push({ hit: { kind: "r", org: o }, n: n + Math.min(o.figures, 30) / 100 });
+  }
+  for (const u of unlinked) {
+    const x = fold(u.org);
+    const n = x === t ? 90 : x.includes(t) ? 50 : 0;
+    if (n) hits.push({ hit: { kind: "u", name: u.org, figures: u.figures }, n: n + Math.min(u.figures, 30) / 100 });
+  }
+  return hits.sort((a, b) => b.n - a.n).slice(0, FOUND).map((h) => h.hit);
+}
+
+/** A list of organisations to open, as a new /organisasi message. */
+async function orgList(s: State, head: string, hits: OrgHit[], typed = ""): Promise<void> {
+  if (s.org.msg) await drop(s.org.msg);
+  s.org = { found: hits.map((h) => (h.kind === "r" ? `r${h.org.id}` : `u${h.name}`)) };
+  const list = hits.map((h, i) => h.kind === "r"
+    ? `<b>${i + 1}.</b> ${esc(h.org.name)}${h.org.short_name ? ` · ${esc(h.org.short_name)}` : ""} · ${h.org.figures} tokoh`
+    : `<b>${i + 1}.</b> ${esc(h.name)} · ${h.figures} tokoh · <i>belum terdaftar</i>`).join("\n");
+  const rows: Keyboard = hits.map((h, i) => [{ text: clip(`${i + 1}. ${h.kind === "r" ? h.org.short_name || h.org.name : h.name}`, 30), callback_data: `g:o:${i}` }]);
+  if (typed && !hits.some((h) => fold(h.kind === "r" ? h.org.name : h.name) === fold(typed))) {
+    s.org.draft = typed;
+    rows.push([{ text: clip(`➕ Daftarkan “${typed}”`, 32), callback_data: "g:new" }]);
+  }
+  rows.push([{ text: "🔎 Cari organisasi", callback_data: "g:q" }, { text: "Tutup", callback_data: "g:x" }]);
+  s.org.msg = await send(hits.length ? `${head}\n${list}` : `${head}\n<i>tidak ada</i>`, rows);
+}
+
+/** /organisasi [nama]: a search, or the names offices use most that no organisation matches. */
+async function organisasiCommand(s: State, q: string): Promise<void> {
+  if (q) return orgList(s, `<b>🏢 Organisasi “${esc(q)}”</b>`, await findOrgs(q), q.slice(0, 200));
+  const unlinked = (await getUnlinkedOrgs()).slice(0, FOUND);
+  await orgList(s, "<b>🏢 Belum terdaftar, paling banyak dipakai</b> <i>(cari: /organisasi nama)</i>",
+    unlinked.map((u) => ({ kind: "u", name: u.org, figures: u.figures })));
+}
+
+async function askOrg(s: State, mode: NonNullable<State["org"]["mode"]>, msgId: number): Promise<void> {
+  const ask: Record<typeof mode, [string, string]> = {
+    name: ["Ketik nama lengkap organisasinya (mis. <i>Kementerian Perdagangan</i>).", "Nama lengkap"],
+    short: ["Ketik singkatannya (mis. <i>Kemendag</i>).", "Singkatan"],
+    alias: ["Ketik alias yang ditambahkan, dipisah titik koma (mis. <i>Kemendag RI; Kementerian Dagang</i>).", "Alias"],
+    add: ["Ketik <i>nama lengkap, singkatan</i> (singkatan boleh kosong), mis. <i>PT Pertamina (Persero), Pertamina</i>.", "Nama lengkap, singkatan"],
+    aliasOf: ["Ketik nama organisasi terdaftar yang dimaksud.", "Organisasi"],
+    search: ["Ketik nama organisasi yang dicari.", "Organisasi"],
+  };
+  s.org.mode = mode;
+  s.org.prompt = await send(ask[mode][0], undefined, {
+    reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
+    reply_markup: { force_reply: true, input_field_placeholder: ask[mode][1] },
+  });
+}
+
+/** Saves the organisation with one thing changed. */
+async function saveOrg(id: number, change: (o: { name: string; short: string | null; aliases: string[]; kind: string | null }) => void): Promise<void> {
+  const org = (await getOrganizations()).find((o) => o.id === id);
+  if (!org) throw new Error("Organisasi ini sudah tidak ada.");
+  const o = { name: org.name, short: org.short_name, aliases: [...org.aliases], kind: org.kind };
+  change(o);
+  await saveOrganization(id, o.name, o.short, o.aliases, o.kind);
+}
+
+const orgIdByName = async (name: string) => (await getOrganizations()).find((o) => orgKey(o.name) === orgKey(name))?.id;
+
+/** Registers a name, then shows its card. */
+async function addOrg(s: State, name: string, short: string | null, msgId: number): Promise<void> {
+  await saveOrganization(null, name, short, [], null);
+  const id = await orgIdByName(name);
+  if (!id) throw new Error("Organisasinya tidak tersimpan.");
+  await edit(msgId, ...(await orgCard(s, id, `➕ Didaftarkan. Pilih jenisnya dengan 📂 Jenis.`)));
+}
+
+async function onOrgReply(s: State, typed: string): Promise<void> {
+  const mode = s.org.mode;
+  s.org.mode = undefined;
+  const t = typed.replace(/\s+/g, " ").trim();
+  if (mode === "search") return organisasiCommand(s, t);
+  const msg = s.org.msg;
+  if (!msg) throw new Error("Kartu organisasinya sudah ditutup; buka lagi dengan /organisasi.");
+  if (mode === "add") {
+    const at = t.lastIndexOf(",");
+    const [name, short] = at < 0 ? [t, ""] : [t.slice(0, at).trim(), t.slice(at + 1).trim()];
+    if (name.length < 2) throw new Error("Tulis nama lengkapnya.");
+    const was = s.org.draft;
+    await addOrg(s, name, short || null, msg);
+    // The name offices used becomes an alias when it is neither of the two.
+    if (was && ![name, short].some((x) => x && orgKey(x) === orgKey(was)) && s.org.id) {
+      const id = s.org.id;
+      await saveOrg(id, (o) => o.aliases.push(was));
+      await edit(msg, ...(await orgCard(s, id, `➕ Didaftarkan; “${esc(was)}” jadi aliasnya. Pilih jenisnya dengan 📂 Jenis.`)));
+    }
+    return;
+  }
+  if (mode === "aliasOf") {
+    const hits = (await findOrgs(t)).filter((h): h is Extract<OrgHit, { kind: "r" }> => h.kind === "r").slice(0, 6);
+    s.org.picks = hits.map((h) => String(h.org.id));
+    const rows: Keyboard = hits.map((h, i) => [{ text: clip(`🏷 ${i + 1}. ${h.org.short_name || h.org.name}`, 30), callback_data: `g:alp:${i}` }]);
+    rows.push([{ text: "← Kembali", callback_data: "g:r" }]);
+    await edit(msg, hits.length
+      ? `<b>🏷 “${esc(s.org.draft ?? "")}” alias dari?</b> Hasil “${esc(t)}”:\n${hits.map((h, i) => `<b>${i + 1}.</b> ${esc(h.org.name)}${h.org.short_name ? ` · ${esc(h.org.short_name)}` : ""}`).join("\n")}`
+      : `<b>🏷 Tidak ada organisasi terdaftar yang cocok dengan “${esc(t)}”.</b>`, rows);
+    return;
+  }
+  const id = s.org.id;
+  if (!id) throw new Error("Pilih organisasinya lagi.");
+  if (mode === "name" || mode === "short") {
+    if (!t || t.length > (mode === "name" ? 200 : 60)) throw new Error("Terlalu panjang.");
+    await saveOrg(id, (o) => {
+      if (mode === "name") {
+        if (orgKey(o.name) !== orgKey(t) && !o.aliases.some((a) => orgKey(a) === orgKey(o.name))) o.aliases.push(o.name);
+        o.name = t;
+      } else o.short = t;
+    });
+    await edit(msg, ...(await orgCard(s, id, mode === "name" ? `✏️ Nama lengkap: <b>${esc(t)}</b>; nama lama jadi alias.` : `✏️ Singkatan: <b>${esc(t)}</b>.`)));
+  } else if (mode === "alias") {
+    const add = t.split(";").map((a) => a.trim()).filter(Boolean);
+    await saveOrg(id, (o) => {
+      for (const a of add) if (!o.aliases.some((x) => orgKey(x) === orgKey(a))) o.aliases.push(a);
+    });
+    await edit(msg, ...(await orgCard(s, id, `🏷 Alias ditambahkan: ${add.map(esc).join("; ")}.`)));
+  }
+}
+
+/** The 🏢 buttons ("g:…"); returns the note for the tap. */
+async function onOrg(s: State, action: string, arg: string | undefined, msgId: number): Promise<string> {
+  if (action === "x") {
+    await drop(msgId);
+    if (msgId === s.org.msg) s.org = {};
+    return "";
+  }
+  if (action === "q") {
+    s.org.msg = msgId;
+    await askOrg(s, "search", msgId);
+    return "";
+  }
+  if (msgId !== s.org.msg) throw new Error("Kartu ini sudah diganti; buka lagi dengan /organisasi.");
+  const i = Number(arg);
+  if (action === "o") {
+    const pick = s.org.found?.[i];
+    if (!pick) throw new Error("Daftar ini sudah kedaluwarsa; cari lagi.");
+    if (pick[0] === "r") await edit(msgId, ...(await orgCard(s, Number(pick.slice(1)))));
+    else {
+      const name = pick.slice(1);
+      const uses = (await getUnlinkedOrgs()).find((u) => u.org === name)?.figures ?? 0;
+      await edit(msgId, ...unlinkedCard(s, name, uses));
+    }
+    return "";
+  }
+  if (action === "new" || action === "add") {
+    const name = s.org.draft;
+    if (!name) throw new Error("Ketik namanya lagi.");
+    await addOrg(s, name, null, msgId);
+    return "Didaftarkan";
+  }
+  if (action === "addt" || action === "al") {
+    if (!s.org.draft) throw new Error("Pilih namanya lagi.");
+    await askOrg(s, action === "addt" ? "add" : "aliasOf", msgId);
+    return "";
+  }
+  if (action === "u") {
+    const name = s.org.draft;
+    if (!name) throw new Error("Pilih namanya lagi.");
+    const rows = await lquery<{ id: string }>(
+      `SELECT DISTINCT f.id FROM figures f, json_each(CASE WHEN json_valid(f.positions) THEN f.positions ELSE '[]' END) p
+        WHERE f.active AND lower(trim(json_extract(p.value, '$.org'))) = lower(trim(?)) LIMIT ${FOUND}`, [name]
+    );
+    const byId = new Map((await getFigureOptions()).map((f) => [f.id, f]));
+    await figureList(s, `<b>👤 Tokoh dengan jabatan di “${esc(name)}”</b>`, rows.map((r) => byId.get(r.id)).filter((f): f is FigureOption => Boolean(f)));
+    return "";
+  }
+  if (action === "alp") {
+    const id = Number(s.org.picks?.[i]);
+    const name = s.org.draft;
+    if (!id || !name) throw new Error("Pilihan ini sudah kedaluwarsa.");
+    await saveOrg(id, (o) => {
+      if (!o.aliases.some((a) => orgKey(a) === orgKey(name))) o.aliases.push(name);
+    });
+    await edit(msgId, ...(await orgCard(s, id, `🏷 “${esc(name)}” jadi alias organisasi ini.`)));
+    return "Disimpan";
+  }
+  if (action === "r") {
+    if (s.org.id) await edit(msgId, ...(await orgCard(s, s.org.id)));
+    else if (s.org.draft) {
+      const uses = (await getUnlinkedOrgs()).find((u) => u.org === s.org.draft)?.figures ?? 0;
+      await edit(msgId, ...unlinkedCard(s, s.org.draft, uses));
+    }
+    return "";
+  }
+  const id = s.org.id;
+  if (!id) throw new Error("Pilih organisasinya lagi.");
+  if (action === "n" || action === "s" || action === "a") {
+    await askOrg(s, action === "n" ? "name" : action === "s" ? "short" : "alias", msgId);
+    return "";
+  }
+  if (action === "sx" || action === "ax") {
+    await saveOrg(id, (o) => {
+      if (action === "sx") o.short = null;
+      else o.aliases.splice(i, 1);
+    });
+    await edit(msgId, ...(await orgCard(s, id, action === "sx" ? "✖ Singkatan dihapus." : "✖ Alias dihapus.")));
+    return "Disimpan";
+  }
+  if (action === "k") {
+    const kinds = Object.keys(ORG_KIND_LABEL);
+    const rows: Keyboard = [];
+    kinds.forEach((k, j) => {
+      if (j % 3 === 0) rows.push([]);
+      rows[rows.length - 1].push({ text: ORG_KIND_LABEL[k], callback_data: `g:kk:${j}` });
+    });
+    rows.push([{ text: "← Kembali", callback_data: "g:r" }]);
+    await edit(msgId, "<b>📂 Jenis organisasinya?</b>", rows);
+    return "";
+  }
+  if (action === "kk") {
+    const kind = Object.keys(ORG_KIND_LABEL)[i];
+    if (!kind) throw new Error("Jenis tidak dikenal.");
+    await saveOrg(id, (o) => {
+      o.kind = kind;
+    });
+    await edit(msgId, ...(await orgCard(s, id, `📂 Jenis: ${esc(ORG_KIND_LABEL[kind])}.`)));
+    return "Disimpan";
+  }
+  if (action === "d") {
+    const org = (await getOrganizations()).find((o) => o.id === id);
+    await edit(msgId, `<b>🗑 Hapus ${esc(org?.name ?? "organisasi ini")} dari daftar?</b>\nJabatan tokoh tidak berubah; nama itu hanya tidak lagi dikenali sebagai organisasi terdaftar.`,
+      [[{ text: "🗑 Ya, hapus", callback_data: "g:dy" }, { text: "← Batal", callback_data: "g:r" }]]);
+    return "";
+  }
+  if (action === "dy") {
+    const name = (await getOrganizations()).find((o) => o.id === id)?.name ?? "";
+    await deleteOrganization(id);
+    s.org = {};
+    await edit(msgId, `🗑 <b>${esc(name)}</b> dihapus dari daftar organisasi.`);
+    return "Dihapus";
+  }
+  throw new Error("Tombol tidak dikenal.");
+}
+
+// ---------------------------------------------------------------------------
 // Corrections: the right answer instead, saved as /kurasi's "koreksi".
 //
 // Peristiwa and lini list the events /kurasi offers, on the card itself; a
@@ -1048,6 +1679,19 @@ async function prompt(s: State, p: Point, msgId: number): Promise<void> {
 
 /** A typed reply: to a prompt, or straight to a card. */
 async function onReply(s: State, replyTo: number, text: string, own: number): Promise<boolean> {
+  if (replyTo === s.fig.prompt || replyTo === s.org.prompt) {
+    const fig = replyTo === s.fig.prompt;
+    if (fig) s.fig.prompt = undefined;
+    else s.org.prompt = undefined;
+    try {
+      await (fig ? onFigureReply(s, text) : onOrgReply(s, text));
+    } catch (e) {
+      await send(esc(e instanceof Error ? e.message : String(e)));
+    }
+    await drop(replyTo);
+    await drop(own);
+    return true;
+  }
   if (replyTo === s.cand.prompt || (replyTo === s.cand.msg && s.cand.mode)) {
     if (replyTo === s.cand.prompt) s.cand.prompt = undefined;
     try {
@@ -1101,15 +1745,16 @@ async function correctOffice(s: State, p: Point, card: number, typed: string): P
     await send("Tulis keduanya, dipisah koma: <i>jabatan, organisasi</i>. Balas kartunya lagi.");
     return;
   }
+  const match = await orgMatch(org);
   try {
-    await answerPoint(p.id, "koreksi", officeCorrection(role, org));
+    await answerPoint(p.id, "koreksi", officeCorrection(role, match.org));
   } catch (e) {
     await send(esc(e instanceof Error ? e.message : String(e)));
     return;
   }
   await forget(s, p.id);
   const done = (await getPoint(p.id))!;
-  await edit(card, await answeredText(done), [[{ text: "Batalkan", callback_data: `u:${p.id}` }]]);
+  await edit(card, `${await answeredText(done)}\n${match.note}`, [[{ text: "Batalkan", callback_data: `u:${p.id}` }]]);
 }
 
 /** A card is done: drop what it kept, and take its extra messages (📄 paragraphs) out of the chat. */
@@ -1146,6 +1791,16 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
     try {
       if (!msg) throw new Error("Pesan ini sudah tidak ada.");
       note = await onAuto(s, kind, idRaw ?? "", code, msg.message_id);
+    } catch (e) {
+      note = e instanceof Error ? e.message : String(e);
+    }
+    await tg("answerCallbackQuery", { callback_query_id: q.id, text: note.slice(0, 190) }).catch(() => {});
+    return;
+  }
+  if (kind === "f" || kind === "g") {
+    try {
+      if (!msg) throw new Error("Pesan ini sudah tidak ada.");
+      note = await (kind === "f" ? onFigure : onOrg)(s, idRaw ?? "", code, msg.message_id);
     } catch (e) {
       note = e instanceof Error ? e.message : String(e);
     }
@@ -1258,7 +1913,10 @@ async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<v
   const text = m.text ?? "";
   if (m.reply_to_message && !text.startsWith("/") && (await onReply(s, m.reply_to_message.message_id, text, m.message_id))) return;
   const cmd = text.trim().split(/[\s@]/)[0].toLowerCase();
+  const rest = text.trim().replace(/^\/\S+\s*/, "").trim();
   if (cmd === "/status") await send(await status());
+  else if (cmd === "/tokoh") await tokohCommand(s, rest);
+  else if (cmd === "/organisasi") await organisasiCommand(s, rest);
   else if (cmd === "/start" || cmd === "/lagi") await topUp(s);
   else if (cmd === "/otomatis") await send(...(await autoText()));
   else if (cmd === "/kandidat") {
@@ -1272,7 +1930,7 @@ async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<v
     } else {
       await showNextCandidate(s);
     }
-  } else await send("Perintah: /lagi (isi ulang kartu), /kandidat (kandidat tokoh), /otomatis (jawaban otomatis), /status (jumlah yang menunggu).");
+  } else await send("Perintah: /lagi (isi ulang kartu), /kandidat (kandidat tokoh), /otomatis (jawaban otomatis), /tokoh [nama] (ubah data tokoh), /organisasi [nama] (daftar organisasi), /status (jumlah yang menunggu).");
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -1304,6 +1962,10 @@ async function main(): Promise<void> {
   await tg("setMyCommands", {
     commands: [
       { command: "lagi", description: "Isi ulang kartu poin kurasi" },
+      { command: "kandidat", description: "Kandidat tokoh baru" },
+      { command: "otomatis", description: "Jawaban otomatis per jenis" },
+      { command: "tokoh", description: "Ubah data tokoh: /tokoh nama" },
+      { command: "organisasi", description: "Daftar organisasi: /organisasi nama" },
       { command: "status", description: "Jumlah poin terbuka per jenis" },
     ],
   }).catch(() => {});

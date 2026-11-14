@@ -1526,8 +1526,8 @@ export async function mergeFigure(fromId: string, intoId: string): Promise<void>
  * Retired and taken off every peristiwa; its records come down
  * (scripts/kurasi_ops.py not-a-person).
  */
-export async function removeNotAPerson(figureId: string): Promise<void> {
-  await pipelineOp("not-a-person", figureId);
+export async function removeNotAPerson(figureId: string): Promise<string> {
+  return pipelineOp("not-a-person", figureId);
 }
 
 /**
