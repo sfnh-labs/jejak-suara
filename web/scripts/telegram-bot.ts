@@ -1642,6 +1642,17 @@ async function draftText(r: DraftRow, note = ""): Promise<string> {
     if (!x) continue;
     lines.push("", `<b>${head}</b> · <i>${line(x)}</i>`, `<b>${esc(x.title ?? "")}</b>`, esc(clip(x.summary_text ?? "", 900)));
   }
+  // The articles the model was given, numbered as it cites them: by
+  // publication, as jejak/summarize.py draft_event reads them.
+  const articles = await lquery<{ source: string; url: string; title: string | null; published_at: string | null }>(
+    `SELECT source, url, title, published_at FROM articles WHERE event_id = ? ORDER BY published_at, id`, [r.event_id]
+  );
+  if (articles.length) {
+    const href = (u: string) => esc(u).replace(/"/g, "&quot;");
+    lines.push("", "<b>Sumber</b>", ...articles.slice(0, 8).map((a, i) =>
+      `[${i + 1}] <a href="${href(a.url)}">${esc(a.source)} · ${esc(clip(a.title ?? a.url, 80))}</a>${a.published_at ? ` · ${esc(day(a.published_at))}` : ""}`));
+    if (articles.length > 8) lines.push(`<i>…dan ${articles.length - 8} artikel lain.</i>`);
+  }
   if (note) lines.push("", note);
   return lines.filter((l, i) => l !== "" || i > 1).join("\n");
 }
