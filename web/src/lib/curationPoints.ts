@@ -36,6 +36,8 @@ export const KIND_LABEL: Record<PointKind, string> = {
 /** The auto-answer gate, as for auto-hide (jejak/curation_points.py). */
 export const AUTO_MIN_ANSWERS = 25;
 export const AUTO_MIN_AGREEMENT = 0.95;
+/** One point in this many stays open as a spot check (SPOT_CHECK_EVERY there). */
+export const SPOT_CHECK_EVERY = 20;
 const PRIOR = 1;
 
 export function isPointAnswer(value: unknown): value is PointAnswer {
@@ -268,6 +270,25 @@ export async function getNextOpenPointOn(eventId: number, kinds: PointKind[], ex
         ORDER BY k.key, -p.group_size, p.id
         LIMIT 1`,
       [JSON.stringify(kinds), eventId, exclude]
+    ),
+    calibration(),
+  ]);
+  return row ? toPoint(row, cal) : null;
+}
+
+/**
+ * The latest answer auto-answering gave and the curator has not looked at
+ * from the bot (`exclude`), for checking it there: Salah or let it stand.
+ */
+export async function getNextAutoAnswered(exclude: number[] = []): Promise<Point | null> {
+  if (!(await pointsReady())) return null;
+  const [row, cal] = await Promise.all([
+    queryOne<Row>(
+      `${POINT_SELECT}
+        WHERE p.status = 'auto' AND p.id NOT IN (SELECT value FROM json_each(?))
+        ORDER BY p.answered_at DESC, p.id DESC
+        LIMIT 1`,
+      [exclude]
     ),
     calibration(),
   ]);
