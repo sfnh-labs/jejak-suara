@@ -40,6 +40,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 from . import actors, offices
+from . import quotes as quotes_mod
 from .cluster import _tokens
 from .config import load_figures
 from .quotes import _terms, apply_lessons, lesson_scope, norm_speaker
@@ -588,6 +589,49 @@ def open_checks(conn: sqlite3.Connection, event_id: int) -> int:
               _quote_evidence(conn, {**dict(quotes[0]), "speaker": written}), group_size=len(quotes))
     conn.commit()
     return sum(w.stats.values())
+
+
+def open_doubtful_speakers(conn: sqlite3.Connection) -> dict[str, int]:
+    """Open a check for the quotes given a speaker on a bare first or last name
+    that quotes.match_speaker now turns down ("Siti" in an article that never
+    names Siti Hediati Hariyadi, "Kompol Joko Sembodo" as Joko Widodo). One
+    point per figure, speaker as written and lesson scope, so Ya teaches the
+    lesson for that spelling there; Bukan takes the quotes off the figure.
+    Answered points are left as they are."""
+    figures = {f.id: f for f in load_figures(conn)}
+    roster = quotes_mod._figure_terms(conn)
+    fits: dict[str, list] = {}
+    groups: dict[tuple[str, str, str], list] = defaultdict(list)
+    for q in conn.execute(
+        """SELECT q.id, q.event_id, q.article_id, q.quote, q.speaker, q.figure_id,
+                  e.figure_id AS owner, e.event_date, a.body
+             FROM event_quotes q JOIN events e ON e.id = q.event_id
+             LEFT JOIN articles a ON a.id = q.article_id
+            WHERE q.figure_id IS NOT NULL AND COALESCE(q.assigned_by, 'auto') = 'auto'
+              AND e.curated IS NOT 'rejected'"""
+    ).fetchall():
+        speaker = q["speaker"] or ""
+        if speaker not in fits:
+            fits[speaker] = [f for f in roster if quotes_mod._hit(speaker, f, None)]
+        if quotes_mod.match_speaker(speaker, fits[speaker], q["owner"], q["body"]) == q["figure_id"]:
+            continue
+        scope = lesson_scope(q["owner"], q["event_id"])
+        groups[(q["figure_id"], norm_speaker(speaker), scope)].append(q)
+    w = _Writer(conn)
+    for (fid, speaker, scope), qs in groups.items():
+        fig = figures.get(fid)
+        if fig is None:
+            continue
+        qs.sort(key=lambda q: (q["event_date"] or "", q["id"]), reverse=True)
+        written = qs[0]["speaker"] or fig.name
+        w.put("pembicara", f"cek:pembicara:ragu:{scope}:{fid}:{speaker}", qs[0]["event_id"],
+              {"speaker": written, "figure_id": fid, "name": fig.name, "candidates": [],
+               "quote_ids": sorted(q["id"] for q in qs), "events": len({q["event_id"] for q in qs}),
+               "scope": scope, "check": "pembicara",
+               "claim": f"“{written}” di sini adalah {fig.name}"},
+              None, "ragu · nama saja", _quote_evidence(conn, qs[0]), group_size=len(qs))
+    conn.commit()
+    return {"quotes": sum(len(v) for v in groups.values()), "points": sum(w.stats.values())}
 
 
 def run(conn: sqlite3.Connection) -> dict[str, int]:

@@ -20,6 +20,8 @@
                                              # figures whose first office names no linked one
     python -m jejak.cli points               # open questions per catatan for /kurasi to ask,
                                              # and auto-answers for the kinds switched on there
+    python -m jejak.cli doubtful-speakers    # checks for quotes given a speaker on a bare first
+                                             # or last name the matcher now turns down
     python -m jejak.cli timeline <figure_id> # approved, publishable events
 
 Taking an event off the public site is not done here — that is `/kurasi` in the
@@ -121,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                            "(same as JEJAK_AUTO_HIDE=1)")
     sub.add_parser("curation-report")
     sub.add_parser("points")
+    sub.add_parser("doubtful-speakers")
     # Curation upkeep: draft what /kurasi left undone, learn from the curator.
     sub.add_parser("kurasi")
     sub.add_parser("organizations")
@@ -244,6 +247,8 @@ def main(argv: list[str] | None = None) -> int:
             print("suggest:", res)
         if args.cmd == "points":
             print("points:", curation_points.run(conn))
+        if args.cmd == "doubtful-speakers":
+            print("doubtful-speakers:", curation_points.open_doubtful_speakers(conn))
         if args.cmd == "kurasi":
             from . import kurasi
             print("kurasi:", kurasi.run_stage(conn))
