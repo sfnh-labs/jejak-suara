@@ -141,6 +141,26 @@ def test_the_model_is_trimmed_and_must_be_stated_beside_the_name(conn, monkeypat
     assert tuple(row) == ("luthfi", "Gubernur", "Pemerintah Provinsi Jawa Tengah", "model, baru")
 
 
+def test_no_write_lock_is_held_while_the_model_thinks(conn, monkeypatch):
+    # A publish run's model calls take minutes; the bot and /kurasi write to
+    # the same db meanwhile, so each proposal is committed before the next call.
+    _figure(conn, "luthfi", "Ahmad Luthfi", "Gubernur Jawa Tengah")
+    _figure(conn, "koster", "Wayan Koster", "Gubernur Bali")
+    _event(conn, 1, "luthfi", "Gubernur Jawa Tengah Ahmad Luthfi menegaskan komitmen itu.")
+    _event(conn, 2, "koster", "Gubernur Bali Wayan Koster menegaskan komitmen itu.")
+    answers = {"Ahmad Luthfi": {"role": "Gubernur", "org": "Pemerintah Provinsi Jawa Tengah"},
+               "Wayan Koster": {"role": "Gubernur", "org": "Pemerintah Provinsi Bali"}}
+    held = []
+
+    def ask(name, *a):
+        held.append(conn.in_transaction)
+        return answers[name]
+
+    monkeypatch.setattr(offices, "ask_model", ask)
+    assert offices.propose(conn)["model"] == 2
+    assert held[1:] == [False]
+
+
 def test_a_figure_with_a_linked_office_is_not_asked(conn):
     dpr = organizations.index(conn)["dpr"]
     _figure(conn, "puan", "Puan Maharani", "Ketua DPR",

@@ -255,6 +255,9 @@ def _put(conn, figure_id: str, role: str, org: str, band: str, ev: dict | None,
         (figure_id, role, org, band, event_id, (ev or {}).get("article_id"),
          (ev or {}).get("paragraph"), (ev or {}).get("hl_start"), (ev or {}).get("hl_end"),
          model, _now()))
+    # Commit each proposal on its own: the write lock must not stay held
+    # through the model calls that follow, or the bot and /kurasi time out.
+    conn.commit()
     return cur.rowcount > 0
 
 
