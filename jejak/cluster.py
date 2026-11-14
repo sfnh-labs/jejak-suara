@@ -28,6 +28,13 @@ _STOP = {
     "the", "a", "an", "of", "to", "in", "on", "for", "and", "is", "are",
 }
 _TOKEN_RE = re.compile(r"[a-zA-ZÀ-ɏ]+")
+# Spoken filler in quotes: frequent in speech, rare in written news, so word
+# rarity would otherwise count it as what two articles have in common.
+_CASUAL = set("loh lho gitu gini nggak enggak gak kan kayak aja sih dong deh nih tuh "
+              "banget kamu kita kami saya dia mereka kok".split())
+_HTML_TAG = re.compile(r"<[^>]+>")
+# Outlet furniture inside a body: video plugs and read-also links.
+_BOILERPLATE = re.compile(r"^\s*(saksikan|lihat juga|baca juga|simak|advertisement|scroll to)", re.I)
 
 WINDOW_DAYS = 7
 # Records get a tighter window than peristiwa. A tracked figure acts most days,
@@ -71,6 +78,18 @@ PERISTIWA_MIN_SHARED = 4
 # real stories apart.
 PERISTIWA_MEDIAN_SIM = 0.58
 PERISTIWA_MIN_LEX = 0.09
+# Even so, one candidate chained Kapolri's message to his officers through
+# Megawati, Gibran's resignation and the Pahlawan Nasional awards: 53 articles,
+# each matching only the one article before it. Two things let it. Outlets
+# close a story with background on the week's big one ("Para tersangka... Irjen
+# Ahrie Sonta"), and those rare names matched unrelated articles; and matching
+# a single member is all a chain needs. So the word checks read only an
+# article's lead (title, teaser and the first PERISTIWA_LEAD_CHARS of the body,
+# without outlet boilerplate), and the word score has to hold against at least
+# PERISTIWA_LEX_QUORUM of the members. Replayed over Oct-Nov 2026, published
+# clusters of 15+ articles fell from 69 to 33, each reading as one story.
+PERISTIWA_LEAD_CHARS = 600
+PERISTIWA_LEX_QUORUM = 0.5
 # Unpromoted candidates older than this are deleted along with their articles,
 # which is what keeps bulk ingestion from growing the database without bound.
 CANDIDATE_TTL_DAYS = 14
@@ -147,6 +166,19 @@ def _text(article: dict | sqlite3.Row) -> str:
     return "\n".join(parts)
 
 
+def _lead(article: dict | sqlite3.Row) -> str:
+    """Title, teaser and the start of the body: what the article is about,
+    before the background paragraphs an outlet appends."""
+    body = "\n".join(line for line in (article["body"] or "").splitlines()
+                     if not _BOILERPLATE.match(line))
+    return "\n".join([article["title"], _HTML_TAG.sub(" ", article["summary"] or ""),
+                      body[:PERISTIWA_LEAD_CHARS]])
+
+
+def _lead_tokens(article: dict | sqlite3.Row) -> set[str]:
+    return _tokens(_lead(article)) - _CASUAL
+
+
 class _Idf:
     """Word rarity over the articles at hand, for comparing word sets."""
 
@@ -177,10 +209,10 @@ class _Open:
     mean: "np.ndarray"
     seed: "np.ndarray"
     toks: set[str]
-    # Each article's unit vector and words, for the peristiwa checks.
+    # Each article's unit vector and lead words, for the peristiwa checks.
     members: list[tuple["np.ndarray", set[str]]] = field(default_factory=list)
 
-    def add(self, vec, toks: set[str]) -> None:
+    def add(self, vec, toks: set[str], lead: set[str] | None = None) -> None:
         import numpy as np
 
         n = len(self.members)
@@ -188,7 +220,7 @@ class _Open:
         norm = float(np.linalg.norm(updated))
         self.mean = updated / norm if norm > 0 else updated
         self.toks |= toks
-        self.members.append((_unit(vec), toks))
+        self.members.append((_unit(vec), toks if lead is None else lead))
 
 
 def _unit(vec):
@@ -199,21 +231,26 @@ def _unit(vec):
     return v / norm if norm > 0 else v
 
 
-def _sits_with(ev: _Open, vec, toks: set[str], idf: _Idf) -> bool:
-    """A peristiwa article fits with the cluster's articles, not only its average."""
+def _sits_with(ev: _Open, vec, lead: set[str], idf: _Idf) -> bool:
+    """A peristiwa article fits with the cluster's articles, not only its average.
+
+    `lead` is the article's lead words (_lead_tokens), as the members hold theirs.
+    """
     import numpy as np
 
     sims = np.stack([m for m, _ in ev.members]) @ _unit(vec)
     if float(np.median(sims)) < PERISTIWA_MEDIAN_SIM:
         return False
     nearest = ev.members[int(np.argmax(sims))][1]
-    if len(toks & nearest) < PERISTIWA_MIN_SHARED:
+    if len(lead & nearest) < PERISTIWA_MIN_SHARED:
         return False
-    return max(idf.cosine(toks, t) for _, t in ev.members) >= PERISTIWA_MIN_LEX
+    close = sum(1 for _, t in ev.members if idf.cosine(lead, t) >= PERISTIWA_MIN_LEX)
+    return close >= max(1, math.ceil(PERISTIWA_LEX_QUORUM * len(ev.members)))
 
 
 def _best_event(open_events: list[_Open], vec, toks: set[str], when: datetime,
-                figure_id: str | None, window: timedelta, idf: _Idf) -> _Open | None:
+                figure_id: str | None, window: timedelta, idf: _Idf,
+                lead: set[str] | None = None) -> _Open | None:
     """The open event an article belongs to, or None for a new one."""
     is_general = figure_id is None
     threshold = PERISTIWA_THRESHOLD if is_general else THRESHOLD
@@ -240,7 +277,7 @@ def _best_event(open_events: list[_Open], vec, toks: set[str], when: datetime,
         # spanning every story of the week the figure was named in.
         if cosine_similarity(vec, ev.seed) < threshold:
             continue
-        if is_general and not _sits_with(ev, vec, toks, idf):
+        if is_general and not _sits_with(ev, vec, toks if lead is None else lead, idf):
             continue
         best, match = sim, ev
     return match
@@ -319,14 +356,15 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
             if first is None:
                 first = _Open(ev["id"], ev["figure_id"], _parse(ev["event_date"]),
                               _unit(vec), vec, set())
-            first.add(vec, _tokens(txt))
+            first.add(vec, _tokens(txt), _lead_tokens(a))
         open_events.append(first)
 
     texts = {art["id"]: _text(art) for art in rows}
     # Rarity among general news, which is what peristiwa are matched in: a
     # figure's beat words are common in their records and rare elsewhere.
+    leads = {art["id"]: _lead_tokens(art) for art in rows}
     idf = _Idf([t for ev in open_events if ev.figure_id is None for _, t in ev.members]
-               + [_tokens(texts[a["id"]]) for a in rows if a["figure_id"] is None])
+               + [leads[a["id"]] for a in rows if a["figure_id"] is None])
     for art in rows:
         txt = texts[art["id"]]
         vec = _embed_article(conn, art["id"], txt)
@@ -341,7 +379,8 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
         if join_only:
             window = peristiwa_window
 
-        hit = _best_event(open_events, vec, toks, when, art["figure_id"], window, idf)
+        hit = _best_event(open_events, vec, toks, when, art["figure_id"], window, idf,
+                          leads[art["id"]])
         match_id = hit.event_id if hit else None
 
         if match_id is None and join_only:
@@ -372,11 +411,11 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
             )
             match_id = cur.lastrowid
             fresh = _Open(match_id, art["figure_id"], when, _unit(vec), vec, set())
-            fresh.add(vec, toks)
+            fresh.add(vec, toks, leads[art["id"]])
             open_events.append(fresh)
             stats["new_events"] += 1
         else:
-            hit.add(vec, toks)
+            hit.add(vec, toks, leads[art["id"]])
             # Re-infer event_type from all article texts in the event
             art_texts = [a["body"] or a["title"] for a in conn.execute(
                 "SELECT title, body FROM articles WHERE event_id = ?", (match_id,)
@@ -622,7 +661,9 @@ def recluster_peristiwa(conn: sqlite3.Connection, since: str, apply: bool = Fals
 
     Without `apply` nothing is written: the counts say what it would do.
     """
-    statuses = ("candidate", "new", "summarized", "approved")
+    # Expired too: a repair leaves its under-corroborated pieces expired, and a
+    # later repair under better rules has to be able to regroup them.
+    statuses = ("candidate", "new", "summarized", "approved", "expired")
     marks = ",".join("?" * len(statuses))
     old_events = {r["id"]: r for r in conn.execute(
         f"""SELECT id, status, curated FROM events
@@ -637,7 +678,8 @@ def recluster_peristiwa(conn: sqlite3.Connection, since: str, apply: bool = Fals
              ORDER BY published_at, id""").fetchall()
     texts = {a["id"]: _text(a) for a in arts}
     toks = {a["id"]: _tokens(texts[a["id"]]) for a in arts}
-    idf = _Idf(toks.values())
+    leads = {a["id"]: _lead_tokens(a) for a in arts}
+    idf = _Idf(leads.values())
     window = timedelta(days=WINDOW_DAYS)
 
     clusters: list[_Open] = []
@@ -645,12 +687,12 @@ def recluster_peristiwa(conn: sqlite3.Connection, since: str, apply: bool = Fals
     for a in arts:
         vec = _embed_article(conn, a["id"], texts[a["id"]])
         when = _parse(a["published_at"])
-        hit = _best_event(clusters, vec, toks[a["id"]], when, None, window, idf)
+        hit = _best_event(clusters, vec, toks[a["id"]], when, None, window, idf, leads[a["id"]])
         if hit is None:
             hit = _Open(len(clusters), None, when, _unit(vec), vec, set())
             clusters.append(hit)
             members.append([])
-        hit.add(vec, toks[a["id"]])
+        hit.add(vec, toks[a["id"]], leads[a["id"]])
         members[hit.event_id].append(a)
 
     # Ids go to the biggest clusters first, each to the event most of its
@@ -665,7 +707,7 @@ def recluster_peristiwa(conn: sqlite3.Connection, since: str, apply: bool = Fals
     outlets = [len({a["source"] for a in m}) for m in members]
     stats = {
         "events": len(old_events),
-        "published_before": sum(1 for e in old_events.values() if e["status"] != "candidate"),
+        "published_before": sum(1 for e in old_events.values() if e["status"] not in ("candidate", "expired")),
         "clusters": len(clusters),
         "published_after": sum(1 for n in outlets if n >= PERISTIWA_MIN_OUTLETS),
         "kept": len(taken),
@@ -713,6 +755,10 @@ def recluster_peristiwa(conn: sqlite3.Connection, since: str, apply: bool = Fals
             ended = _parse(m[-1]["published_at"]) < datetime.now(timezone.utc) - window
             conn.execute("UPDATE events SET status = ?, impact = NULL WHERE id = ?",
                          ("expired" if ended else "candidate", eid))
+        else:
+            # Corroborated now: promote_peristiwa below publishes it.
+            conn.execute("UPDATE events SET status = 'candidate' WHERE id = ? AND status = 'expired'",
+                         (eid,))
         conn.execute("DELETE FROM event_figures WHERE event_id = ?", (eid,))
         conn.execute("DELETE FROM record_links WHERE peristiwa_id = ? AND verdict IS NULL", (eid,))
     for eid in gone:
