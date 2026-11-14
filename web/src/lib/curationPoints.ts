@@ -252,6 +252,41 @@ export async function getNextOpenPoint(kind: PointKind, exclude: number[] = []):
 }
 
 /**
+ * The next open point on one catatan, of the kinds given, in their order
+ * (then the one settling most first), for the bot to finish a catatan before
+ * moving on. Those in `exclude` are left out.
+ */
+export async function getNextOpenPointOn(eventId: number, kinds: PointKind[], exclude: number[] = []): Promise<Point | null> {
+  if (!(await pointsReady())) return null;
+  const [row, cal] = await Promise.all([
+    queryOne<Row>(
+      `${POINT_SELECT}
+        LEFT JOIN events e ON e.id = p.event_id
+        JOIN json_each(?) k ON k.value = p.kind
+        WHERE p.event_id = ? AND p.status = 'open' AND p.id NOT IN (SELECT value FROM json_each(?))
+          AND e.curated IS NOT 'rejected'
+        ORDER BY k.key, -p.group_size, p.id
+        LIMIT 1`,
+      [JSON.stringify(kinds), eventId, exclude]
+    ),
+    calibration(),
+  ]);
+  return row ? toPoint(row, cal) : null;
+}
+
+/** How many points of the kinds given are open on one catatan, leaving out those in `exclude`. */
+export async function countOpenPointsOn(eventId: number, kinds: PointKind[], exclude: number[] = []): Promise<number> {
+  if (!(await pointsReady())) return 0;
+  const row = await queryOne<{ n: number }>(
+    `SELECT count(*) AS n FROM curation_points
+      WHERE event_id = ? AND status = 'open' AND kind IN (SELECT value FROM json_each(?))
+        AND id NOT IN (SELECT value FROM json_each(?))`,
+    [eventId, JSON.stringify(kinds), exclude]
+  );
+  return row?.n ?? 0;
+}
+
+/**
  * The catatan's automatic decisions not yet open as points: quotes given a
  * speaker, one per figure and speaker as written — what open_checks would open.
  */
