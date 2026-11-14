@@ -414,6 +414,29 @@ def test_open_checks_turns_automatic_speakers_into_points(conn):
     assert conn.execute("SELECT count(*) FROM curation_points WHERE key LIKE 'cek:%'").fetchone()[0] == 2
 
 
+def test_quotes_on_a_bare_first_name_the_matcher_turns_down_become_checks(conn):
+    # "Budi" in an article that never names Budi Gunadi Sadikin; a fine "Amran"
+    # (an alias) and an article that does name Budi Prasetyo are left alone.
+    _event(conn, 1, "suyudi", "Pasar", 'Pedagang Budi Santoso hadir.\n"Harga naik," ujar Budi.')
+    _event(conn, 2, "suyudi", "Pasar lagi", 'Pedagang Budi Santoso lagi.\n"Harga turun," ujar Budi.')
+    _event(conn, 3, "suyudi", "KPK", 'Juru Bicara KPK Budi Prasetyo.\n"Kami periksa," ujar Budi.')
+    _quote(conn, 1, "Budi", "Harga naik,", "budi-a")
+    _quote(conn, 2, "Budi", "Harga turun,", "budi-a")
+    _quote(conn, 3, "Budi", "Kami periksa,", "budi-b")
+    _quote(conn, 3, "Amran", "Stok aman,", "amran")
+    _quote(conn, 1, "Budi", "Sudah,", "budi-a", by="curator")
+
+    assert cp.open_doubtful_speakers(conn) == {"quotes": 2, "points": 1}
+    (p,) = _points(conn, "pembicara").values()
+    prop = json.loads(p["proposal"])
+    assert (p["bucket"], p["group_size"], prop["figure_id"], prop["scope"], prop["events"]) == \
+        ("ragu · nama saja", 2, "budi-a", "suyudi", 2)
+    # A check: the run leaves it open, and opening again changes nothing.
+    cp.run(conn)
+    assert cp.open_doubtful_speakers(conn)["points"] == 1
+    assert conn.execute("SELECT status FROM curation_points WHERE id = ?", (p["id"],)).fetchone()[0] == "open"
+
+
 def test_an_office_alone_is_its_own_band(conn):
     fig = next(f for f in cp.load_figures(conn) if f.id == "budi-b")
     assert cp._check_band(fig, "Juru bicara KPK") == "otomatis · sebutan"
