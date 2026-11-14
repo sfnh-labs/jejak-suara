@@ -16,6 +16,7 @@
  */
 import { existsSync } from "node:fs";
 import { localDbPath, lquery, lqueryOne, lrun, pipelineOp } from "@/lib/localDb";
+import { getCandidate, getCandidateCounts, getCandidates, setCandidateVerdict, type CandidateRow } from "@/lib/candidates";
 import {
   assignQuote,
   figureTitle,
@@ -23,6 +24,7 @@ import {
   getFollowupCandidates,
   getItem,
   getRelated,
+  positionTitle,
   REASONS,
   reasonLabel,
   setRelated,
@@ -147,6 +149,18 @@ interface State {
   /** the figure just taken off its Terkait list, and "Ketik nama" prompts from it. */
   viewUndo: Record<string, { id: string; name: string }>;
   viewPrompts: Record<string, number>;
+  /** The kandidat card: its name and message, names skipped this round, what is
+   *  being asked (and its prompt), a typed new figure, choices, rejects to undo. */
+  cand: {
+    slug?: string;
+    msg?: number;
+    skip: string[];
+    mode?: "new" | "alias";
+    prompt?: number;
+    draft?: { name: string; role: string; org: string };
+    picks?: string[];
+    rejected: Record<string, string>;
+  };
 }
 
 async function loadState(): Promise<State> {
@@ -167,9 +181,14 @@ async function loadState(): Promise<State> {
       viewQuote: s.viewQuote && typeof s.viewQuote === "object" ? s.viewQuote : {},
       viewUndo: s.viewUndo && typeof s.viewUndo === "object" ? s.viewUndo : {},
       viewPrompts: s.viewPrompts && typeof s.viewPrompts === "object" ? s.viewPrompts : {},
+      cand: {
+        ...(s.cand && typeof s.cand === "object" ? s.cand : {}),
+        skip: Array.isArray(s.cand?.skip) ? s.cand.skip : [],
+        rejected: s.cand?.rejected && typeof s.cand.rejected === "object" ? s.cand.rejected : {},
+      },
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {} };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, cand: { skip: [], rejected: {} } };
   }
 }
 
@@ -594,6 +613,197 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
 }
 
 // ---------------------------------------------------------------------------
+// Kandidat tokoh (/kandidat): names the media use often enough that are not
+// tracked yet, as /kurasi/kandidat lists them, most outlets first. One card at
+// a time; each decision brings the next. They are not points: a decision is
+// carried out at once (lib/candidates), a new figure by the pipeline's own code.
+
+/** Undecided names, most outlets first, without the ones skipped this round. */
+async function nextCandidate(s: State): Promise<CandidateRow | null> {
+  const rows = await getCandidates("undecided", 300);
+  return rows.find((r) => !s.cand.skip.includes(r.slug)) ?? null;
+}
+
+/** A feed's context as plain text: RSS summaries carry <img …> markup, sometimes cut mid-tag. */
+function plain(t: string): string {
+  const decoded = t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  const untagged = decoded.replace(/<[^>]*>/g, " ");
+  const after = untagged.includes(">") ? untagged.slice(untagged.lastIndexOf(">") + 1) : untagged;
+  return after.replace(/\s+/g, " ").trim();
+}
+
+/** The kandidat card: the name, where the media use it, and tracked figures it may be. */
+async function candidateCard(s: State, c: CandidateRow, note = ""): Promise<[string, Keyboard]> {
+  const like = findFigures(await getFigureOptions(), c.name, null).slice(0, 2);
+  s.cand.picks = like.map((f) => f.id);
+  const lines = [
+    `<b>👤 KANDIDAT TOKOH</b> · ${c.outlets} media · ${c.mentions}× disebut`,
+    `<b>${esc(c.name)}</b>${c.role ? ` · <i>${esc(c.role)}</i>` : ""}`,
+  ];
+  // The same sentence comes from several articles: once is enough.
+  const seen = [...new Map(c.headlines.map((h) => [plain(h.context ?? h.title), h] as const)).entries()]
+    .filter(([t]) => t)
+    .slice(0, 3);
+  if (seen.length) {
+    lines.push("", ...seen.map(([t, h]) => `• ${esc(clip(t, 220))}${h.source ? ` — <i>${esc(h.source)}</i>` : ""}`));
+  }
+  if (c.records.length) {
+    lines.push("", "<b>Di catatan:</b>", ...c.records.slice(0, 3).map((r) => `• ${esc(clip(r.title, 90))}`));
+  }
+  if (like.length) {
+    lines.push("", "<b>Mungkin tokoh yang sudah ada:</b>", ...like.map((f, i) => `<b>${i + 1}.</b> ${esc(f.name)}${f.title ? ` – ${esc(f.title)}` : ""}`));
+  }
+  if (c.notes) lines.push("", `📝 ${esc(clip(c.notes, 300))}`);
+  if (note) lines.push("", note);
+  const rows: Keyboard = like.map((f, i) => [{ text: clip(`🔗 Ini ${i + 1}. ${f.name}`, 32), callback_data: `c:same:${i}` }]);
+  rows.push(
+    [{ text: "✅ Jadikan tokoh", callback_data: "c:new" }, { text: "🔗 Tokoh lain", callback_data: "c:alias" }],
+    [{ text: "❌ Bukan orang / tolak", callback_data: "c:no" }, { text: "⏭ Lewati", callback_data: "c:skip" }],
+  );
+  const url = c.headlines.find((h) => h.url && /^https?:\/\//.test(h.url))?.url;
+  if (url) rows.push([{ text: "📰 Baca berita", url }]);
+  return [lines.join("\n"), rows];
+}
+
+/** The current card's name, re-read: it may have been decided in /kurasi meanwhile. */
+async function currentCandidate(s: State): Promise<CandidateRow> {
+  const c = s.cand.slug ? await getCandidate(s.cand.slug) : null;
+  if (!c) throw new Error("Kandidat ini sudah tidak ada; /kandidat untuk yang berikutnya.");
+  return c;
+}
+
+/** Send the next undecided name's card, or say there is none. */
+async function showNextCandidate(s: State): Promise<void> {
+  const c = await nextCandidate(s);
+  s.cand.mode = undefined;
+  s.cand.draft = undefined;
+  s.cand.picks = undefined;
+  if (!c) {
+    s.cand.slug = undefined;
+    s.cand.msg = undefined;
+    await send(s.cand.skip.length ? "Tidak ada kandidat lagi selain yang dilewati. /kandidat ulang untuk melihatnya lagi." : "Tidak ada kandidat tokoh yang menunggu.");
+    s.cand.skip = [];
+    return;
+  }
+  s.cand.slug = c.slug;
+  s.cand.msg = await send(...(await candidateCard(s, c)));
+}
+
+/**
+ * The card again, with what is being asked or what just happened under it:
+ * its own buttons, or `rows` of a list to pick from, whose `picks` they point into.
+ */
+async function redrawCandidate(s: State, c: CandidateRow, note = "", rows?: Keyboard, picks?: string[]): Promise<void> {
+  const [text, own] = await candidateCard(s, c, note);
+  if (rows) s.cand.picks = picks ?? [];
+  await edit(s.cand.msg!, text, rows ?? own);
+}
+
+async function askCandidate(s: State, mode: "new" | "alias", c: CandidateRow): Promise<void> {
+  s.cand.mode = mode;
+  const ask = mode === "new"
+    ? `Ketik nama lengkap, jabatan dan organisasinya, dipisah koma: <i>Nama Lengkap, jabatan, organisasi</i> (mis. <i>${esc(c.name)}, Wakil Kepala, Badan Gizi Nasional</i>). Jabatan dan organisasi boleh kosong.`
+    : `Ketik nama tokoh yang sudah dilacak; “${esc(c.name)}” jadi salah satu nama lainnya.`;
+  const id = await send(ask, undefined, {
+    reply_parameters: { message_id: s.cand.msg!, allow_sending_without_reply: true },
+    reply_markup: { force_reply: true, input_field_placeholder: mode === "new" ? "Nama Lengkap, jabatan, organisasi" : "Nama tokoh" },
+  });
+  s.cand.prompt = id;
+}
+
+/** A reply to a kandidat prompt: the new figure to confirm, or figures to pick from. */
+async function onCandidateReply(s: State, typed: string): Promise<void> {
+  const c = await currentCandidate(s);
+  if (s.cand.mode === "new") {
+    const [rawName, rawRole = "", ...rest] = typed.split(",");
+    const draft = { name: rawName.trim().slice(0, 200), role: rawRole.trim().slice(0, 300), org: rest.join(",").trim().slice(0, 300) };
+    if (draft.name.length < 3) throw new Error("Namanya terlalu pendek.");
+    s.cand.draft = draft;
+    // Someone tracked already under that name: say so before a duplicate is made.
+    const like = findFigures(await getFigureOptions(), draft.name, null).slice(0, 3);
+    const lines = [
+      `<b>➕ Tokoh baru:</b> ${[draft.name, draft.role, draft.org].filter(Boolean).map(esc).join(" – ")}`,
+      ...(fold(draft.name) !== fold(c.name) ? [`Nama lain: ${esc(c.name)}`] : []),
+    ];
+    if (like.length) {
+      lines.push("", "<b>⚠️ Mirip tokoh yang sudah ada:</b>", ...like.map((f, i) => `<b>${i + 1}.</b> ${esc(f.name)}${f.title ? ` – ${esc(f.title)}` : ""}`));
+    }
+    const rows: Keyboard = [[{ text: "✅ Buat tokoh ini", callback_data: "c:make" }]];
+    like.forEach((f, i) => rows.push([{ text: clip(`🔗 Sama dengan ${i + 1}. ${f.name}`, 32), callback_data: `c:same:${i}` }]));
+    rows.push([{ text: "✏️ Ketik ulang", callback_data: "c:new" }, { text: "← Kembali", callback_data: "c:back" }]);
+    await redrawCandidate(s, c, lines.join("\n"), rows, like.map((f) => f.id));
+    return;
+  }
+  const found = findFigures(await getFigureOptions(), typed.trim().slice(0, 200), null);
+  const rows: Keyboard = found.map((f, i) => [{ text: clip(`${i + 1}. ${f.name}`, 30), callback_data: `c:same:${i}` }]);
+  rows.push([{ text: "🔎 Cari lagi", callback_data: "c:alias" }, { text: "← Kembali", callback_data: "c:back" }]);
+  await redrawCandidate(s, c, found.length
+    ? `<b>🔗 Hasil “${esc(typed)}”:</b>\n${found.map((f, i) => `<b>${i + 1}.</b> ${esc(f.name)}${f.title ? ` – ${esc(f.title)}` : ""}`).join("\n")}`
+    : `<b>🔗 Tidak ada tokoh yang cocok dengan “${esc(typed)}”.</b>`, rows, found.map((f) => f.id));
+}
+
+/** The kandidat buttons ("c:…"); returns the note for the tap. */
+async function onCandidate(s: State, action: string, arg: string | undefined, msgId: number): Promise<string> {
+  if (msgId !== s.cand.msg) throw new Error("Kartu kandidat ini sudah lewat; /kandidat untuk yang berikutnya.");
+  if (action === "undo") throw new Error("Batalkan dari kartu yang sudah dijawab.");
+  const c = await currentCandidate(s);
+  const decided = async (text: string, undo = false) => {
+    await edit(msgId, `${text}\n<i>${esc(c.name)}</i>`, undo ? [[{ text: "Batalkan", callback_data: "cu" }]] : []);
+    if (undo) s.cand.rejected[String(msgId)] = c.slug;
+    await showNextCandidate(s);
+  };
+  switch (action) {
+    case "back":
+      s.cand.mode = s.cand.draft = s.cand.picks = undefined;
+      await redrawCandidate(s, c);
+      return "";
+    case "new":
+    case "alias":
+      await askCandidate(s, action, c);
+      return "";
+    case "skip":
+      s.cand.skip.push(c.slug);
+      await edit(msgId, `<b>⏭ Dilewati</b>\n<i>${esc(c.name)}</i>`);
+      await showNextCandidate(s);
+      return "Dilewati";
+    case "no":
+      await setCandidateVerdict(c.slug, "reject");
+      await decided("<b>❌ Ditolak</b>", true);
+      return "Ditolak";
+    case "make": {
+      const d = s.cand.draft;
+      if (!d) throw new Error("Ketik namanya lagi.");
+      const positions = d.role || d.org ? [{ role: d.role, org: d.org, period: "" }] : [];
+      const extra = fold(d.name) !== fold(c.name) ? c.name : "";
+      await setCandidateVerdict(c.slug, "promote", d.name, extra, positions.length ? positionTitle(positions[0]) : "", "",
+        positions.length ? JSON.stringify(positions) : null);
+      await decided(`<b>✅ Tokoh baru:</b> ${[d.name, d.role, d.org].filter(Boolean).map(esc).join(" – ")}`);
+      return "Tokoh dibuat";
+    }
+    case "same": {
+      const fid = s.cand.picks?.[Number(arg)];
+      if (!fid) throw new Error("Pilihan ini sudah kedaluwarsa; ketik namanya lagi.");
+      const fig = (await getFigureOptions()).find((f) => f.id === fid);
+      await setCandidateVerdict(c.slug, "alias", null, null, null, fid, null);
+      await decided(`<b>🔗 Nama lain dari ${esc(fig?.name ?? fid)}</b>`);
+      return "Disimpan sebagai nama lain";
+    }
+    default:
+      throw new Error("Tombol tidak dikenal.");
+  }
+}
+
+/** "Batalkan" on a rejected name's card: back in the queue, and on a card again. */
+async function undoCandidateReject(s: State, msgId: number): Promise<string> {
+  const slug = s.cand.rejected[String(msgId)];
+  if (!slug) throw new Error("Penolakan ini tidak bisa dibatalkan dari sini; buka /kurasi/kandidat.");
+  await setCandidateVerdict(slug, null);
+  delete s.cand.rejected[String(msgId)];
+  await edit(msgId, "<b>↩ Penolakan dibatalkan</b>; namanya kembali ke antrean.");
+  return "Dibatalkan";
+}
+
+// ---------------------------------------------------------------------------
 // Corrections: the right answer instead, saved as /kurasi's "koreksi".
 //
 // Peristiwa and lini list the events /kurasi offers, on the card itself; a
@@ -735,6 +945,17 @@ async function prompt(s: State, p: Point, msgId: number): Promise<void> {
 
 /** A typed reply: to a prompt, or straight to a card. */
 async function onReply(s: State, replyTo: number, text: string, own: number): Promise<boolean> {
+  if (replyTo === s.cand.prompt || (replyTo === s.cand.msg && s.cand.mode)) {
+    if (replyTo === s.cand.prompt) s.cand.prompt = undefined;
+    try {
+      await onCandidateReply(s, text);
+    } catch (e) {
+      await send(e instanceof Error ? e.message : String(e));
+    }
+    if (replyTo !== s.cand.msg) await drop(replyTo);
+    await drop(own);
+    return true;
+  }
   const viewOf = s.viewPrompts[replyTo];
   if (viewOf) {
     delete s.viewPrompts[replyTo];
@@ -805,11 +1026,12 @@ async function forget(s: State, pointId: number): Promise<void> {
 }
 
 async function status(): Promise<string> {
-  const stats = await getKindStats();
-  if (!stats) return "Belum ada poin kurasi di jejak.db.";
+  const [stats, cand] = await Promise.all([getKindStats(), getCandidateCounts()]);
+  const kandidat = `Kandidat tokoh: ${cand.undecided} · /kandidat`;
+  if (!stats) return `Belum ada poin kurasi di jejak.db.\n${kandidat}`;
   return ["<b>Poin terbuka</b>", ...stats.map((k) =>
     `${esc(KIND_LABEL[k.kind])}: ${k.open}${k.overall.value === null ? "" : ` · yakin ${Math.round(k.overall.value * 100)}%`}${k.auto ? " · otomatis" : ""}`
-  )].join("\n");
+  ), "", kandidat].join("\n");
 }
 
 async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): Promise<void> {
@@ -817,6 +1039,16 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
   const [kind, idRaw, code] = (q.data ?? "").split(":");
   const id = Number(idRaw);
   let note = "";
+  if (kind === "c" || kind === "cu") {
+    try {
+      if (!msg) throw new Error("Kartu ini sudah tidak ada.");
+      note = kind === "cu" ? await undoCandidateReject(s, msg.message_id) : await onCandidate(s, idRaw, code, msg.message_id);
+    } catch (e) {
+      note = e instanceof Error ? e.message : String(e);
+    }
+    await tg("answerCallbackQuery", { callback_query_id: q.id, text: note.slice(0, 190) }).catch(() => {});
+    return;
+  }
   if (kind?.startsWith("v")) {
     // The 📋 view: its own message, so a failure leaves the card as it is.
     try {
@@ -915,7 +1147,18 @@ async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<v
   const cmd = text.trim().split(/[\s@]/)[0].toLowerCase();
   if (cmd === "/status") await send(await status());
   else if (cmd === "/start" || cmd === "/lagi") await topUp(s);
-  else await send("Perintah: /lagi (isi ulang kartu), /status (jumlah poin terbuka).");
+  else if (cmd === "/kandidat") {
+    // The open card again at the bottom of the chat, or the next name.
+    if (s.cand.msg) await drop(s.cand.msg);
+    s.cand.msg = undefined;
+    const c = s.cand.slug ? await getCandidate(s.cand.slug) : null;
+    if (c && c.verdict === null) {
+      s.cand.mode = s.cand.draft = s.cand.picks = undefined;
+      s.cand.msg = await send(...(await candidateCard(s, c)));
+    } else {
+      await showNextCandidate(s);
+    }
+  } else await send("Perintah: /lagi (isi ulang kartu), /kandidat (kandidat tokoh), /status (jumlah yang menunggu).");
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

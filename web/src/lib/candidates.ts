@@ -149,6 +149,18 @@ export async function getCandidates(
   }));
 }
 
+/** One name of the queue, whatever its verdict; null if there is no such row. */
+export async function getCandidate(slug: string): Promise<CandidateRow | null> {
+  const [r] = await query<RawRow>(
+    `SELECT slug, name, outlets, mentions, role, headlines,
+            records, verdict, full_name, aliases, curated_role, curated_slug,
+            decided_at, applied_at, notes
+       FROM candidate_review WHERE slug = ?`,
+    [slug]
+  );
+  return r ? { ...r, headlines: parseHeadlines(r.headlines), records: parseRecords(r.records) } : null;
+}
+
 export async function getCandidateCounts(): Promise<Record<CandidateFilter, number>> {
   const [row] = await query<Record<string, string>>(
     `SELECT count(*) FILTER (WHERE verdict IS NULL)      AS undecided,
