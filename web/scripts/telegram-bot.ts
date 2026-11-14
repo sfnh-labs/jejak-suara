@@ -14,11 +14,16 @@
  *   npm run telegram-bot      (from web/, with web/.env.local holding
  *                              JEJAK_DB, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
  */
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { localDbPath, lquery, lqueryOne, lrun, pipelineOp } from "@/lib/localDb";
 import { getCandidate, getCandidateCounts, getCandidates, setCandidateVerdict, type CandidateRow } from "@/lib/candidates";
 import {
+  acceptRework,
   assignQuote,
+  discardRework,
+  requestRework,
+  type ReworkSnapshot,
   canonicalOrg,
   deleteOrganization,
   figureTitle,
@@ -198,6 +203,13 @@ interface State {
     oldName?: string;
     target?: string;
   };
+  /** Rework drafts sent as cards (request -> message), and "✍️" note prompts (prompt -> point). */
+  drafts: Record<string, number>;
+  reworkPrompts: Record<string, number>;
+  /** "Pindah ke tokoh lain" name prompts (prompt -> point). */
+  reworkWho: Record<string, number>;
+  /** How far publish_local.log has been read, and the run being read. */
+  publish: { at?: number; started?: string; trouble: string[] };
   /** The /organisasi card likewise; `draft` is a name not registered yet. */
   org: {
     msg?: number;
@@ -236,9 +248,17 @@ async function loadState(): Promise<State> {
       autoSeen: Array.isArray(s.autoSeen) ? s.autoSeen.filter(Number.isInteger) : [],
       fig: s.fig && typeof s.fig === "object" ? s.fig : {},
       org: s.org && typeof s.org === "object" ? s.org : {},
+      drafts: s.drafts && typeof s.drafts === "object" ? s.drafts : {},
+      reworkPrompts: s.reworkPrompts && typeof s.reworkPrompts === "object" ? s.reworkPrompts : {},
+      reworkWho: s.reworkWho && typeof s.reworkWho === "object" ? s.reworkWho : {},
+      publish: {
+        at: Number.isInteger(s.publish?.at) ? s.publish!.at : undefined,
+        started: typeof s.publish?.started === "string" ? s.publish.started : undefined,
+        trouble: Array.isArray(s.publish?.trouble) ? s.publish!.trouble : [],
+      },
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, cand: { skip: [], rejected: {} }, autoSeen: [], fig: {}, org: {} };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, cand: { skip: [], rejected: {} }, autoSeen: [], fig: {}, org: {}, drafts: {}, reworkPrompts: {}, reworkWho: {}, publish: { trouble: [] } };
   }
 }
 
@@ -550,7 +570,8 @@ async function showView(s: State, p: Point, note = ""): Promise<void> {
   if (back) rows.push([{ text: `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }]);
   const unchecked = await getUncheckedCount(p.event_id);
   if (unchecked) rows.push([{ text: `🔍 Cek ${unchecked} keputusan otomatis`, callback_data: `vc:${p.id}` }]);
-  rows.push([{ text: "👤 Ubah data tokoh", callback_data: `vf:${p.id}` }, { text: "Tutup", callback_data: `vx:${p.id}` }]);
+  rows.push([{ text: "👤 Ubah data tokoh", callback_data: `vf:${p.id}` }, { text: "✍️ Tulis ulang", callback_data: `vw:${p.id}` }]);
+  rows.push([{ text: "Tutup", callback_data: `vx:${p.id}` }]);
   const at = s.view[p.id];
   if (at) {
     await edit(at, v.text, rows);
@@ -626,6 +647,40 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
     s.viewUndo[p.id] = { id: fid, name };
     await showView(s, p, `✖ ${esc(name)} dihapus dari Terkait.`);
     return "Dihapus dari Terkait";
+  }
+  if (kind === "vw") {
+    await showReworkMenu(s, p);
+    return "";
+  }
+  if (kind === "vwn") {
+    const id = await send("Tulis apa yang salah dan bagaimana seharusnya, untuk model yang menulis ulang.", undefined, {
+      reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
+      reply_markup: { force_reply: true, input_field_placeholder: "Catatan untuk model" },
+    });
+    s.reworkPrompts[id] = p.id;
+    return "";
+  }
+  if (kind === "vwf") {
+    const id = await send("Ketik nama tokoh yang seharusnya punya catatan ini.", undefined, {
+      reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
+      reply_markup: { force_reply: true, input_field_placeholder: "Nama tokoh" },
+    });
+    s.reworkWho[id] = p.id;
+    return "";
+  }
+  if (kind === "vwp") {
+    const to = s.picks[`w${p.id}`]?.[Number(code)];
+    if (!to) throw new Error("Pilihan ini sudah kedaluwarsa; ketik namanya lagi.");
+    const name = (await getFigureOptions()).find((f) => f.id === to)?.name ?? to;
+    await askRework(p.event_id, null, null, to);
+    delete s.picks[`w${p.id}`];
+    await showView(s, p, `✍️ Diminta ditulis ulang sebagai catatan ${esc(name)}; drafnya datang di sini.`);
+    return "Diminta";
+  }
+  if (kind === "vwa") {
+    await askRework(p.event_id, null, "about");
+    await showView(s, p, "✍️ Diminta ditulis ulang sebagai liputan tentang tokohnya; drafnya datang di sini.");
+    return "Diminta";
   }
   if (kind === "vf") {
     const item = await getItem(p.event_id);
@@ -1538,6 +1593,193 @@ async function onOrg(s: State, action: string, arg: string | undefined, msgId: n
 }
 
 // ---------------------------------------------------------------------------
+// Tulis ulang: a catatan written again by the local model, asked for from the
+// 📋 view (a note on what is wrong, or "about the figure, not by them"), and
+// every draft that is ready — asked for here, in /kurasi or by the pipeline —
+// sent as a card to take or throw away, as /kurasi's rework panel does.
+
+const FRAMING_LABEL: Record<string, string> = { own: "perbuatan tokoh sendiri", about: "liputan tentang tokoh, bukan pelaku" };
+
+interface DraftRow {
+  id: number;
+  event_id: number;
+  note: string | null;
+  framing: string | null;
+  new_figure_id: string | null;
+  to_peristiwa: number;
+  status: string;
+  error: string | null;
+  before: string | null;
+  after: string | null;
+}
+
+const snap = (raw: string | null): ReworkSnapshot | null => {
+  try {
+    return raw ? (JSON.parse(raw) as ReworkSnapshot) : null;
+  } catch {
+    return null;
+  }
+};
+
+async function draftText(r: DraftRow, note = ""): Promise<string> {
+  const names = new Map((await getFigureOptions()).map((f) => [f.id, f.name]));
+  const who = (id: string | null) => (id ? names.get(id) ?? id : "");
+  const line = (x: ReworkSnapshot) => [
+    x.kind === "peristiwa" ? "Peristiwa" : `Catatan ${who(x.figure_id)}`.trim(),
+    x.kind === "record" ? FRAMING_LABEL[x.framing === "about" ? "about" : "own"] : null,
+    x.event_type,
+  ].filter(Boolean).map((t) => esc(String(t))).join(" · ");
+  const asked = [
+    r.note ? `“${esc(clip(r.note, 300))}”` : null,
+    r.framing ? `sudut pandang: ${esc(FRAMING_LABEL[r.framing] ?? r.framing)}` : null,
+    r.new_figure_id ? `pindah ke ${esc(who(r.new_figure_id))}` : null,
+    r.to_peristiwa ? "jadikan peristiwa" : null,
+  ].filter(Boolean).join(" · ");
+  const lines = [`<b>✍️ DRAF TULIS ULANG</b> · catatan #${r.event_id}`, asked ? `Diminta: ${asked}` : ""];
+  const [b, a] = [snap(r.before), snap(r.after)];
+  if (r.status === "failed") lines.push("", `❌ <b>Gagal:</b> ${esc(clip(r.error ?? "", 400))}${r.error?.includes("Ollama") ? "\nJalankan Ollama, lalu minta lagi." : ""}`);
+  for (const [head, x] of [["Sekarang", b], [r.status === "accepted" ? "Diterima" : "Draf baru", a]] as const) {
+    if (!x) continue;
+    lines.push("", `<b>${head}</b> · <i>${line(x)}</i>`, `<b>${esc(x.title ?? "")}</b>`, esc(clip(x.summary_text ?? "", 900)));
+  }
+  if (note) lines.push("", note);
+  return lines.filter((l, i) => l !== "" || i > 1).join("\n");
+}
+
+const draftKeyboard = (r: DraftRow): Keyboard => r.status === "ready"
+  ? [[{ text: "✅ Pakai draf ini", callback_data: `w:${r.id}:y` }, { text: "🗑 Buang", callback_data: `w:${r.id}:n` }]]
+  : r.status === "failed" ? [[{ text: "🗑 Hapus", callback_data: `w:${r.id}:n` }]] : [];
+
+const getDraft = (id: number) => lqueryOne<DraftRow>(
+  `SELECT id, event_id, note, framing, new_figure_id, to_peristiwa, status, error, before, after FROM rework_requests WHERE id = ?`, [id]
+);
+
+/** Drafts finished since the bot last looked, each as a card (once). */
+async function sendDrafts(s: State, all = false): Promise<number> {
+  const rows = await lquery<DraftRow>(
+    `SELECT id, event_id, note, framing, new_figure_id, to_peristiwa, status, error, before, after
+       FROM rework_requests WHERE status IN ('ready', 'failed') ORDER BY id`
+  ).catch(() => [] as DraftRow[]);
+  let n = 0;
+  for (const r of rows) {
+    if (s.drafts[r.id] && !all) continue;
+    if (s.drafts[r.id]) await drop(s.drafts[r.id]);
+    s.drafts[r.id] = await send(await draftText(r), draftKeyboard(r));
+    n++;
+  }
+  return n;
+}
+
+async function onDraft(s: State, id: number, code: string | undefined, msgId: number): Promise<string> {
+  const r = await getDraft(id);
+  if (!r) throw new Error("Draf ini sudah tidak ada.");
+  if (r.status !== "ready" && r.status !== "failed") {
+    await edit(msgId, await draftText(r, r.status === "accepted" ? "✅ Sudah dipakai." : "🗑 Sudah dibuang."));
+    throw new Error("Draf ini sudah diputuskan.");
+  }
+  if (code === "y") {
+    if (r.status !== "ready") throw new Error("Draf yang gagal tidak bisa dipakai.");
+    await acceptRework(id);
+    await edit(msgId, await draftText((await getDraft(id))!, "✅ Dipakai: catatannya sekarang seperti draf ini."));
+    return "Draf dipakai";
+  }
+  if (code === "n") {
+    await discardRework(id);
+    await edit(msgId, await draftText((await getDraft(id))!, "🗑 Dibuang; catatannya tetap seperti sekarang."));
+    return "Dibuang";
+  }
+  throw new Error("Tombol tidak dikenal.");
+}
+
+/** The view's ✍️ menu: what to ask the model for. */
+async function showReworkMenu(s: State, p: Point): Promise<void> {
+  const item = await getItem(p.event_id);
+  if (!item) throw new Error("Catatannya tidak ditemukan.");
+  const rows: Keyboard = [[{ text: "📝 Tulis catatan untuk model", callback_data: `vwn:${p.id}` }]];
+  if (item.kind === "record") {
+    rows.push([{ text: "🔄 Liputan tentang tokoh, bukan perbuatannya", callback_data: `vwa:${p.id}` }]);
+    rows.push([{ text: "👤 Pindah ke tokoh lain", callback_data: `vwf:${p.id}` }]);
+  }
+  rows.push([{ text: "← Kembali", callback_data: `v:${p.id}` }]);
+  await edit(s.view[p.id], [
+    "<b>✍️ Tulis ulang catatan ini?</b>",
+    `<i>${esc(item.title ?? "")}</i>`,
+    "",
+    "Model lokal menulis draf baru dengan permintaanmu, biasanya kurang dari semenit; drafnya datang di sini untuk dipakai atau dibuang. Sampai itu catatannya tidak berubah.",
+  ].join("\n"), rows);
+}
+
+async function askRework(eventId: number, note: string | null, framing: "about" | null, newFigureId: string | null = null): Promise<void> {
+  await requestRework(eventId, { note, framing, newFigureId, toPeristiwa: false });
+}
+
+/** The figures a name typed for "pindah ke" matched, on the view. */
+async function showReworkFigures(s: State, p: Point, typed: string): Promise<void> {
+  const item = await getItem(p.event_id);
+  const found = findFigures(await getFigureOptions(), typed.trim().slice(0, 200), item?.figure_id).slice(0, 6);
+  s.picks[`w${p.id}`] = found.map((f) => f.id);
+  const rows: Keyboard = found.map((f, i) => [{ text: clip(`👤 ${i + 1}. ${f.name}`, 30), callback_data: `vwp:${p.id}:${i}` }]);
+  rows.push([{ text: "🔎 Cari lagi", callback_data: `vwf:${p.id}` }, { text: "← Kembali", callback_data: `vw:${p.id}` }]);
+  const list = found.map((f, i) => `<b>${i + 1}.</b> <b>${esc(f.name)}</b>${f.title ? ` – ${esc(f.title)}` : ""}`).join("\n");
+  await edit(s.view[p.id], found.length
+    ? `<b>👤 Catatan siapa ini?</b> Hasil “${esc(typed)}”:\n${list}\n\n<i>Model menulis ulang sebagai catatan tokoh itu; drafnya datang di sini.</i>`
+    : `<b>👤 Tidak ada tokoh yang cocok dengan “${esc(typed)}”.</b> Tokoh baru dibuat dari /kandidat atau kartu pembicara.`, rows);
+}
+
+// ---------------------------------------------------------------------------
+// Publish runs: scripts/publish_local.log read as it grows, and a message when
+// a run stops early or a stage fails, so a broken run is not found days later.
+
+const PUBLISH_LOG = process.env.PUBLISH_LOG ?? join(dirname(resolve(DB_FILE)), "scripts", "publish_local.log");
+// The run's own log lines (scripts/publish_local.sh log()) that mean trouble.
+const TROUBLE = /^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\] .*(failed|aborting|stopping it|stale lock)/i;
+
+async function watchPublish(s: State): Promise<void> {
+  let size: number;
+  try {
+    size = statSync(PUBLISH_LOG).size;
+  } catch {
+    return; // no log here (a copy of the db, another machine): nothing to watch
+  }
+  if (s.publish.at === undefined || size < s.publish.at) {
+    // First start, or the log was cut: from here on, not its history.
+    s.publish = { at: size, trouble: [] };
+    return;
+  }
+  if (size === s.publish.at) return;
+  const fd = openSync(PUBLISH_LOG, "r");
+  const buf = Buffer.alloc(Math.min(size - s.publish.at, 4_000_000));
+  readSync(fd, buf, 0, buf.length, s.publish.at);
+  closeSync(fd);
+  const chunk = buf.toString("utf8");
+  // Up to the last full line; the rest is read next time.
+  const end = chunk.lastIndexOf("\n");
+  if (end < 0) return;
+  s.publish.at += Buffer.byteLength(chunk.slice(0, end + 1));
+  for (const line of chunk.slice(0, end).split("\n")) {
+    if (line.includes("=== publish_local starting ===")) {
+      s.publish.trouble = [];
+      s.publish.started = line.slice(1, 20);
+    } else if (TROUBLE.test(line)) {
+      s.publish.trouble.push(line.replace(/^\[[^\]]*\]\s*/, ""));
+      if (/aborting/i.test(line)) {
+        await send(`⚠️ <b>Proses publikasi berhenti</b>${s.publish.started ? ` (mulai ${esc(s.publish.started)})` : ""}:\n${esc(clip(line, 300))}`);
+        s.publish.trouble = [];
+      }
+    } else if (line.includes("=== publish_local done ===")) {
+      if (s.publish.trouble.length) {
+        await send([
+          `⚠️ <b>Proses publikasi selesai dengan masalah</b>${s.publish.started ? ` (mulai ${esc(s.publish.started)})` : ""}:`,
+          ...s.publish.trouble.slice(0, 10).map((t) => `• ${esc(clip(t, 200))}`),
+          "<i>Rinciannya di scripts/publish_local.log.</i>",
+        ].join("\n"));
+      }
+      s.publish.trouble = [];
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Corrections: the right answer instead, saved as /kurasi's "koreksi".
 //
 // Peristiwa and lini list the events /kurasi offers, on the card itself; a
@@ -1703,6 +1945,34 @@ async function onReply(s: State, replyTo: number, text: string, own: number): Pr
     await drop(own);
     return true;
   }
+  const whoOf = s.reworkWho[replyTo];
+  if (whoOf) {
+    delete s.reworkWho[replyTo];
+    const p = await getPoint(whoOf);
+    if (p && s.view[p.id]) await showReworkFigures(s, p, text);
+    else await send("Catatannya sudah tidak dibuka; buka 📋 Catatan lagi.");
+    await drop(replyTo);
+    await drop(own);
+    return true;
+  }
+  const reworkOf = s.reworkPrompts[replyTo];
+  if (reworkOf) {
+    delete s.reworkPrompts[replyTo];
+    const p = await getPoint(reworkOf);
+    const note = text.trim().slice(0, 2000);
+    try {
+      if (!p || !note) throw new Error("Catatannya sudah tidak dibuka; buka 📋 Catatan lagi.");
+      await askRework(p.event_id, note, null);
+      if (s.view[p.id]) await showView(s, p, "✍️ Diminta ditulis ulang; drafnya datang di sini.");
+      else await send("✍️ Diminta ditulis ulang; drafnya datang di sini.");
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      await send(esc(/already running/.test(m) ? "Tulis ulang catatan ini masih berjalan; tunggu drafnya." : m));
+    }
+    await drop(replyTo);
+    await drop(own);
+    return true;
+  }
   const viewOf = s.viewPrompts[replyTo];
   if (viewOf) {
     delete s.viewPrompts[replyTo];
@@ -1775,7 +2045,8 @@ async function forget(s: State, pointId: number): Promise<void> {
 
 async function status(): Promise<string> {
   const [stats, cand] = await Promise.all([getKindStats(), getCandidateCounts()]);
-  const kandidat = `Kandidat tokoh: ${cand.undecided} · /kandidat`;
+  const drafts = await lqueryOne<{ n: number }>(`SELECT count(*) AS n FROM rework_requests WHERE status = 'ready'`).catch(() => null);
+  const kandidat = `Kandidat tokoh: ${cand.undecided} · /kandidat${drafts?.n ? `\nDraf tulis ulang: ${drafts.n} · /draf` : ""}`;
   if (!stats) return `Belum ada poin kurasi di jejak.db.\n${kandidat}`;
   return ["<b>Poin terbuka</b>", ...stats.map((k) =>
     `${esc(KIND_LABEL[k.kind])}: ${k.open}${k.overall.value === null ? "" : ` · yakin ${Math.round(k.overall.value * 100)}%`}${k.auto ? " · otomatis" : ""}`
@@ -1793,6 +2064,18 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
       note = await onAuto(s, kind, idRaw ?? "", code, msg.message_id);
     } catch (e) {
       note = e instanceof Error ? e.message : String(e);
+    }
+    await tg("answerCallbackQuery", { callback_query_id: q.id, text: note.slice(0, 190) }).catch(() => {});
+    return;
+  }
+  if (kind === "w") {
+    try {
+      if (!msg || !Number.isInteger(id)) throw new Error("Draf ini sudah tidak ada.");
+      note = await onDraft(s, id, code, msg.message_id);
+      delete s.drafts[id];
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      note = /already running|not ready/.test(m) ? "Draf ini belum bisa dipakai." : m;
     }
     await tg("answerCallbackQuery", { callback_query_id: q.id, text: note.slice(0, 190) }).catch(() => {});
     return;
@@ -1916,6 +2199,9 @@ async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<v
   const rest = text.trim().replace(/^\/\S+\s*/, "").trim();
   if (cmd === "/status") await send(await status());
   else if (cmd === "/tokoh") await tokohCommand(s, rest);
+  else if (cmd === "/draf") {
+    if (!(await sendDrafts(s, true))) await send("Tidak ada draf tulis ulang yang menunggu.");
+  }
   else if (cmd === "/organisasi") await organisasiCommand(s, rest);
   else if (cmd === "/start" || cmd === "/lagi") await topUp(s);
   else if (cmd === "/otomatis") await send(...(await autoText()));
@@ -1930,7 +2216,7 @@ async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<v
     } else {
       await showNextCandidate(s);
     }
-  } else await send("Perintah: /lagi (isi ulang kartu), /kandidat (kandidat tokoh), /otomatis (jawaban otomatis), /tokoh [nama] (ubah data tokoh), /organisasi [nama] (daftar organisasi), /status (jumlah yang menunggu).");
+  } else await send("Perintah: /lagi (isi ulang kartu), /kandidat (kandidat tokoh), /otomatis (jawaban otomatis), /tokoh [nama] (ubah data tokoh), /organisasi [nama] (daftar organisasi), /draf (draf tulis ulang), /status (jumlah yang menunggu).");
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -1966,6 +2252,7 @@ async function main(): Promise<void> {
       { command: "otomatis", description: "Jawaban otomatis per jenis" },
       { command: "tokoh", description: "Ubah data tokoh: /tokoh nama" },
       { command: "organisasi", description: "Daftar organisasi: /organisasi nama" },
+      { command: "draf", description: "Draf tulis ulang yang menunggu" },
       { command: "status", description: "Jumlah poin terbuka per jenis" },
     ],
   }).catch(() => {});
@@ -1975,6 +2262,7 @@ async function main(): Promise<void> {
     if (p?.status === "open") await edit(msg, await cardText(p), cardKeyboard(p)).catch(() => {});
   }
   await topUp(s);
+  await watchPublish(s);
   console.log(`telegram-bot: up, ${Object.keys(s.sent).length} cards open in chat ${CHAT}`);
   for (;;) {
     try {
@@ -1989,6 +2277,8 @@ async function main(): Promise<void> {
         else if (u.message?.text) await onMessage(s, u.message);
       }
       await topUp(s);
+      await sendDrafts(s);
+      await watchPublish(s);
     } catch (e) {
       // Offline, asleep, Telegram down, the db locked past its timeout: wait and go on.
       console.error(`telegram-bot: ${e instanceof Error ? e.message : e}`);
