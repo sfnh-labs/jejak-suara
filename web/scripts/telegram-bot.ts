@@ -1684,20 +1684,21 @@ async function sendDrafts(s: State, all = false): Promise<number> {
 async function onDraft(s: State, id: number, code: string | undefined, msgId: number): Promise<string> {
   const r = await getDraft(id);
   if (!r) throw new Error("Draf ini sudah tidak ada.");
+  // A decided draft leaves the chat; the tap's note says which way it went.
   if (r.status !== "ready" && r.status !== "failed") {
-    await edit(msgId, await draftText(r, r.status === "accepted" ? "✅ Sudah dipakai." : "🗑 Sudah dibuang."));
-    throw new Error("Draf ini sudah diputuskan.");
+    await drop(msgId);
+    return r.status === "accepted" ? "Draf ini sudah dipakai." : "Draf ini sudah dibuang.";
   }
   if (code === "y") {
     if (r.status !== "ready") throw new Error("Draf yang gagal tidak bisa dipakai.");
     await acceptRework(id);
-    await edit(msgId, await draftText((await getDraft(id))!, "✅ Dipakai: catatannya sekarang seperti draf ini."));
-    return "Draf dipakai";
+    await drop(msgId);
+    return "✅ Draf dipakai: catatannya sekarang seperti draf ini.";
   }
   if (code === "n") {
     await discardRework(id);
-    await edit(msgId, await draftText((await getDraft(id))!, "🗑 Dibuang; catatannya tetap seperti sekarang."));
-    return "Dibuang";
+    await drop(msgId);
+    return "🗑 Dibuang; catatannya tetap seperti sekarang.";
   }
   throw new Error("Tombol tidak dikenal.");
 }
