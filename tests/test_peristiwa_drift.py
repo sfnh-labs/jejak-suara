@@ -48,6 +48,31 @@ def test_sharing_words_but_far_from_most_articles_does_not():
     assert not _sits_with(_flood_cluster(), _vec(60), set(FLOOD), _idf())
 
 
+def test_sharing_words_with_one_member_only_does_not():
+    """How 26051 chained: each article matched just the article before it."""
+    ev = _flood_cluster()
+    ev.add(_vec(5), set(CABINET))          # the one stray member already in, and the nearest
+    assert not _sits_with(ev, _vec(5), set(CABINET), _idf())
+
+
+def test_the_lead_leaves_out_appended_background_and_boilerplate():
+    background = "Para tersangka ialah Irjen Ahrie Sonta dan Irjen Slamet Uliandi. " * 3
+    art = {
+        "title": "Megawati Tak Pegang Ponsel",
+        "summary": '<img src="https://akcdn.detik.net.id/visual/foto.jpeg" /> Megawati bercerita',
+        "body": "Megawati bercerita soal ponsel.\n" + "isi berita " * 80
+                + "\nSaksikan Live DetikSore\n" + background,
+    }
+    toks = cluster._lead_tokens(art)
+    assert {"megawati", "ponsel", "bercerita"} <= toks
+    assert not toks & {"sonta", "uliandi", "akcdn", "jpeg", "saksikan", "detiksore"}
+
+
+def test_casual_speech_is_not_shared_meaning():
+    art = {"title": "Relawan datang", "summary": "", "body": "Ya gitu loh, nggak apa-apa kan."}
+    assert not cluster._lead_tokens(art) & {"gitu", "loh", "nggak", "kan"}
+
+
 # ---------------------------------------------------------------------------
 # recluster_peristiwa
 
