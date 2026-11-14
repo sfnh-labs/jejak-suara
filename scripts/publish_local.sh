@@ -57,6 +57,8 @@ run_stage() {
     pkill -P "$watchdog" 2>/dev/null
     kill "$watchdog" 2>/dev/null
     wait "$watchdog" 2>/dev/null
+    # The Telegram bot watches this log and reports a run's failed stages.
+    [ "$rc" -ne 0 ] && log "stage $label failed (exit $rc)"
     return "$rc"
 }
 
