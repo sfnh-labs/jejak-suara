@@ -16,7 +16,21 @@
  */
 import { existsSync } from "node:fs";
 import { localDbPath, lquery, lqueryOne, lrun, pipelineOp } from "@/lib/localDb";
-import { getFigureOptions, getFollowupCandidates, getItem, REASONS, reasonLabel, type FigureOption, type ReasonCode } from "@/lib/curation";
+import {
+  assignQuote,
+  figureTitle,
+  getFigureOptions,
+  getFollowupCandidates,
+  getItem,
+  getRelated,
+  REASONS,
+  reasonLabel,
+  setRelated,
+  type FigureOption,
+  type QuoteRow,
+  type ReasonCode,
+  type Related,
+} from "@/lib/curation";
 import {
   answerPoint,
   getKindStats,
@@ -42,6 +56,8 @@ const CHAT = process.env.TELEGRAM_CHAT_ID ?? "";
 const BATCH = Math.max(1, Number(process.env.TELEGRAM_BATCH ?? 1) || 1);
 /** Optional: where /kurasi is reachable from the phone, for an "open" link. */
 const KURASI_URL = (process.env.KURASI_URL ?? "").replace(/\/$/, "");
+/** Telegram's Bot API, or a stand-in for trying the bot out locally. */
+const API = (process.env.TELEGRAM_API ?? "https://api.telegram.org").replace(/\/$/, "");
 const STATE_KEY = "telegram_bot";
 const POLL_SECONDS = 50;
 
@@ -71,7 +87,7 @@ interface Update {
 }
 
 async function tg<T = unknown>(method: string, body: object, timeoutMs = 30_000): Promise<T> {
-  const res = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, {
+  const res = await fetch(`${API}/bot${TOKEN}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -125,6 +141,12 @@ interface State {
   extras: Record<string, number[]>;
   /** Catatan taken down from a card (card's point -> takedown), for its Batalkan. */
   takedowns: Record<string, Takedown>;
+  /** A card's 📋 Catatan message (point -> message), the quote being put right there, */
+  view: Record<string, number>;
+  viewQuote: Record<string, number>;
+  /** the figure just taken off its Terkait list, and "Ketik nama" prompts from it. */
+  viewUndo: Record<string, { id: string; name: string }>;
+  viewPrompts: Record<string, number>;
 }
 
 async function loadState(): Promise<State> {
@@ -141,9 +163,13 @@ async function loadState(): Promise<State> {
       newFig: s.newFig && typeof s.newFig === "object" ? s.newFig : {},
       extras: s.extras && typeof s.extras === "object" ? s.extras : {},
       takedowns: s.takedowns && typeof s.takedowns === "object" ? s.takedowns : {},
+      view: s.view && typeof s.view === "object" ? s.view : {},
+      viewQuote: s.viewQuote && typeof s.viewQuote === "object" ? s.viewQuote : {},
+      viewUndo: s.viewUndo && typeof s.viewUndo === "object" ? s.viewUndo : {},
+      viewPrompts: s.viewPrompts && typeof s.viewPrompts === "object" ? s.viewPrompts : {},
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {} };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {} };
   }
 }
 
@@ -276,7 +302,7 @@ function cardKeyboard(p: Point): Keyboard {
     { text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` },
     { text: "⏭ Lewati", callback_data: a("lewati") },
   ]);
-  rows.push([{ text: "🗑 Tolak catatan", callback_data: `r:${p.id}:` }]);
+  rows.push([{ text: "📋 Catatan", callback_data: `v:${p.id}` }, { text: "🗑 Tolak catatan", callback_data: `r:${p.id}:` }]);
   // The article on its outlet's site, in Telegram's own browser.
   if (p.article_url && /^https?:\/\//.test(p.article_url)) {
     rows.push([{ text: `📰 Baca berita${p.source ? ` · ${clip(p.source, 28)}` : ""}`, url: p.article_url }]);
@@ -389,6 +415,182 @@ async function placeOn(s: State, p: Point): Promise<string> {
   // Points the pipeline opened on it meanwhile count too.
   s.record.total = Math.max(s.record.total, left);
   return s.record.total > 1 ? ` · poin ${s.record.total - left + 1}/${s.record.total}` : "";
+}
+
+// ---------------------------------------------------------------------------
+// The catatan behind a card (📋 Catatan): its summary, Terkait list and every
+// quote with whose words it is, sent beside the card and gone with it. A
+// quote's speaker and the Terkait list can be put right from there, as in
+// /kurasi; those are the curator's say at once, not answers to a point.
+
+const VIEW_QUOTES = 10;
+
+/** Who said a quote, as the view lists it. */
+function saidBy(q: QuoteRow): string {
+  const written = q.speaker ? `“${esc(clip(q.speaker, 60))}”` : "<i>tanpa nama</i>";
+  if (q.figure_id) return `${written} → <b>${esc(q.figure_name ?? q.figure_id)}</b>${q.assigned_by === "curator" ? " ✔" : ""}`;
+  return `${written} → ${q.assigned_by === "curator" ? "bukan tokoh yang dilacak ✔" : "❔ belum dikenali"}`;
+}
+
+async function viewText(p: Point, note = ""): Promise<{ text: string; quotes: QuoteRow[]; related: Related[] } | null> {
+  const item = await getItem(p.event_id);
+  if (!item) return null;
+  const related = item.kind === "record" ? await getRelated(item.event_id, item.figure_id) : [];
+  const quotes = item.quotes.slice(0, VIEW_QUOTES);
+  const lines = [
+    `<b>📋 CATATAN</b> · ${esc(day(item.event_date))}${item.curated === "rejected" ? " · ditolak" : ""}`,
+    `<i>${esc(item.title ?? `Catatan #${item.event_id}`)}</i>`,
+  ];
+  if (item.owner) lines.push(`Tokoh: <b>${esc(item.owner.name)}</b>${figureTitle(item.owner) ? ` – ${esc(figureTitle(item.owner))}` : ""}`);
+  if (item.summary) lines.push("", esc(clip(item.summary, 700)));
+  if (item.kind === "record") {
+    lines.push("", `<b>Terkait</b> (${related.length})`);
+    lines.push(related.length
+      ? related.map((r, i) => `${i + 1}. ${esc(r.name)}${figureTitle(r) ? ` – ${esc(clip(figureTitle(r), 60))}` : ""}${r.assigned_by === "curator" ? " ✔" : ""}`).join("\n")
+      : "<i>belum ada</i>");
+  }
+  lines.push("", `<b>Kutipan</b> (${item.quotes.length})`);
+  lines.push(quotes.length
+    ? quotes.map((q, i) => `<b>${i + 1}.</b> “${esc(clip(q.quote, 140))}”\n    ${saidBy(q)}`).join("\n")
+    : "<i>tidak ada</i>");
+  if (item.quotes.length > quotes.length) lines.push(`<i>…dan ${item.quotes.length - quotes.length} kutipan lain, di /kurasi.</i>`);
+  if (note) lines.push("", note);
+  return { text: lines.join("\n"), quotes, related };
+}
+
+/** Numbered buttons, four to a row. */
+function numbered(n: number, label: string, data: (i: number) => string): Keyboard {
+  const rows: Keyboard = [];
+  for (let i = 0; i < n; i++) {
+    if (i % 4 === 0) rows.push([]);
+    rows[rows.length - 1].push({ text: `${label} ${i + 1}`, callback_data: data(i) });
+  }
+  return rows;
+}
+
+/** Send the view, or redraw it in place; `note` says what just changed. */
+async function showView(s: State, p: Point, note = ""): Promise<void> {
+  const v = await viewText(p, note);
+  if (!v) throw new Error("Catatannya tidak ditemukan.");
+  s.picks[`v${p.id}`] = [...v.quotes.map((q) => `q${q.id}`), ...v.related.map((r) => `f${r.id}`)];
+  const rows: Keyboard = [
+    ...numbered(v.quotes.length, "🗣", (i) => `vq:${p.id}:${i}`),
+    ...numbered(v.related.length, "✖ Terkait", (i) => `vt:${p.id}:${i}`),
+  ];
+  const back = s.viewUndo[p.id];
+  if (back) rows.push([{ text: `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }]);
+  rows.push([{ text: "Tutup", callback_data: `vx:${p.id}` }]);
+  const at = s.view[p.id];
+  if (at) {
+    await edit(at, v.text, rows);
+    return;
+  }
+  const id = await send(v.text, rows, { reply_parameters: { message_id: s.sent[p.id] ?? 0, allow_sending_without_reply: true } });
+  s.view[p.id] = id;
+  (s.extras[p.id] ??= []).push(id);
+}
+
+/** The view's pick at `i`: a quote id or a Terkait figure id. */
+function viewPick(s: State, p: Point, i: number, kind: "q" | "f"): string {
+  const all = s.picks[`v${p.id}`] ?? [];
+  const of = all.filter((x) => x[0] === kind);
+  const pick = of[i];
+  if (!pick) throw new Error("Daftar ini sudah berubah; buka 📋 Catatan lagi.");
+  return pick.slice(1);
+}
+
+/** One quote's speaker to put right: the view with that quote's choices. */
+async function showQuoteFix(s: State, p: Point, quoteId: number): Promise<void> {
+  const item = await getItem(p.event_id);
+  const q = item?.quotes.find((x) => x.id === quoteId);
+  if (!q) throw new Error("Kutipan ini sudah tidak ada.");
+  s.viewQuote[p.id] = quoteId;
+  const rows: Keyboard = [];
+  if (q.figure_id && q.assigned_by !== "curator") rows.push([{ text: `✅ Benar, ${clip(q.figure_name ?? q.figure_id, 22)}`, callback_data: `vy:${p.id}` }]);
+  rows.push([{ text: "Bukan tokoh yang dilacak", callback_data: `vn:${p.id}` }]);
+  rows.push([{ text: "🔎 Ketik nama", callback_data: `vs:${p.id}` }, { text: "← Kembali", callback_data: `v:${p.id}` }]);
+  await edit(s.view[p.id], [
+    `<b>🗣 Siapa yang bicara?</b>`,
+    `<blockquote>“${esc(clip(q.quote, 400))}”</blockquote>`,
+    `Tertulis: ${saidBy(q)}`,
+  ].join("\n"), rows);
+}
+
+/** The figures a name typed for a quote matched, to pick from. */
+async function showQuoteFigures(s: State, p: Point, typed: string): Promise<void> {
+  const found = findFigures(await getFigureOptions(), typed.trim().slice(0, 200), null);
+  s.picks[`v${p.id}f`] = found.map((f) => f.id);
+  const rows: Keyboard = found.map((f, i) => [{ text: clip(`${i + 1}. ${f.name}`, 30), callback_data: `vp:${p.id}:${i}` }]);
+  rows.push([{ text: "🔎 Cari lagi", callback_data: `vs:${p.id}` }, { text: "← Kembali", callback_data: `v:${p.id}` }]);
+  const list = found.map((f, i) => `<b>${i + 1}.</b> <b>${esc(f.name)}</b>${f.title ? ` – ${esc(f.title)}` : ""}`).join("\n");
+  await edit(s.view[p.id], found.length
+    ? `<b>🗣 Hasil “${esc(typed)}”:</b>\n${list}`
+    : `<b>🗣 Tidak ada tokoh yang cocok dengan “${esc(typed)}”.</b> Cari lagi, atau Kembali. Tokoh baru dibuat dari /kurasi.`, rows);
+}
+
+/** The 📋 buttons (callback codes starting with "v"); returns the note for the tap. */
+async function onView(s: State, kind: string, p: Point, code: string | undefined, msgId: number): Promise<string> {
+  if (kind === "v") {
+    await showView(s, p);
+    return "";
+  }
+  // The tap came from the view itself: its message, even after a restart.
+  s.view[p.id] = msgId;
+  if (kind === "vx") {
+    await drop(msgId);
+    s.extras[p.id] = (s.extras[p.id] ?? []).filter((m) => m !== msgId);
+    delete s.view[p.id];
+    delete s.viewQuote[p.id];
+    delete s.viewUndo[p.id];
+    return "";
+  }
+  if (kind === "vq") {
+    await showQuoteFix(s, p, Number(viewPick(s, p, Number(code), "q")));
+    return "";
+  }
+  if (kind === "vt") {
+    const fid = viewPick(s, p, Number(code), "f");
+    const name = (await getRelated(p.event_id, null)).find((r) => r.id === fid)?.name ?? fid;
+    await setRelated(p.event_id, fid, false);
+    s.viewUndo[p.id] = { id: fid, name };
+    await showView(s, p, `✖ ${esc(name)} dihapus dari Terkait.`);
+    return "Dihapus dari Terkait";
+  }
+  if (kind === "vr") {
+    const back = s.viewUndo[p.id];
+    if (!back) throw new Error("Tidak ada yang bisa dikembalikan.");
+    await setRelated(p.event_id, back.id, true);
+    delete s.viewUndo[p.id];
+    await showView(s, p, `↩ ${esc(back.name)} kembali di Terkait.`);
+    return "Dikembalikan";
+  }
+  const quoteId = s.viewQuote[p.id];
+  if (!quoteId) throw new Error("Pilih kutipannya lagi.");
+  if (kind === "vs") {
+    const id = await send("Ketik nama tokoh yang bicara.", undefined, {
+      reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
+      reply_markup: { force_reply: true, input_field_placeholder: "Nama tokoh" },
+    });
+    s.viewPrompts[id] = p.id;
+    return "";
+  }
+  let to: string | null;
+  if (kind === "vy") {
+    to = (await getItem(p.event_id))?.quotes.find((q) => q.id === quoteId)?.figure_id ?? null;
+    if (!to) throw new Error("Kutipan ini belum punya pembicara.");
+  } else if (kind === "vn") {
+    to = null;
+  } else if (kind === "vp") {
+    to = s.picks[`v${p.id}f`]?.[Number(code)] ?? null;
+    if (!to) throw new Error("Pilihan ini sudah kedaluwarsa; ketik namanya lagi.");
+  } else {
+    throw new Error("Tombol tidak dikenal.");
+  }
+  await assignQuote(quoteId, to);
+  delete s.viewQuote[p.id];
+  delete s.picks[`v${p.id}f`];
+  await showView(s, p, "🗣 Pembicara disimpan.");
+  return "Pembicara disimpan";
 }
 
 // ---------------------------------------------------------------------------
@@ -533,6 +735,16 @@ async function prompt(s: State, p: Point, msgId: number): Promise<void> {
 
 /** A typed reply: to a prompt, or straight to a card. */
 async function onReply(s: State, replyTo: number, text: string, own: number): Promise<boolean> {
+  const viewOf = s.viewPrompts[replyTo];
+  if (viewOf) {
+    delete s.viewPrompts[replyTo];
+    const p = await getPoint(viewOf);
+    if (p && s.view[p.id] && s.viewQuote[p.id]) await showQuoteFigures(s, p, text);
+    else await send("Kutipannya sudah tidak dibuka; buka 📋 Catatan lagi.");
+    await drop(replyTo);
+    await drop(own);
+    return true;
+  }
   let pointId = s.prompts[replyTo];
   let promptId: number | null = pointId ? replyTo : null;
   if (!pointId) {
@@ -583,7 +795,13 @@ async function forget(s: State, pointId: number): Promise<void> {
   delete s.sent[pointId];
   delete s.picks[pointId];
   delete s.newFig[pointId];
+  delete s.picks[`v${pointId}`];
+  delete s.picks[`v${pointId}f`];
+  delete s.view[pointId];
+  delete s.viewQuote[pointId];
+  delete s.viewUndo[pointId];
   for (const [m, id] of Object.entries(s.prompts)) if (id === pointId) delete s.prompts[m];
+  for (const [m, id] of Object.entries(s.viewPrompts)) if (id === pointId) delete s.viewPrompts[m];
 }
 
 async function status(): Promise<string> {
@@ -599,6 +817,18 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
   const [kind, idRaw, code] = (q.data ?? "").split(":");
   const id = Number(idRaw);
   let note = "";
+  if (kind?.startsWith("v")) {
+    // The 📋 view: its own message, so a failure leaves the card as it is.
+    try {
+      const p = Number.isInteger(id) ? await getPoint(id) : null;
+      if (!p || !msg) throw new Error("Poin ini sudah tidak ada.");
+      note = await onView(s, kind, p, code, msg.message_id);
+    } catch (e) {
+      note = e instanceof Error ? e.message : String(e);
+    }
+    await tg("answerCallbackQuery", { callback_query_id: q.id, text: note.slice(0, 190) }).catch(() => {});
+    return;
+  }
   try {
     const p = Number.isInteger(id) ? await getPoint(id) : null;
     if (!p || !msg) throw new Error("Poin ini sudah tidak ada.");
