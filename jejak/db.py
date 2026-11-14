@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS events (
     -- public; 'approved' only means the summary has been written.
     -- 'expired' is a stale candidate kept only because its articles are
     -- evidence in figure_mentions (see cluster.prune_candidates).
-    status      TEXT NOT NULL DEFAULT 'new', -- candidate|new|summarized|approved|rejected|expired
+    -- 'dissolved' is a peristiwa a re-cluster left with no articles, kept for
+    -- the verdicts and links that point at it (cluster.recluster_peristiwa).
+    status      TEXT NOT NULL DEFAULT 'new', -- candidate|new|summarized|approved|rejected|expired|dissolved
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_figure ON events(figure_id);

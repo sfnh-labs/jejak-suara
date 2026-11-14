@@ -7,8 +7,11 @@ share concrete entities/topics beyond the tracked figure's name.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import sqlite3
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -51,6 +54,23 @@ PERISTIWA_MIN_OUTLETS = 3
 # from drifting. Hence a threshold close to the record one, plus that check.
 PERISTIWA_THRESHOLD = 0.60
 PERISTIWA_MIN_SHARED = 4
+# The seed check was not enough either. This model scores any two pieces of
+# Indonesian political news around 0.6, so a short, generic seed ("Dirut KAI
+# Menghadap Prabowo ke Istana") cleared it for half a week's politics, and the
+# shared-word check compared against every word the cluster had collected,
+# which a 30-article cluster passes for anything. One peristiwa held a KAI
+# meeting, hero awards, a wiretap hearing and Gibran's volunteers.
+#
+# So a peristiwa article also has to sit with the cluster's articles: its
+# median similarity to them at least PERISTIWA_MEDIAN_SIM, its words shared
+# with the article it is closest to, and enough rare words in common with
+# some member (PERISTIWA_MIN_LEX, cosine over IDF-weighted word sets).
+# Replayed over six weeks of general news (Oct–Nov 2026), loose clusters fell
+# from 105 of 365 published with 15+ articles to clusters that each read as
+# one story; 0.06 still let a 48-article Jakarta grab-bag form, 0.15 split
+# real stories apart.
+PERISTIWA_MEDIAN_SIM = 0.58
+PERISTIWA_MIN_LEX = 0.09
 # Unpromoted candidates older than this are deleted along with their articles,
 # which is what keeps bulk ingestion from growing the database without bound.
 CANDIDATE_TTL_DAYS = 14
@@ -127,6 +147,105 @@ def _text(article: dict | sqlite3.Row) -> str:
     return "\n".join(parts)
 
 
+class _Idf:
+    """Word rarity over the articles at hand, for comparing word sets."""
+
+    def __init__(self, token_sets) -> None:
+        self.df: Counter[str] = Counter()
+        self.n = 0
+        for toks in token_sets:
+            self.df.update(toks)
+            self.n += 1
+
+    def weight(self, w: str) -> float:
+        return math.log((self.n + 1) / (self.df.get(w, 0) + 1))
+
+    def norm(self, toks: set[str]) -> float:
+        return math.sqrt(sum(self.weight(w) ** 2 for w in toks)) or 1.0
+
+    def cosine(self, a: set[str], b: set[str]) -> float:
+        shared = sum(self.weight(w) ** 2 for w in a & b)
+        return shared / (self.norm(a) * self.norm(b)) if shared else 0.0
+
+
+@dataclass
+class _Open:
+    """An event open for matching, as cluster() holds it."""
+    event_id: int
+    figure_id: str | None
+    when: datetime
+    mean: "np.ndarray"
+    seed: "np.ndarray"
+    toks: set[str]
+    # Each article's unit vector and words, for the peristiwa checks.
+    members: list[tuple["np.ndarray", set[str]]] = field(default_factory=list)
+
+    def add(self, vec, toks: set[str]) -> None:
+        import numpy as np
+
+        n = len(self.members)
+        updated = (self.mean * n + vec) / (n + 1) if n else vec
+        norm = float(np.linalg.norm(updated))
+        self.mean = updated / norm if norm > 0 else updated
+        self.toks |= toks
+        self.members.append((_unit(vec), toks))
+
+
+def _unit(vec):
+    import numpy as np
+
+    v = np.asarray(vec, dtype=np.float32)
+    norm = float(np.linalg.norm(v))
+    return v / norm if norm > 0 else v
+
+
+def _sits_with(ev: _Open, vec, toks: set[str], idf: _Idf) -> bool:
+    """A peristiwa article fits with the cluster's articles, not only its average."""
+    import numpy as np
+
+    sims = np.stack([m for m, _ in ev.members]) @ _unit(vec)
+    if float(np.median(sims)) < PERISTIWA_MEDIAN_SIM:
+        return False
+    nearest = ev.members[int(np.argmax(sims))][1]
+    if len(toks & nearest) < PERISTIWA_MIN_SHARED:
+        return False
+    return max(idf.cosine(toks, t) for _, t in ev.members) >= PERISTIWA_MIN_LEX
+
+
+def _best_event(open_events: list[_Open], vec, toks: set[str], when: datetime,
+                figure_id: str | None, window: timedelta, idf: _Idf) -> _Open | None:
+    """The open event an article belongs to, or None for a new one."""
+    is_general = figure_id is None
+    threshold = PERISTIWA_THRESHOLD if is_general else THRESHOLD
+    min_shared = PERISTIWA_MIN_SHARED if is_general else MIN_SHARED
+    match, best = None, threshold
+    for ev in open_events:
+        if ev.figure_id != figure_id:
+            continue
+        if abs((when - ev.when).total_seconds()) > window.total_seconds():
+            continue
+        sim = cosine_similarity(vec, ev.mean)
+        if sim < best or len(toks & ev.toks) < min_shared:
+            continue
+        # Also require similarity to the cluster's first article. The mean
+        # widens with every merge, so matching on it alone lets a cluster
+        # drift: each loosely-related article pulls the centroid further out
+        # and admits the next one. The seed does not move.
+        #
+        # This was once applied to peristiwa only, on the reasoning that a
+        # record is already anchored by its figure. It is not: the figure
+        # only decides *whose* event it is, not which one, and a tracked
+        # figure appears in everything an outlet writes about the
+        # government. Left unguarded, one record grew to 131 articles
+        # spanning every story of the week the figure was named in.
+        if cosine_similarity(vec, ev.seed) < threshold:
+            continue
+        if is_general and not _sits_with(ev, vec, toks, idf):
+            continue
+        best, match = sim, ev
+    return match
+
+
 def _embed_article(conn: sqlite3.Connection, article_id: str, txt: str):
     """An article's embedding, from the local cache when its text is unchanged.
 
@@ -174,8 +293,7 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
     if not rows:
         return stats
 
-    # Cache: (event_id, figure_id, when, mean-embedding, seed-embedding, tokens)
-    open_events: list[tuple[int, str, datetime, np.ndarray, np.ndarray, set[str]]] = []
+    open_events: list[_Open] = []
     # 'approved' events are open for matching too. Coverage no longer arrives
     # in order: the archive backfill walks history backwards, so an article
     # about an event that was summarized last week can land today. Excluding
@@ -194,30 +312,28 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
         ).fetchall()
         if not arts:
             continue
-        all_toks: set[str] = set()
-        vecs = []
+        first = None
         for a in arts:
             txt = _text(a)
-            all_toks |= _tokens(txt)
-            vecs.append(_embed_article(conn, a["id"], txt))
-        mean_vec = sum(vecs[1:], vecs[0]) / len(vecs)
-        norm = float((mean_vec @ mean_vec) ** 0.5)
-        if norm > 0:
-            mean_vec = mean_vec / norm
-        open_events.append(
-            (ev["id"], ev["figure_id"], _parse(ev["event_date"]), mean_vec,
-             vecs[0], all_toks)
-        )
+            vec = _embed_article(conn, a["id"], txt)
+            if first is None:
+                first = _Open(ev["id"], ev["figure_id"], _parse(ev["event_date"]),
+                              _unit(vec), vec, set())
+            first.add(vec, _tokens(txt))
+        open_events.append(first)
 
+    texts = {art["id"]: _text(art) for art in rows}
+    # Rarity among general news, which is what peristiwa are matched in: a
+    # figure's beat words are common in their records and rare elsewhere.
+    idf = _Idf([t for ev in open_events if ev.figure_id is None for _, t in ev.members]
+               + [_tokens(texts[a["id"]]) for a in rows if a["figure_id"] is None])
     for art in rows:
-        txt = _text(art)
+        txt = texts[art["id"]]
         vec = _embed_article(conn, art["id"], txt)
         toks = _tokens(txt)
         when = _parse(art["published_at"])
 
         is_general = art["figure_id"] is None
-        threshold = PERISTIWA_THRESHOLD if is_general else THRESHOLD
-        min_shared = PERISTIWA_MIN_SHARED if is_general else MIN_SHARED
         window = peristiwa_window if is_general else record_window
         # A recalled statement (jejak/actors.py) is dated by the article that
         # recalls it, so the record it belongs to can be a few days older.
@@ -225,31 +341,8 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
         if join_only:
             window = peristiwa_window
 
-        match_id = None
-        best = threshold
-        for eid, fig, ewhen, ev_vec, seed_vec, ev_toks in open_events:
-            if fig != art["figure_id"]:
-                continue
-            if abs((when - ewhen).total_seconds()) > window.total_seconds():
-                continue
-            sim = cosine_similarity(vec, ev_vec)
-            shared = len(toks & ev_toks)
-            if sim < best or shared < min_shared:
-                continue
-            # Also require similarity to the cluster's first article. The mean
-            # widens with every merge, so matching on it alone lets a cluster
-            # drift: each loosely-related article pulls the centroid further out
-            # and admits the next one. The seed does not move.
-            #
-            # This was once applied to peristiwa only, on the reasoning that a
-            # record is already anchored by its figure. It is not: the figure
-            # only decides *whose* event it is, not which one, and a tracked
-            # figure appears in everything an outlet writes about the
-            # government. Left unguarded, one record grew to 131 articles
-            # spanning every story of the week the figure was named in.
-            if cosine_similarity(vec, seed_vec) < threshold:
-                continue
-            best, match_id = sim, eid
+        hit = _best_event(open_events, vec, toks, when, art["figure_id"], window, idf)
+        match_id = hit.event_id if hit else None
 
         if match_id is None and join_only:
             # Nothing of theirs to join: a new record would carry the wrong date.
@@ -278,36 +371,26 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
                  now_iso),
             )
             match_id = cur.lastrowid
-            open_events.append((match_id, art["figure_id"], when, vec, vec, toks))
+            fresh = _Open(match_id, art["figure_id"], when, _unit(vec), vec, set())
+            fresh.add(vec, toks)
+            open_events.append(fresh)
             stats["new_events"] += 1
         else:
-            for i, (eid, fig, ewhen, ev_vec, seed_vec, ev_toks) in enumerate(open_events):
-                if eid == match_id:
-                    n = conn.execute(
-                        "SELECT count(*) FROM articles WHERE event_id = ?",
-                        (eid,),
-                    ).fetchone()[0]
-                    updated = (ev_vec * n + vec) / (n + 1)
-                    norm = float((updated @ updated) ** 0.5)
-                    if norm > 0:
-                        updated = updated / norm
-                    open_events[i] = (eid, fig, ewhen, updated, seed_vec,
-                                      ev_toks | toks)
-                    # Re-infer event_type from all article texts in the event
-                    art_texts = [a["body"] or a["title"] for a in conn.execute(
-                        "SELECT title, body FROM articles WHERE event_id = ?", (eid,)
-                    ).fetchall()] + [txt]
-                    etype = _infer_event_type(art_texts)
-                    # event_date stays put — it is when the thing happened —
-                    # while last_seen follows the coverage, so an event that is
-                    # still being written about resurfaces on the timeline.
-                    conn.execute(
-                        "UPDATE events SET event_type = ?, "
-                        "last_seen = max(coalesce(last_seen, ''), ?) WHERE id = ?",
-                        (etype, art["published_at"] or now_iso, eid),
-                    )
-                    _reopen_if_summarized(conn, eid)
-                    break
+            hit.add(vec, toks)
+            # Re-infer event_type from all article texts in the event
+            art_texts = [a["body"] or a["title"] for a in conn.execute(
+                "SELECT title, body FROM articles WHERE event_id = ?", (match_id,)
+            ).fetchall()] + [txt]
+            etype = _infer_event_type(art_texts)
+            # event_date stays put — it is when the thing happened —
+            # while last_seen follows the coverage, so an event that is
+            # still being written about resurfaces on the timeline.
+            conn.execute(
+                "UPDATE events SET event_type = ?, "
+                "last_seen = max(coalesce(last_seen, ''), ?) WHERE id = ?",
+                (etype, art["published_at"] or now_iso, match_id),
+            )
+            _reopen_if_summarized(conn, match_id)
 
         conn.execute("UPDATE articles SET event_id = ? WHERE id = ?", (match_id, art["id"]))
         stats["clustered"] += 1
@@ -437,6 +520,15 @@ def promote_peristiwa(conn: sqlite3.Connection) -> dict[str, int]:
     return stats
 
 
+# What can point at an event besides its articles: (table, column).
+_EVENT_REFS = (
+    ("event_quotes", "event_id"), ("event_summaries", "event_id"), ("sentiment", "event_id"),
+    ("buzzer_signals", "event_id"), ("corrections", "event_id"), ("record_figures", "event_id"),
+    ("record_links", "peristiwa_id"), ("followup_links", "earlier_id"), ("followup_links", "later_id"),
+    ("curation_points", "event_id"), ("curation_labels", "event_id"),
+)
+
+
 def prune_candidates(conn: sqlite3.Connection) -> int:
     """Delete stale peristiwa candidates and the general articles under them.
 
@@ -458,6 +550,18 @@ def prune_candidates(conn: sqlite3.Connection) -> int:
     ).fetchall()]
     if not stale:
         return 0
+    # One that was published once (recluster_peristiwa puts those back to
+    # candidate) has quotes, points, links or a verdict pointing at it: it
+    # expires whole, articles and all, rather than being deleted from under them.
+    marks = ",".join("?" * len(stale))
+    used = " OR ".join(f"EXISTS (SELECT 1 FROM {t} x WHERE x.{c} = e.id)" for t, c in _EVENT_REFS)
+    kept = [r["id"] for r in conn.execute(
+        f"SELECT id FROM events e WHERE id IN ({marks}) AND (curated IS NOT NULL OR {used})", stale)]
+    conn.executemany("UPDATE events SET status = 'expired' WHERE id = ?", [(i,) for i in kept])
+    stale = [i for i in stale if i not in set(kept)]
+    if not stale:
+        conn.commit()
+        return len(kept)
     marks = ",".join("?" * len(stale))
     doomed = (f"SELECT id FROM articles WHERE event_id IN ({marks}) AND id NOT IN "
               "(SELECT article_id FROM figure_mentions)")
@@ -470,7 +574,156 @@ def prune_candidates(conn: sqlite3.Connection) -> int:
     conn.execute(f"DELETE FROM event_figures WHERE event_id IN ({empty})", stale)
     conn.execute(f"DELETE FROM events WHERE id IN ({empty})", stale)
     conn.commit()
-    return len(stale)
+    return len(stale) + len(kept)
+
+
+def _move_quotes(conn: sqlite3.Connection, article_id: str, event_id: int) -> None:
+    """An article's quotes follow it to `event_id`. Where the event already
+    holds the same words from another outlet, the two become one quote: the
+    curator's speaker and their rulings on whom it is about are kept, and the
+    duplicate goes (its open points are settled at the next points run)."""
+    for q in conn.execute(
+        "SELECT id, quote, speaker, figure_id, assigned_by FROM event_quotes "
+        "WHERE article_id = ? AND event_id <> ?", (article_id, event_id)).fetchall():
+        keep = conn.execute(
+            "SELECT id, assigned_by FROM event_quotes WHERE event_id = ? AND quote = ?",
+            (event_id, q["quote"])).fetchone()
+        if keep is None:
+            conn.execute("UPDATE event_quotes SET event_id = ? WHERE id = ?", (event_id, q["id"]))
+            continue
+        if q["assigned_by"] == "curator" and keep["assigned_by"] != "curator":
+            conn.execute(
+                "UPDATE event_quotes SET speaker = ?, figure_id = ?, assigned_by = 'curator' WHERE id = ?",
+                (q["speaker"], q["figure_id"], keep["id"]))
+        conn.execute(
+            """INSERT INTO quote_subjects (quote_id, figure_id, status, band, assigned_by, created_at)
+               SELECT ?, figure_id, status, band, assigned_by, created_at
+                 FROM quote_subjects WHERE quote_id = ? AND status <> 'auto'
+               ON CONFLICT (quote_id, figure_id) DO UPDATE
+                  SET status = excluded.status, assigned_by = excluded.assigned_by
+                WHERE quote_subjects.status = 'auto'""", (keep["id"], q["id"]))
+        conn.execute("DELETE FROM event_quotes WHERE id = ?", (q["id"],))
+
+
+def recluster_peristiwa(conn: sqlite3.Connection, since: str, apply: bool = False) -> dict:
+    """Cluster again, under the current rules, the general articles of the
+    peristiwa dated `since` or later: the repair for peristiwa that drifted
+    before _sits_with existed.
+
+    An event keeps its id where most of its articles stay together, so a
+    curator's verdict, its record links and its illustration stay with the
+    story they were about. A cluster that took no event's majority becomes a
+    new candidate; an event left with no articles is 'dissolved' — kept for
+    whatever still points at it, never published or matched again. Every
+    event whose articles changed is sent back through summarize, loses its
+    automatic related figures (promote_peristiwa finds them again) and its
+    unruled record-link proposals (link proposes again); fewer than
+    PERISTIWA_MIN_OUTLETS outlets puts it back to candidate.
+
+    Without `apply` nothing is written: the counts say what it would do.
+    """
+    statuses = ("candidate", "new", "summarized", "approved")
+    marks = ",".join("?" * len(statuses))
+    old_events = {r["id"]: r for r in conn.execute(
+        f"""SELECT id, status, curated FROM events
+             WHERE kind = 'peristiwa' AND event_date >= ? AND status IN ({marks})""",
+        (since, *statuses))}
+    if not old_events:
+        return {"events": 0}
+    ids = ",".join(str(i) for i in old_events)
+    arts = conn.execute(
+        f"""SELECT id, source, title, summary, body, published_at, event_id FROM articles
+             WHERE event_id IN ({ids}) AND figure_id IS NULL
+             ORDER BY published_at, id""").fetchall()
+    texts = {a["id"]: _text(a) for a in arts}
+    toks = {a["id"]: _tokens(texts[a["id"]]) for a in arts}
+    idf = _Idf(toks.values())
+    window = timedelta(days=WINDOW_DAYS)
+
+    clusters: list[_Open] = []
+    members: list[list[sqlite3.Row]] = []
+    for a in arts:
+        vec = _embed_article(conn, a["id"], texts[a["id"]])
+        when = _parse(a["published_at"])
+        hit = _best_event(clusters, vec, toks[a["id"]], when, None, window, idf)
+        if hit is None:
+            hit = _Open(len(clusters), None, when, _unit(vec), vec, set())
+            clusters.append(hit)
+            members.append([])
+        hit.add(vec, toks[a["id"]])
+        members[hit.event_id].append(a)
+
+    # Ids go to the biggest clusters first, each to the event most of its
+    # articles came from.
+    taken: dict[int, int] = {}
+    order = sorted(range(len(clusters)), key=lambda i: -len(members[i]))
+    for i in order:
+        for eid, _ in Counter(a["event_id"] for a in members[i]).most_common():
+            if eid not in taken.values():
+                taken[i] = eid
+                break
+    outlets = [len({a["source"] for a in m}) for m in members]
+    stats = {
+        "events": len(old_events),
+        "published_before": sum(1 for e in old_events.values() if e["status"] != "candidate"),
+        "clusters": len(clusters),
+        "published_after": sum(1 for n in outlets if n >= PERISTIWA_MIN_OUTLETS),
+        "kept": len(taken),
+        "new": len(clusters) - len(taken),
+        "dissolved": len(set(old_events) - set(taken.values())),
+        "articles": len(arts),
+        "moved": sum(1 for i, m in enumerate(members) for a in m if a["event_id"] != taken.get(i)),
+    }
+    # Changed: any article came from elsewhere, or any of the event's left.
+    held = Counter(a["event_id"] for a in arts)
+    changed = {i for i, m in enumerate(members)
+               if i not in taken or any(a["event_id"] != taken[i] for a in m)
+               or len(m) != held[taken[i]]}
+    stats["changed"] = len(changed)
+    gone = set(old_events) - set(taken.values())
+    stats["dissolved_curated"] = sum(1 for e in gone if old_events[e]["curated"])
+    stats["dissolved_confirmed_links"] = conn.execute(
+        f"SELECT count(*) FROM record_links WHERE verdict IS NOT NULL AND peristiwa_id IN ({','.join(map(str, gone)) or 'NULL'})"
+    ).fetchone()[0]
+    if not apply:
+        return stats
+
+    now = datetime.now(timezone.utc).isoformat()
+    for i in changed:
+        m = members[i]
+        if i in taken:
+            eid = taken[i]
+        else:
+            eid = conn.execute(
+                "INSERT INTO events (figure_id, kind, title, event_date, last_seen, event_type, "
+                "status, created_at) VALUES (NULL, 'peristiwa', ?, ?, ?, 'other', 'candidate', ?)",
+                (m[0]["title"], m[0]["published_at"] or now, m[-1]["published_at"] or now, now),
+            ).lastrowid
+        conn.executemany("UPDATE articles SET event_id = ? WHERE id = ?", [(eid, a["id"]) for a in m])
+        for a in m:
+            _move_quotes(conn, a["id"], eid)
+        _reopen_if_summarized(conn, eid)
+        conn.execute(
+            "UPDATE events SET event_date = ?, last_seen = ?, event_type = ? WHERE id = ?",
+            (m[0]["published_at"] or now, m[-1]["published_at"] or now,
+             _infer_event_type([a["body"] or a["title"] for a in m]), eid))
+        if outlets[i] < PERISTIWA_MIN_OUTLETS:
+            # Past the matching window it can gain no more outlets: expired,
+            # as prune_candidates would leave it, rather than a candidate.
+            ended = _parse(m[-1]["published_at"]) < datetime.now(timezone.utc) - window
+            conn.execute("UPDATE events SET status = ?, impact = NULL WHERE id = ?",
+                         ("expired" if ended else "candidate", eid))
+        conn.execute("DELETE FROM event_figures WHERE event_id = ?", (eid,))
+        conn.execute("DELETE FROM record_links WHERE peristiwa_id = ? AND verdict IS NULL", (eid,))
+    for eid in gone:
+        conn.execute("UPDATE events SET status = 'dissolved' WHERE id = ?", (eid,))
+        conn.execute("DELETE FROM event_summaries WHERE event_id = ?", (eid,))
+        conn.execute("DELETE FROM event_figures WHERE event_id = ?", (eid,))
+        conn.execute("DELETE FROM record_links WHERE peristiwa_id = ? AND verdict IS NULL", (eid,))
+    conn.commit()
+    stats.update(promote_peristiwa(conn))
+    stats["retitled"] = retitle_events(conn)
+    return stats
 
 
 def _parse(ts: str | None) -> datetime:
