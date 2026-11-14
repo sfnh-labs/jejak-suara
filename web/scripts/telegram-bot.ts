@@ -2277,8 +2277,11 @@ async function main(): Promise<void> {
         else if (u.message?.text) await onMessage(s, u.message);
       }
       await topUp(s);
+      // Saved again: topUp saved before these, and a restart in between
+      // would send the same drafts twice.
       await sendDrafts(s);
       await watchPublish(s);
+      await saveState(s);
     } catch (e) {
       // Offline, asleep, Telegram down, the db locked past its timeout: wait and go on.
       console.error(`telegram-bot: ${e instanceof Error ? e.message : e}`);
