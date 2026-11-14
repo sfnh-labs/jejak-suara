@@ -7,10 +7,12 @@ coverage rather than listed by hand, so the database is the source of truth and
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,6 +36,19 @@ class Figure:
     def match_terms(self) -> list[str]:
         """All lowercased strings that, if present in text, name this figure."""
         return [t.lower() for t in ([self.name, *self.aliases]) if t]
+
+    def first_named_at(self, text: str) -> int | None:
+        """Where `text` first names this figure, as a whole word: the alias
+        "Aries" is not in "karies". None if it does not."""
+        m = names_pattern(tuple(self.match_terms())).search(text)
+        return m.start() if m else None
+
+
+@lru_cache(maxsize=4096)
+def names_pattern(terms: tuple[str, ...]) -> re.Pattern:
+    """Any of `terms`, case-insensitive, never inside a longer word."""
+    alt = "|".join(re.escape(t) for t in sorted(set(terms), key=len, reverse=True) if t)
+    return re.compile(rf"(?<!\w)(?:{alt})(?!\w)" if alt else r"(?!x)x", re.I)
 
 
 def load_sources(path: Path | None = None) -> list[Source]:

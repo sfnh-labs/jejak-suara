@@ -90,11 +90,7 @@ def _figures_mentioned(text: str) -> list[str]:
     this is not first-match-wins: an event can involve several people, and none
     of them owns it.
     """
-    low = text.lower()
-    return [
-        f.id for f in load_figures()
-        if any(term in low for term in f.match_terms())
-    ]
+    return [f.id for f in load_figures() if f.first_named_at(text) is not None]
 
 
 @lru_cache(maxsize=1)

@@ -56,13 +56,11 @@ _SPEAKER_RE = re.compile(r"^([A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*){0,2})\s*:")
 
 def _first_alias_at(text: str, figures: list[Figure]) -> tuple[int, Figure | None]:
     """Earliest position at which any tracked figure is named, and who."""
-    low = text.lower()
-    best, who = len(low) + 1, None
+    best, who = len(text) + 1, None
     for fig in figures:
-        for term in fig.match_terms():
-            pos = low.find(term)
-            if 0 <= pos < best:
-                best, who = pos, fig
+        pos = fig.first_named_at(text)
+        if pos is not None and pos < best:
+            best, who = pos, fig
     return best, who
 
 
@@ -95,7 +93,7 @@ def _attribute(text: str, figures: list[Figure]) -> Figure | None:
     speaker = _SPEAKER_RE.match(headline)
     if speaker and speaker.end(1) <= alias_at:
         said_by = speaker.group(1).lower()
-        if not any(term in said_by for term in figure.match_terms()):
+        if figure.first_named_at(said_by) is None:
             return None
     return figure
 
