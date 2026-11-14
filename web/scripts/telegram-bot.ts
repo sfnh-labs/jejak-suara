@@ -20,7 +20,9 @@ import { getFigureOptions, getFollowupCandidates, getItem, REASONS, reasonLabel,
 import {
   answerPoint,
   getKindStats,
+  countOpenPointsOn,
   getNextOpenPoint,
+  getNextOpenPointOn,
   getPoint,
   rejectRecord,
   restoreRecord,
@@ -111,6 +113,8 @@ interface State {
   sent: Record<string, number>;
   /** The kind of the last card sent, so the next one is the next kind's turn. */
   lastKind?: PointKind;
+  /** The catatan being worked through: its points come one after another. */
+  record?: { id: number; total: number };
   /** A card's correction choices, as listed on it: event ids or figure ids. */
   picks: Record<string, string[]>;
   /** "Ketik …" prompts waiting for a reply: prompt message -> point. */
@@ -131,6 +135,7 @@ async function loadState(): Promise<State> {
       offset: Number(s.offset) || 0,
       sent: s.sent && typeof s.sent === "object" ? s.sent : {},
       lastKind: s.lastKind && s.lastKind in KIND_LABEL ? s.lastKind : undefined,
+      record: s.record && Number.isInteger(s.record.id) ? { id: s.record.id, total: Number(s.record.total) || 1 } : undefined,
       picks: s.picks && typeof s.picks === "object" ? s.picks : {},
       prompts: s.prompts && typeof s.prompts === "object" ? s.prompts : {},
       newFig: s.newFig && typeof s.newFig === "object" ? s.newFig : {},
@@ -209,11 +214,15 @@ function others(p: Point): { id: string; name: string }[] {
   return (p.proposal.candidates ?? []).filter((c) => c.id !== p.proposal.figure_id).slice(0, 3);
 }
 
+/** Each sent card's place in its catatan (" · poin 2/4"), kept for redrawing it. */
+const PLACE = new Map<number, string>();
+
 async function cardText(p: Point): Promise<string> {
+  const place = PLACE.get(p.id) ?? "";
   const ev = await lqueryOne<{ title: string | null }>(`SELECT title FROM events WHERE id = ?`, [p.event_id]);
   const x = p.proposal;
   const lines = [
-    `<b>${esc(KIND_LABEL[p.kind].toUpperCase())}</b> · ${meter(p)}${checkTag(p)}${p.spot_check ? " · cek acak" : ""}`,
+    `<b>${esc(KIND_LABEL[p.kind].toUpperCase())}</b> · ${meter(p)}${checkTag(p)}${p.spot_check ? " · cek acak" : ""}${place}`,
     `<i>${esc(ev?.title ?? `Catatan #${p.event_id}`)}</i>`,
     "",
   ];
@@ -334,8 +343,8 @@ async function topUp(s: State): Promise<void> {
   while (Object.keys(s.sent).length < BATCH) {
     const p = await nextPoint(s);
     if (!p) break;
+    PLACE.set(p.id, await placeOn(s, p));
     s.sent[p.id] = await send(await cardText(p), cardKeyboard(p));
-    s.lastKind = p.kind;
   }
   await saveState(s);
 }
@@ -343,15 +352,43 @@ async function topUp(s: State): Promise<void> {
 /** The kinds take turns, in this order; a kind with nothing open is passed over. */
 const ROTATION: PointKind[] = ["peristiwa", "pembicara", "tentang", "terkait", "jabatan", "lini"];
 
-/** The newest open point of the kind after the last one sent. */
+/**
+ * A catatan's points come together: the catatan being worked through gives
+ * the next card while it has open points, in ROTATION's order. Then the kinds
+ * take turns again, the newest open point of the kind after the last one
+ * picked so, and that point's catatan is the one worked through next.
+ * Jabatan is about a figure, not its catatan, so it only comes in its turn.
+ */
+const BY_RECORD: PointKind[] = ROTATION.filter((k) => k !== "jabatan");
+
 async function nextPoint(s: State): Promise<Point | null> {
-  const start = s.lastKind ? ROTATION.indexOf(s.lastKind) + 1 : 0;
   const exclude = Object.keys(s.sent).map(Number);
+  if (s.record) {
+    const p = await getNextOpenPointOn(s.record.id, BY_RECORD, exclude);
+    if (p) return p;
+    s.record = undefined;
+  }
+  const start = s.lastKind ? ROTATION.indexOf(s.lastKind) + 1 : 0;
   for (let i = 0; i < ROTATION.length; i++) {
     const p = await getNextOpenPoint(ROTATION[(start + i) % ROTATION.length], exclude);
-    if (p) return p;
+    if (!p) continue;
+    s.lastKind = p.kind;
+    if (BY_RECORD.includes(p.kind)) {
+      s.record = { id: p.event_id, total: await countOpenPointsOn(p.event_id, BY_RECORD, exclude) };
+    }
+    return p;
   }
   return null;
+}
+
+/** " · poin 2/4" when the card's catatan has more than one point, for its header. */
+async function placeOn(s: State, p: Point): Promise<string> {
+  if (!s.record || s.record.id !== p.event_id || !BY_RECORD.includes(p.kind)) return "";
+  const others = Object.keys(s.sent).map(Number).filter((id) => id !== p.id);
+  const left = await countOpenPointsOn(p.event_id, BY_RECORD, others);
+  // Points the pipeline opened on it meanwhile count too.
+  s.record.total = Math.max(s.record.total, left);
+  return s.record.total > 1 ? ` · poin ${s.record.total - left + 1}/${s.record.total}` : "";
 }
 
 // ---------------------------------------------------------------------------
