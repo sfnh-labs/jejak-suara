@@ -50,7 +50,17 @@ case "$cmd" in
     git -C "$ROOT" branch -q -D "$branch"
     # The scheduled publish runs from the main checkout: bring it up to date.
     if [ "$(git -C "$ROOT" symbolic-ref --short -q HEAD)" = main ]; then
+      before=$(git -C "$ROOT" rev-parse HEAD)
       git -C "$ROOT" merge -q --ff-only origin/main
+      # The Telegram bot bundles these files when it starts: restart its
+      # launchd agent (scripts/register_telegram_agent.sh) if they changed.
+      # Its Python calls (scripts/kurasi_ops.py, jejak/) run fresh each time.
+      bot="gui/$(id -u)/com.jejaksuara.telegram-bot"
+      if ! git -C "$ROOT" diff --quiet "$before" HEAD -- \
+             web/scripts/telegram-bot.ts web/src/lib web/package.json web/package-lock.json &&
+         command -v launchctl >/dev/null && launchctl print "$bot" >/dev/null 2>&1; then
+        launchctl kickstart -k "$bot" && echo "restarted the Telegram bot on the new code"
+      fi
     fi
     echo "finished $branch; main checkout at $(git -C "$ROOT" log --oneline -1)"
     ;;
