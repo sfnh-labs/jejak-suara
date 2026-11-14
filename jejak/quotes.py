@@ -17,6 +17,7 @@ import json
 import re
 import sqlite3
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 _OPEN, _CLOSE = "\"“", "\"”"
 _QUOTE = rf"[{_OPEN}](?P<q>[^{_OPEN}{_CLOSE}\n]{{40,320}})[{_CLOSE}]"
@@ -205,16 +206,68 @@ def apply_lessons(conn: sqlite3.Connection) -> int:
     return done
 
 
-def match_speaker(speaker: str, figures: list[tuple[str, list[str]]],
-                  prefer: str | None = None) -> str | None:
+class Fig(NamedTuple):
+    """A tracked figure as speakers are matched to it: every term it is
+    called by (_terms), and the full ones among them — its name and aliases;
+    the rest are a bare first or last word of the name."""
+    id: str
+    name: str
+    terms: list[str]
+    full: frozenset[str]
+
+
+def _word(term: str, text: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, re.I) is not None
+
+
+def named_in_full(body: str | None, fig: Fig) -> bool:
+    """Whether the article names the figure by more than a bare first or last
+    word: by a name or alias, with every word of the name, or with two of its
+    words side by side. "Siti" refers back to Siti Hediati Hariyadi only in an
+    article that has named her; without the body to read, it is taken on trust."""
+    if not body:
+        return True
+    words = fig.name.split()
+    return (any(_word(t, body) for t in fig.full)
+            or all(_word(w, body) for w in words if len(w) >= 3)
+            # Two of its words side by side: "Wamen Transmigrasi Viva Yoga".
+            or any(_word(f"{a} {b}", body) for a, b in zip(words, words[1:])))
+
+
+def _other_name(speaker: str, term: str, fig: Fig) -> bool:
+    """The speaker goes on with a name that is not the figure's: "Kompol Joko
+    Sembodo" or "Siti Qiptia" is someone else sharing a first name."""
+    own = set(fig.name.split())
+    for m in re.finditer(rf"\b{re.escape(term)}\b", speaker):
+        after = speaker[m.end():].split()[:1]
+        if after and after[0][:1].isupper() and after[0] not in own:
+            return True
+    return False
+
+
+def _hit(speaker: str, fig: Fig, body: str | None) -> int:
+    """The longest of the figure's terms the speaker is written as, 0 for none.
+    A bare first or last word counts only when the speaker does not go on with
+    another name and the article names the figure in full."""
+    best = 0
+    for t in fig.terms:
+        if len(t) <= best or not _names(speaker, [t]):
+            continue
+        if t not in fig.full and (_other_name(speaker, t, fig) or not named_in_full(body, fig)):
+            continue
+        best = len(t)
+    return best
+
+
+def match_speaker(speaker: str, figures: list[Fig], prefer: str | None = None,
+                  body: str | None = None) -> str | None:
     """The tracked figure a written speaker names, if exactly one fits.
 
-    `figures` is [(id, terms)]. The longest matching term wins, so "Said
-    Abdullah" beats a bare "Said"; `prefer` (the record's own figure) wins a
-    tie, since a record's quotes are mostly its owner's.
+    The longest matching term wins, so "Said Abdullah" beats a bare "Said";
+    `prefer` (the record's own figure) wins a tie, since a record's quotes are
+    mostly its owner's. `body` is the article the quote is from (see _hit).
     """
-    return _pick([(fid, max((len(t) for t in terms if _names(speaker, [t])), default=0))
-                  for fid, terms in figures], prefer)
+    return _pick([(f.id, _hit(speaker, f, body)) for f in figures], prefer)
 
 
 def _pick(hits: list[tuple[str, int]], prefer: str | None) -> str | None:
@@ -232,14 +285,15 @@ def _pick(hits: list[tuple[str, int]], prefer: str | None) -> str | None:
     return None if best is None or tied else best[1]
 
 
-def _figure_terms(conn: sqlite3.Connection) -> list[tuple[str, list[str]]]:
+def _figure_terms(conn: sqlite3.Connection) -> list[Fig]:
     figures = []
     for r in conn.execute("SELECT id, name, aliases FROM figures WHERE active = 1"):
         try:
             aliases = json.loads(r["aliases"]) if r["aliases"] else []
         except (TypeError, ValueError):
             aliases = []
-        figures.append((r["id"], _terms(r["name"], aliases)))
+        figures.append(Fig(r["id"], r["name"], _terms(r["name"], aliases),
+                           frozenset(t for t in (r["name"], *aliases) if t)))
     return figures
 
 
@@ -249,28 +303,32 @@ def rematch_waiting(conn: sqlite3.Connection) -> int:
     its speaker was tracked, waits otherwise for good, since collection never
     reassigns a listed quote. Only the stage's own unmatched quotes are
     touched. Returns how many found their speaker."""
-    # As match_speaker, with each term compiled once and each speaker scored
-    # once: the waiting quotes run to tens of thousands.
-    figures = [(fid, [(len(t), re.compile(rf"\b{re.escape(t)}\b")) for t in terms])
-               for fid, terms in _figure_terms(conn)]
-    hits: dict[str, list[tuple[str, int]]] = {}
-    fits: dict[tuple[str, str | None], str | None] = {}
+    # As match_speaker, but the roster is narrowed once per speaker (the
+    # waiting quotes run to tens of thousands) to the figures it could be with
+    # no article to check; each quote's article then decides among those.
+    figures = _figure_terms(conn)
+    fits: dict[str, list[Fig]] = {}
+    bodies: dict[int, str | None] = {}
     found = 0
     for q in conn.execute(
-        """SELECT q.id, q.speaker, e.figure_id AS owner
+        """SELECT q.id, q.speaker, q.article_id, e.figure_id AS owner
              FROM event_quotes q JOIN events e ON e.id = q.event_id
             WHERE q.figure_id IS NULL AND COALESCE(q.assigned_by, 'auto') = 'auto'
               AND q.speaker IS NOT NULL AND q.speaker != ''"""
     ).fetchall():
         speaker = q["speaker"]
-        if speaker not in hits:
-            hits[speaker] = [(fid, max((n for n, pat in pats if pat.search(speaker)), default=0))
-                             for fid, pats in figures]
-        key = (speaker, q["owner"])
-        if key not in fits:
-            fits[key] = _pick(hits[speaker], q["owner"])
-        if fits[key]:
-            conn.execute("UPDATE event_quotes SET figure_id = ? WHERE id = ?", (fits[key], q["id"]))
+        if speaker not in fits:
+            fits[speaker] = [f for f in figures if _hit(speaker, f, None)]
+        if not fits[speaker]:
+            continue
+        aid = q["article_id"]
+        if aid is not None and aid not in bodies:
+            row = conn.execute("SELECT body FROM articles WHERE id = ?", (aid,)).fetchone()
+            bodies[aid] = row["body"] if row else None
+        body = bodies.get(aid) if aid is not None else None
+        fig = match_speaker(speaker, fits[speaker], q["owner"], body)
+        if fig:
+            conn.execute("UPDATE event_quotes SET figure_id = ? WHERE id = ?", (fig, q["id"]))
             found += 1
     return found
 
@@ -309,7 +367,7 @@ def collect_quotes(conn: sqlite3.Connection, event_ids: list[int] | None = None,
         for quote, speaker in all_quotes(art["body"]):
             taught, fig = lesson_for(lessons, speaker, art["owner"], art["event_id"])
             if not taught:
-                fig = match_speaker(speaker, figures, art["owner"])
+                fig = match_speaker(speaker, figures, art["owner"], art["body"])
             cur = conn.execute(
                 """INSERT OR IGNORE INTO event_quotes
                        (event_id, article_id, url, quote, speaker, figure_id, assigned_by, found_at)
