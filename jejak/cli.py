@@ -124,6 +124,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("curation-report")
     sub.add_parser("points")
     sub.add_parser("doubtful-speakers")
+    p_rc = sub.add_parser("recluster-peristiwa",
+                          help="cluster recent peristiwa again under the current rules")
+    p_rc.add_argument("since", help="peristiwa dated this day or later (YYYY-MM-DD)")
+    p_rc.add_argument("--apply", action="store_true", help="write it; without, only count")
     # Curation upkeep: draft what /kurasi left undone, learn from the curator.
     sub.add_parser("kurasi")
     sub.add_parser("organizations")
@@ -249,6 +253,8 @@ def main(argv: list[str] | None = None) -> int:
             print("points:", curation_points.run(conn))
         if args.cmd == "doubtful-speakers":
             print("doubtful-speakers:", curation_points.open_doubtful_speakers(conn))
+        if args.cmd == "recluster-peristiwa":
+            print("recluster-peristiwa:", cluster_mod.recluster_peristiwa(conn, args.since, apply=args.apply))
         if args.cmd == "kurasi":
             from . import kurasi
             print("kurasi:", kurasi.run_stage(conn))

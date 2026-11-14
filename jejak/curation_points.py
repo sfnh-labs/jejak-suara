@@ -231,8 +231,8 @@ def _peristiwa(conn: sqlite3.Connection, w: _Writer) -> None:
              FROM record_links l
              JOIN events r ON r.id = l.record_id
              JOIN events p ON p.id = l.peristiwa_id
-            WHERE l.verdict IS NULL AND r.curated IS NOT 'rejected'
-              AND p.curated IS NOT 'rejected'"""
+            WHERE l.verdict IS NULL AND r.curated IS NOT 'rejected' AND r.status NOT IN ('expired', 'dissolved')
+              AND p.curated IS NOT 'rejected' AND p.status NOT IN ('expired', 'dissolved')"""
     ).fetchall()
     titles = _titles(conn, [r["peristiwa_id"] for r in rows])
     for r in rows:
@@ -252,8 +252,8 @@ def _lini(conn: sqlite3.Connection, w: _Writer) -> None:
              FROM followup_links l
              JOIN events a ON a.id = l.earlier_id
              JOIN events b ON b.id = l.later_id
-            WHERE l.verdict IS NULL AND a.curated IS NOT 'rejected'
-              AND b.curated IS NOT 'rejected'"""
+            WHERE l.verdict IS NULL AND a.curated IS NOT 'rejected' AND a.status NOT IN ('expired', 'dissolved')
+              AND b.curated IS NOT 'rejected' AND b.status NOT IN ('expired', 'dissolved')"""
     ).fetchall()
     titles = _titles(conn, [r["earlier_id"] for r in rows])
     for r in rows:
@@ -277,7 +277,7 @@ def _terkait(conn: sqlite3.Connection, w: _Writer) -> None:
         """SELECT rf.event_id, rf.figure_id, rf.source
              FROM record_figures rf JOIN events e ON e.id = rf.event_id
             WHERE rf.role = 'related' AND rf.assigned_by = 'auto'
-              AND rf.source IN ('owner', 'derived') AND e.curated IS NOT 'rejected'"""
+              AND rf.source IN ('owner', 'derived') AND e.curated IS NOT 'rejected' AND e.status NOT IN ('expired', 'dissolved')"""
     ).fetchall()
     for r in rows:
         fig = figures.get(r["figure_id"])
@@ -307,7 +307,7 @@ def _tentang(conn: sqlite3.Connection, w: _Writer) -> None:
                   q.speaker, q.figure_id AS speaker_id
              FROM quote_subjects s JOIN event_quotes q ON q.id = s.quote_id
              JOIN events e ON e.id = q.event_id
-            WHERE s.status = 'auto' AND e.curated IS NOT 'rejected'"""
+            WHERE s.status = 'auto' AND e.curated IS NOT 'rejected' AND e.status NOT IN ('expired', 'dissolved')"""
     ).fetchall()
     for r in rows:
         name = names.get(r["figure_id"])
@@ -403,7 +403,7 @@ def _pembicara(conn: sqlite3.Connection, w: _Writer) -> None:
              FROM event_quotes q JOIN events e ON e.id = q.event_id
             WHERE q.figure_id IS NULL AND COALESCE(q.assigned_by, 'auto') = 'auto'
               AND q.speaker IS NOT NULL AND q.speaker != ''
-              AND e.curated IS NOT 'rejected'"""
+              AND e.curated IS NOT 'rejected' AND e.status NOT IN ('expired', 'dissolved')"""
     ).fetchall()
 
     # Who fits each speaker string, by longest matching term — once per string.
@@ -608,7 +608,7 @@ def open_doubtful_speakers(conn: sqlite3.Connection) -> dict[str, int]:
              FROM event_quotes q JOIN events e ON e.id = q.event_id
              LEFT JOIN articles a ON a.id = q.article_id
             WHERE q.figure_id IS NOT NULL AND COALESCE(q.assigned_by, 'auto') = 'auto'
-              AND e.curated IS NOT 'rejected'"""
+              AND e.curated IS NOT 'rejected' AND e.status NOT IN ('expired', 'dissolved')"""
     ).fetchall():
         speaker = q["speaker"] or ""
         if speaker not in fits:
