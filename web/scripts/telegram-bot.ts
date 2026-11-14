@@ -35,7 +35,15 @@ import {
 } from "@/lib/curation";
 import {
   answerPoint,
+  AUTO_MIN_AGREEMENT,
+  AUTO_MIN_ANSWERS,
   getKindStats,
+  getNextAutoAnswered,
+  getUncheckedCount,
+  salahPoint,
+  setAutoKind,
+  SPOT_CHECK_EVERY,
+  type Confidence,
   countOpenPointsOn,
   getNextOpenPoint,
   getNextOpenPointOn,
@@ -161,6 +169,8 @@ interface State {
     picks?: string[];
     rejected: Record<string, string>;
   };
+  /** Auto answers looked at from /otomatis lately, not offered again. */
+  autoSeen: number[];
 }
 
 async function loadState(): Promise<State> {
@@ -186,9 +196,10 @@ async function loadState(): Promise<State> {
         skip: Array.isArray(s.cand?.skip) ? s.cand.skip : [],
         rejected: s.cand?.rejected && typeof s.cand.rejected === "object" ? s.cand.rejected : {},
       },
+      autoSeen: Array.isArray(s.autoSeen) ? s.autoSeen.filter(Number.isInteger) : [],
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, cand: { skip: [], rejected: {} } };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, cand: { skip: [], rejected: {} }, autoSeen: [] };
   }
 }
 
@@ -498,6 +509,8 @@ async function showView(s: State, p: Point, note = ""): Promise<void> {
   ];
   const back = s.viewUndo[p.id];
   if (back) rows.push([{ text: `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }]);
+  const unchecked = await getUncheckedCount(p.event_id);
+  if (unchecked) rows.push([{ text: `🔍 Cek ${unchecked} keputusan otomatis`, callback_data: `vc:${p.id}` }]);
   rows.push([{ text: "Tutup", callback_data: `vx:${p.id}` }]);
   const at = s.view[p.id];
   if (at) {
@@ -574,6 +587,17 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
     s.viewUndo[p.id] = { id: fid, name };
     await showView(s, p, `✖ ${esc(name)} dihapus dari Terkait.`);
     return "Dihapus dari Terkait";
+  }
+  if (kind === "vc") {
+    await pipelineOp("open-checks", String(p.event_id));
+    // They are this catatan's points now: they come next, after this card.
+    if (s.record?.id !== p.event_id) {
+      s.record = { id: p.event_id, total: await countOpenPointsOn(p.event_id, BY_RECORD) };
+    } else {
+      s.record.total = Math.max(s.record.total, await countOpenPointsOn(p.event_id, BY_RECORD));
+    }
+    await showView(s, p, "🔍 Keputusan otomatisnya dibuka sebagai kartu; datang setelah kartu ini.");
+    return "Cek dibuka";
   }
   if (kind === "vr") {
     const back = s.viewUndo[p.id];
@@ -801,6 +825,85 @@ async function undoCandidateReject(s: State, msgId: number): Promise<string> {
   delete s.cand.rejected[String(msgId)];
   await edit(msgId, "<b>↩ Penolakan dibatalkan</b>; namanya kembali ke antrean.");
   return "Dibatalkan";
+}
+
+// ---------------------------------------------------------------------------
+// Auto-answering (/otomatis): per kind, whether it is on and which bands have
+// cleared the gate, switched as in /kurasi; and the answers it gave, one card
+// at a time, newest first, to let stand or call Salah — which puts it back,
+// rules the other way and counts against the kind, as /kurasi's does.
+
+const pct = (c: Confidence) => (c.value === null ? "–" : `${Math.round(c.value * 100)}% (${c.agreed}/${c.answered})`);
+
+async function autoText(note = ""): Promise<[string, Keyboard]> {
+  const stats = (await getKindStats()) ?? [];
+  const lines = ["<b>🤖 JAWABAN OTOMATIS</b>", ""];
+  const rows: Keyboard = [];
+  for (const k of stats) {
+    const ready = k.buckets.filter((b) => b.eligible);
+    lines.push(`<b>${esc(KIND_LABEL[k.kind])}</b> · ${k.auto ? "🟢 nyala" : "⚪ mati"} · ${k.open} terbuka · yakin ${pct(k.overall)}`);
+    if (ready.length) lines.push(`  siap: ${ready.map((b) => esc(b.bucket || "–")).join(", ")}`);
+    else {
+      const best = k.buckets[0];
+      lines.push(`  belum ada pita yang siap${best ? ` · terbanyak: ${esc(best.bucket || "–")} ${best.confidence.answered}/${AUTO_MIN_ANSWERS}` : ""}`);
+    }
+    if (k.answeredAuto) lines.push(`  dijawab otomatis: ${k.answeredAuto}`);
+    if (k.switchedOff) lines.push(`  ⚠️ dimatikan pipeline ${esc(day(k.switchedOff.at))}: cek ${k.switchedOff.agreed}/${k.switchedOff.checked} benar`);
+    // Switching on does nothing until a band is ready: no button for that.
+    if (k.auto) rows.push([{ text: `⚪ Matikan ${KIND_LABEL[k.kind]}`, callback_data: `ot:${k.kind}:0` }]);
+    else if (ready.length) rows.push([{ text: `🟢 Nyalakan ${KIND_LABEL[k.kind]}`, callback_data: `ot:${k.kind}:1` }]);
+  }
+  lines.push("", `<i>Pita siap: ${AUTO_MIN_ANSWERS}+ jawabanmu dan yakin ${Math.round(AUTO_MIN_AGREEMENT * 100)}%+. Yang menyala hanya menjawab pita yang siap; satu dari ${SPOT_CHECK_EVERY} tetap ditanyakan sebagai cek acak.</i>`);
+  if (stats.some((k) => k.answeredAuto)) rows.push([{ text: "🧾 Periksa jawaban otomatis", callback_data: "oc" }]);
+  if (note) lines.push("", note);
+  return [lines.join("\n"), rows];
+}
+
+/** The next auto answer to look at, on the overview's message or a new one. */
+async function showAutoAnswer(s: State, msgId?: number): Promise<void> {
+  const p = await getNextAutoAnswered(s.autoSeen);
+  // The card as it was asked, said as what was done and what Salah does instead.
+  const asked = p ? (await cardText(p)).replace("<b>Jika Ya:</b>", "<b>Sudah dilakukan:</b>").replace("<b>Jika Bukan:</b>", "<b>Jika Salah:</b>") : "";
+  const text = p
+    ? `<b>🤖 Dijawab otomatis: Ya</b> · ${esc(day(p.answered_at))}\n\n${asked}`
+    : "Tidak ada jawaban otomatis lagi yang belum kamu periksa.";
+  const rows: Keyboard = p
+    ? [[{ text: "❌ Salah", callback_data: `os:${p.id}` }, { text: "✅ Benar, lanjut", callback_data: `ok:${p.id}` }]]
+    : [];
+  if (msgId) await edit(msgId, text, rows);
+  else await send(text, rows);
+}
+
+/** The /otomatis buttons ("o…"); returns the note for the tap. */
+async function onAuto(s: State, kind: string, arg: string, code: string | undefined, msgId: number): Promise<string> {
+  if (kind === "ot") {
+    if (!(arg in KIND_LABEL)) throw new Error("Jenis tidak dikenal.");
+    await setAutoKind(arg as PointKind, code === "1");
+    const label = KIND_LABEL[arg as PointKind];
+    await edit(msgId, ...(await autoText(code === "1" ? `🟢 ${esc(label)} dinyalakan; berlaku di proses berikutnya.` : `⚪ ${esc(label)} dimatikan.`)));
+    return code === "1" ? "Dinyalakan" : "Dimatikan";
+  }
+  if (kind === "oc") {
+    await showAutoAnswer(s);
+    return "";
+  }
+  const id = Number(arg);
+  if (!Number.isInteger(id)) throw new Error("Tombol tidak dikenal.");
+  // Kept short: only what was looked at recently needs leaving out.
+  s.autoSeen = [...s.autoSeen.filter((x) => x !== id), id].slice(-500);
+  if (kind === "os") {
+    const p = await getPoint(id);
+    if (!p || p.status !== "auto") throw new Error("Jawaban ini sudah bukan jawaban otomatis.");
+    await salahPoint(id);
+    await edit(msgId, `<b>❌ Salah dicatat</b> · ${esc(KIND_LABEL[p.kind])}\n${esc(p.kind === "pembicara" ? `“${p.proposal.speaker ?? ""}”` : p.proposal.claim)}\n<i>Dikembalikan dan diputuskan sebaliknya; dihitung melawan jawaban otomatis jenis ini.</i>`);
+    await showAutoAnswer(s);
+    return "Salah dicatat";
+  }
+  if (kind === "ok") {
+    await showAutoAnswer(s, msgId);
+    return "";
+  }
+  throw new Error("Tombol tidak dikenal.");
 }
 
 // ---------------------------------------------------------------------------
@@ -1039,6 +1142,16 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
   const [kind, idRaw, code] = (q.data ?? "").split(":");
   const id = Number(idRaw);
   let note = "";
+  if (kind === "ot" || kind === "oc" || kind === "os" || kind === "ok") {
+    try {
+      if (!msg) throw new Error("Pesan ini sudah tidak ada.");
+      note = await onAuto(s, kind, idRaw ?? "", code, msg.message_id);
+    } catch (e) {
+      note = e instanceof Error ? e.message : String(e);
+    }
+    await tg("answerCallbackQuery", { callback_query_id: q.id, text: note.slice(0, 190) }).catch(() => {});
+    return;
+  }
   if (kind === "c" || kind === "cu") {
     try {
       if (!msg) throw new Error("Kartu ini sudah tidak ada.");
@@ -1147,6 +1260,7 @@ async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<v
   const cmd = text.trim().split(/[\s@]/)[0].toLowerCase();
   if (cmd === "/status") await send(await status());
   else if (cmd === "/start" || cmd === "/lagi") await topUp(s);
+  else if (cmd === "/otomatis") await send(...(await autoText()));
   else if (cmd === "/kandidat") {
     // The open card again at the bottom of the chat, or the next name.
     if (s.cand.msg) await drop(s.cand.msg);
@@ -1158,7 +1272,7 @@ async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<v
     } else {
       await showNextCandidate(s);
     }
-  } else await send("Perintah: /lagi (isi ulang kartu), /kandidat (kandidat tokoh), /status (jumlah yang menunggu).");
+  } else await send("Perintah: /lagi (isi ulang kartu), /kandidat (kandidat tokoh), /otomatis (jawaban otomatis), /status (jumlah yang menunggu).");
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
