@@ -32,7 +32,6 @@ import {
   getItem,
   getOrgChoices,
   getOrganizations,
-  getRelated,
   getUnlinkedOrgs,
   likelyDuplicates,
   mergeFigure,
@@ -43,13 +42,17 @@ import {
   removeNotAPerson,
   saveFigureEdit,
   saveOrganization,
+  getListed,
+  setListed,
   setRelated,
+  undoListed,
   type FigureOption,
+  type Listed,
+  type ListedPrev,
   type Organization,
   type Position,
   type QuoteRow,
   type ReasonCode,
-  type Related,
 } from "@/lib/curation";
 import { getFigureFull } from "@/lib/kurasiLists";
 import {
@@ -173,9 +176,12 @@ interface State {
   /** A card's 📋 Catatan message (point -> message), the quote being put right there, */
   view: Record<string, number>;
   viewQuote: Record<string, number>;
-  /** the figure just taken off its Terkait list, and "Ketik nama" prompts from it. */
-  viewUndo: Record<string, { id: string; name: string }>;
+  /** the figure just taken off (or, `added`, put on) its Terkait list, as it was
+   *  before; "Ketik nama" prompts from it, for a quote's speaker or (`viewAdd`)
+   *  a figure to add to Terkait. */
+  viewUndo: Record<string, { id: string; name: string; added?: boolean; prev?: ListedPrev }>;
   viewPrompts: Record<string, number>;
+  viewAdd: Record<string, number>;
   /** The kandidat card: its name and message, names skipped this round, what is
    *  being asked (and its prompt), a typed new figure, choices, rejects to undo. */
   cand: {
@@ -240,6 +246,7 @@ async function loadState(): Promise<State> {
       viewQuote: s.viewQuote && typeof s.viewQuote === "object" ? s.viewQuote : {},
       viewUndo: s.viewUndo && typeof s.viewUndo === "object" ? s.viewUndo : {},
       viewPrompts: s.viewPrompts && typeof s.viewPrompts === "object" ? s.viewPrompts : {},
+      viewAdd: s.viewAdd && typeof s.viewAdd === "object" ? s.viewAdd : {},
       cand: {
         ...(s.cand && typeof s.cand === "object" ? s.cand : {}),
         skip: Array.isArray(s.cand?.skip) ? s.cand.skip : [],
@@ -258,7 +265,7 @@ async function loadState(): Promise<State> {
       },
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, cand: { skip: [], rejected: {} }, autoSeen: [], fig: {}, org: {}, drafts: {}, reworkPrompts: {}, reworkWho: {}, publish: { trouble: [] } };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, viewAdd: {}, cand: { skip: [], rejected: {} }, autoSeen: [], fig: {}, org: {}, drafts: {}, reworkPrompts: {}, reworkWho: {}, publish: { trouble: [] } };
   }
 }
 
@@ -521,23 +528,22 @@ function saidBy(q: QuoteRow): string {
   return `${written} → ${q.assigned_by === "curator" ? "bukan tokoh yang dilacak ✔" : "❔ belum dikenali"}`;
 }
 
-async function viewText(p: Point, note = ""): Promise<{ text: string; quotes: QuoteRow[]; related: Related[] } | null> {
+async function viewText(p: Point, note = ""): Promise<{ text: string; quotes: QuoteRow[]; related: Listed[] } | null> {
   const item = await getItem(p.event_id);
   if (!item) return null;
-  const related = item.kind === "record" ? await getRelated(item.event_id, item.figure_id) : [];
+  // A record's Terkait list, or a peristiwa's related figures: one list here.
+  const related = await getListed(item.event_id);
   const quotes = item.quotes.slice(0, VIEW_QUOTES);
   const lines = [
-    `<b>📋 CATATAN</b> · ${esc(day(item.event_date))}${item.curated === "rejected" ? " · ditolak" : ""}`,
+    `<b>📋 ${item.kind === "peristiwa" ? "PERISTIWA" : "CATATAN"}</b> · ${esc(day(item.event_date))}${item.curated === "rejected" ? " · ditolak" : ""}`,
     `<i>${esc(item.title ?? `Catatan #${item.event_id}`)}</i>`,
   ];
   if (item.owner) lines.push(`Tokoh: <b>${esc(item.owner.name)}</b>${figureTitle(item.owner) ? ` – ${esc(figureTitle(item.owner))}` : ""}`);
   if (item.summary) lines.push("", esc(clip(item.summary, 700)));
-  if (item.kind === "record") {
-    lines.push("", `<b>Terkait</b> (${related.length})`);
-    lines.push(related.length
-      ? related.map((r, i) => `${i + 1}. ${esc(r.name)}${figureTitle(r) ? ` – ${esc(clip(figureTitle(r), 60))}` : ""}${r.assigned_by === "curator" ? " ✔" : ""}`).join("\n")
-      : "<i>belum ada</i>");
-  }
+  lines.push("", `<b>Terkait</b> (${related.length})`);
+  lines.push(related.length
+    ? related.map((r, i) => `${i + 1}. ${esc(r.name)}${r.title ? ` – ${esc(clip(r.title, 60))}` : ""}${r.curator ? " ✔" : ""}`).join("\n")
+    : "<i>belum ada</i>");
   lines.push("", `<b>Kutipan</b> (${item.quotes.length})`);
   lines.push(quotes.length
     ? quotes.map((q, i) => `<b>${i + 1}.</b> “${esc(clip(q.quote, 140))}”\n    ${saidBy(q)}`).join("\n")
@@ -566,8 +572,9 @@ async function showView(s: State, p: Point, note = ""): Promise<void> {
     ...numbered(v.quotes.length, "🗣", (i) => `vq:${p.id}:${i}`),
     ...numbered(v.related.length, "✖ Terkait", (i) => `vt:${p.id}:${i}`),
   ];
+  rows.push([{ text: "➕ Tambah Terkait", callback_data: `va:${p.id}` }]);
   const back = s.viewUndo[p.id];
-  if (back) rows.push([{ text: `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }]);
+  if (back) rows.push([{ text: back.added ? `↩ Batalkan tambah ${clip(back.name, 18)}` : `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }]);
   const unchecked = await getUncheckedCount(p.event_id);
   if (unchecked) rows.push([{ text: `🔍 Cek ${unchecked} keputusan otomatis`, callback_data: `vc:${p.id}` }]);
   rows.push([{ text: "👤 Ubah data tokoh", callback_data: `vf:${p.id}` }, { text: "✍️ Tulis ulang", callback_data: `vw:${p.id}` }]);
@@ -608,16 +615,51 @@ async function showQuoteFix(s: State, p: Point, quoteId: number): Promise<void> 
   ].join("\n"), rows);
 }
 
-/** The figures a name typed for a quote matched, to pick from. */
-async function showQuoteFigures(s: State, p: Point, typed: string): Promise<void> {
-  const found = findFigures(await getFigureOptions(), typed.trim().slice(0, 200), null);
+/**
+ * The figures a name typed in the view matched, to pick from: for a quote's
+ * speaker, or (`terkait`) to add to the Terkait list. "Nama, jabatan,
+ * organisasi" also offers a new figure, as a card's correction does.
+ */
+async function showViewFigures(s: State, p: Point, typed: string, terkait: boolean): Promise<void> {
+  const [rawName, rawRole = "", ...rest] = typed.split(",");
+  const name = rawName.trim().slice(0, 200);
+  const role = rawRole.trim().slice(0, 300);
+  const org = rest.join(",").trim().slice(0, 300);
+  const listed = terkait ? new Set((await getListed(p.event_id)).map((r) => r.id)) : new Set<string>();
+  const found = findFigures(await getFigureOptions(), name, null).filter((f) => !listed.has(f.id));
   s.picks[`v${p.id}f`] = found.map((f) => f.id);
-  const rows: Keyboard = found.map((f, i) => [{ text: clip(`${i + 1}. ${f.name}`, 30), callback_data: `vp:${p.id}:${i}` }]);
-  rows.push([{ text: "🔎 Cari lagi", callback_data: `vs:${p.id}` }, { text: "← Kembali", callback_data: `v:${p.id}` }]);
+  const pick = terkait ? "vap" : "vp";
+  const rows: Keyboard = found.map((f, i) => [{ text: clip(`${i + 1}. ${f.name}`, 30), callback_data: `${pick}:${p.id}:${i}` }]);
+  const fresh = name.length >= 3 ? { name, role, org } : null;
+  if (fresh) {
+    s.newFig[`v${p.id}`] = fresh;
+    rows.push([{ text: "➕ Buat tokoh baru", callback_data: `${terkait ? "van" : "vqn"}:${p.id}` }]);
+  }
+  rows.push([{ text: "🔎 Cari lagi", callback_data: `${terkait ? "va" : "vs"}:${p.id}` }, { text: "← Kembali", callback_data: `v:${p.id}` }]);
   const list = found.map((f, i) => `<b>${i + 1}.</b> <b>${esc(f.name)}</b>${f.title ? ` – ${esc(f.title)}` : ""}`).join("\n");
-  await edit(s.view[p.id], found.length
-    ? `<b>🗣 Hasil “${esc(typed)}”:</b>\n${list}`
-    : `<b>🗣 Tidak ada tokoh yang cocok dengan “${esc(typed)}”.</b> Cari lagi, atau Kembali. Tokoh baru dibuat dari /kurasi.`, rows);
+  const icon = terkait ? "➕" : "🗣";
+  await edit(s.view[p.id], (found.length
+    ? `<b>${icon} ${terkait ? "Tambah ke Terkait" : "Siapa yang bicara?"}</b> Hasil “${esc(name)}”:\n${list}`
+    : `<b>${icon} Tidak ada tokoh yang cocok dengan “${esc(name)}”.</b>${fresh ? "" : " Cari lagi, atau Kembali."}`)
+    + (fresh ? `\n\n➕ <b>Tokoh baru:</b> ${[fresh.name, fresh.role, fresh.org].filter(Boolean).map(esc).join(" – ")}${fresh.role && fresh.org ? "" : "\n<i>Lengkapi jabatan dan organisasinya: Cari lagi, lalu ketik Nama, jabatan, organisasi.</i>"}` : ""), rows);
+}
+
+/** Create the figure typed in the view; its id and name. */
+async function createViewFigure(s: State, p: Point): Promise<{ id: string; name: string }> {
+  const fig = s.newFig[`v${p.id}`];
+  if (!fig) throw new Error("Ketik namanya lagi.");
+  const out = await pipelineOp("new-figure", fig.name, ...(fig.role ? ["--role", fig.role] : []), ...(fig.org ? ["--org", fig.org] : []));
+  delete s.newFig[`v${p.id}`];
+  return { id: out.split("\n").pop()!.trim(), name: fig.name };
+}
+
+/** Put a figure on the event's Terkait list from the view, undoable from there. */
+async function addRelated(s: State, p: Point, fid: string, name: string, fresh: boolean): Promise<string> {
+  const prev = await setListed(p.event_id, fid, true);
+  s.viewUndo[p.id] = { id: fid, name, added: true, prev };
+  delete s.picks[`v${p.id}f`];
+  await showView(s, p, `➕ ${esc(name)}${fresh ? " (tokoh baru)" : ""} ditambahkan ke Terkait.`);
+  return fresh ? `Tokoh baru dibuat: ${name}` : "Ditambahkan ke Terkait";
 }
 
 /** The 📋 buttons (callback codes starting with "v"); returns the note for the tap. */
@@ -642,9 +684,9 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
   }
   if (kind === "vt") {
     const fid = viewPick(s, p, Number(code), "f");
-    const name = (await getRelated(p.event_id, null)).find((r) => r.id === fid)?.name ?? fid;
-    await setRelated(p.event_id, fid, false);
-    s.viewUndo[p.id] = { id: fid, name };
+    const name = (await getListed(p.event_id)).find((r) => r.id === fid)?.name ?? fid;
+    const prev = await setListed(p.event_id, fid, false);
+    s.viewUndo[p.id] = { id: fid, name, prev };
     await showView(s, p, `✖ ${esc(name)} dihapus dari Terkait.`);
     return "Dihapus dari Terkait";
   }
@@ -686,7 +728,7 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
     const item = await getItem(p.event_id);
     if (!item) throw new Error("Catatannya tidak ditemukan.");
     const byId = new Map((await getFigureOptions()).map((f) => [f.id, f]));
-    const ids = [item.figure_id, ...(await getRelated(p.event_id, null)).map((r) => r.id), ...item.quotes.map((q) => q.figure_id)];
+    const ids = [item.figure_id, ...(await getListed(p.event_id)).map((r) => r.id), ...item.quotes.map((q) => q.figure_id)];
     const figures = [...new Set(ids)].map((x) => (x ? byId.get(x) : undefined)).filter((f): f is FigureOption => Boolean(f)).slice(0, FOUND);
     await figureList(s, "<b>👤 Tokoh di catatan ini</b>", figures);
     return "";
@@ -702,18 +744,38 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
     await showView(s, p, "🔍 Keputusan otomatisnya dibuka sebagai kartu; datang setelah kartu ini.");
     return "Cek dibuka";
   }
+  if (kind === "va") {
+    const id = await send("Ketik nama tokoh yang terkait. Untuk tokoh baru, tambahkan jabatan dan organisasi, dipisah koma: <i>Nama Lengkap, jabatan, organisasi</i>", undefined, {
+      reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
+      reply_markup: { force_reply: true, input_field_placeholder: "Nama tokoh" },
+    });
+    s.viewAdd[id] = p.id;
+    return "";
+  }
+  if (kind === "vap") {
+    const fid = s.picks[`v${p.id}f`]?.[Number(code)];
+    if (!fid) throw new Error("Pilihan ini sudah kedaluwarsa; ketik namanya lagi.");
+    const name = (await getFigureOptions()).find((f) => f.id === fid)?.name ?? fid;
+    return addRelated(s, p, fid, name, false);
+  }
+  if (kind === "van") {
+    const f = await createViewFigure(s, p);
+    return addRelated(s, p, f.id, f.name, true);
+  }
   if (kind === "vr") {
     const back = s.viewUndo[p.id];
     if (!back) throw new Error("Tidak ada yang bisa dikembalikan.");
-    await setRelated(p.event_id, back.id, true);
+    // One from before this version has no `prev`: it was a record's, taken off.
+    if (back.prev) await undoListed(p.event_id, back.id, back.prev);
+    else await setRelated(p.event_id, back.id, true);
     delete s.viewUndo[p.id];
-    await showView(s, p, `↩ ${esc(back.name)} kembali di Terkait.`);
-    return "Dikembalikan";
+    await showView(s, p, back.added ? `↩ ${esc(back.name)} tidak jadi ditambahkan.` : `↩ ${esc(back.name)} kembali di Terkait.`);
+    return back.added ? "Dibatalkan" : "Dikembalikan";
   }
   const quoteId = s.viewQuote[p.id];
   if (!quoteId) throw new Error("Pilih kutipannya lagi.");
   if (kind === "vs") {
-    const id = await send("Ketik nama tokoh yang bicara.", undefined, {
+    const id = await send("Ketik nama tokoh yang bicara. Untuk tokoh baru, tambahkan jabatan dan organisasi, dipisah koma: <i>Nama Lengkap, jabatan, organisasi</i>", undefined, {
       reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
       reply_markup: { force_reply: true, input_field_placeholder: "Nama tokoh" },
     });
@@ -729,6 +791,8 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
   } else if (kind === "vp") {
     to = s.picks[`v${p.id}f`]?.[Number(code)] ?? null;
     if (!to) throw new Error("Pilihan ini sudah kedaluwarsa; ketik namanya lagi.");
+  } else if (kind === "vqn") {
+    to = (await createViewFigure(s, p)).id;
   } else {
     throw new Error("Tombol tidak dikenal.");
   }
@@ -1989,8 +2053,18 @@ async function onReply(s: State, replyTo: number, text: string, own: number): Pr
   if (viewOf) {
     delete s.viewPrompts[replyTo];
     const p = await getPoint(viewOf);
-    if (p && s.view[p.id] && s.viewQuote[p.id]) await showQuoteFigures(s, p, text);
+    if (p && s.view[p.id] && s.viewQuote[p.id]) await showViewFigures(s, p, text, false);
     else await send("Kutipannya sudah tidak dibuka; buka 📋 Catatan lagi.");
+    await drop(replyTo);
+    await drop(own);
+    return true;
+  }
+  const addOf = s.viewAdd[replyTo];
+  if (addOf) {
+    delete s.viewAdd[replyTo];
+    const p = await getPoint(addOf);
+    if (p && s.view[p.id]) await showViewFigures(s, p, text, true);
+    else await send("Catatannya sudah tidak dibuka; buka 📋 Catatan lagi.");
     await drop(replyTo);
     await drop(own);
     return true;
@@ -2046,6 +2120,7 @@ async function forget(s: State, pointId: number): Promise<void> {
   delete s.sent[pointId];
   delete s.picks[pointId];
   delete s.newFig[pointId];
+  delete s.newFig[`v${pointId}`];
   delete s.picks[`v${pointId}`];
   delete s.picks[`v${pointId}f`];
   delete s.view[pointId];
@@ -2053,6 +2128,7 @@ async function forget(s: State, pointId: number): Promise<void> {
   delete s.viewUndo[pointId];
   for (const [m, id] of Object.entries(s.prompts)) if (id === pointId) delete s.prompts[m];
   for (const [m, id] of Object.entries(s.viewPrompts)) if (id === pointId) delete s.viewPrompts[m];
+  for (const [m, id] of Object.entries(s.viewAdd)) if (id === pointId) delete s.viewAdd[m];
 }
 
 async function status(): Promise<string> {
