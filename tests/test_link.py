@@ -99,3 +99,19 @@ def test_struck_figure_is_not_related_again(story):
     )
     link.link_records(story)
     assert story.execute("SELECT count(*) FROM event_figures").fetchone()[0] == 0
+
+
+def test_curator_added_figure_survives_rederivation(story, monkeypatch):
+    # Re-clustering clears event_figures; promote_peristiwa puts a curator's
+    # additions back, unless the figure was struck since.
+    monkeypatch.setattr(cluster, "PERISTIWA_MIN_OUTLETS", 1)
+    monkeypatch.setattr(cluster, "_figures_mentioned", lambda text: [])
+    story.executemany(
+        "INSERT INTO event_figure_additions (event_id, figure_id) VALUES (2, ?)",
+        [("nurul-azizah",), ("prabowo",)],
+    )
+    story.execute("INSERT INTO event_figure_rejections (event_id, figure_id) VALUES (2, 'prabowo')")
+    story.execute("DELETE FROM event_figures")
+    cluster.promote_peristiwa(story)
+    rows = story.execute("SELECT figure_id FROM event_figures WHERE event_id = 2").fetchall()
+    assert [r["figure_id"] for r in rows] == ["nurul-azizah"]

@@ -1595,6 +1595,119 @@ export async function getRelated(eventId: number, filedId: string | null): Promi
 }
 
 /**
+ * The figures an event lists, whatever its kind: a record's Terkait list, or
+ * a peristiwa's related figures (event_figures, struck ones left out).
+ * `curator` marks one a curator put there.
+ */
+export interface Listed {
+  id: string;
+  name: string;
+  title: string;
+  curator: boolean;
+}
+
+/** How a figure stood on an event's list before setListed, for undoListed. */
+export type ListedPrev =
+  | { kind: "record"; row: { role: string; source: string; quotes: number; assigned_by: string } | null }
+  | { kind: "peristiwa"; listed: boolean; struck: boolean; added: boolean };
+
+async function eventKind(eventId: number): Promise<string> {
+  const ev = await queryOne<{ kind: string }>(`SELECT kind FROM events WHERE id = ?`, [eventId]);
+  if (!ev) throw new Error(`unknown event: ${eventId}`);
+  return ev.kind;
+}
+
+export async function getListed(eventId: number): Promise<Listed[]> {
+  if ((await eventKind(eventId)) === "record") {
+    return (await getRelated(eventId, null)).map((r) => ({
+      id: r.id, name: r.name, title: figureTitle(r), curator: r.assigned_by === "curator",
+    }));
+  }
+  const additions = await tableExists("event_figure_additions");
+  const rows = await query<{ id: string; name: string; role: string | null; positions: string | null; curator: number }>(
+    `SELECT f.id, f.name, f.role, f.positions,
+            ${additions ? "EXISTS (SELECT 1 FROM event_figure_additions x WHERE x.event_id = ef.event_id AND x.figure_id = f.id)" : "0"} AS curator
+       FROM event_figures ef JOIN figures f ON f.id = ef.figure_id
+      WHERE ef.event_id = ?
+        AND NOT EXISTS (SELECT 1 FROM event_figure_rejections r WHERE r.event_id = ef.event_id AND r.figure_id = ef.figure_id)
+      ORDER BY f.name`,
+    [eventId]
+  );
+  return rows.map((r) => ({
+    id: r.id, name: r.name, title: figureTitle({ role: r.role, positions: parsePositions(r.positions) }), curator: Boolean(r.curator),
+  }));
+}
+
+/**
+ * Put a figure on an event's list or take them off, as a curator: on a
+ * record through setRelated; on a peristiwa as an addition the pipeline
+ * keeps (event_figure_additions) or a strike (setRelatedFigure).
+ */
+export async function setListed(eventId: number, figureId: string, on: boolean): Promise<ListedPrev> {
+  if ((await eventKind(eventId)) === "record") {
+    const row = (await queryOne<{ role: string; source: string; quotes: number; assigned_by: string }>(
+      `SELECT role, source, quotes, assigned_by FROM record_figures WHERE event_id = ? AND figure_id = ?`,
+      [eventId, figureId]
+    )) ?? null;
+    await setRelated(eventId, figureId, on);
+    return { kind: "record", row };
+  }
+  const fig = await queryOne(`SELECT 1 FROM figures WHERE id = ?`, [figureId]);
+  if (!fig) throw new Error(`unknown figure: ${figureId}`);
+  if (!(await tableExists("event_figure_additions"))) throw new Error("jejak.db belum dimigrasi (event_figure_additions)");
+  const has = async (table: string) =>
+    Boolean(await queryOne(`SELECT 1 FROM ${table} WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]));
+  const prev: ListedPrev = {
+    kind: "peristiwa",
+    listed: await has("event_figures"),
+    struck: await has("event_figure_rejections"),
+    added: await has("event_figure_additions"),
+  };
+  if (on) {
+    await ltx(async () => {
+      await setRelatedFigure(eventId, figureId, false);
+      await lrun(`INSERT OR IGNORE INTO event_figure_additions (event_id, figure_id, decided_at) VALUES (?, ?, ?)`,
+                 [eventId, figureId, new Date().toISOString()]);
+    });
+  } else {
+    await setRelatedFigure(eventId, figureId, true);
+  }
+  return prev;
+}
+
+/** Put a figure back on (or off) an event's list as setListed found it. */
+export async function undoListed(eventId: number, figureId: string, prev: ListedPrev): Promise<void> {
+  if (prev.kind === "record") {
+    if (!prev.row) {
+      await lrun(`DELETE FROM record_figures WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]);
+      return;
+    }
+    await lrun(
+      `INSERT INTO record_figures (event_id, figure_id, role, source, quotes, assigned_by)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (event_id, figure_id) DO UPDATE SET role = excluded.role, source = excluded.source,
+         quotes = excluded.quotes, assigned_by = excluded.assigned_by`,
+      [eventId, figureId, prev.row.role, prev.row.source, prev.row.quotes, prev.row.assigned_by]
+    );
+    return;
+  }
+  const put = async (table: string, there: boolean, extra = "") => {
+    if (there) {
+      await lrun(`INSERT OR IGNORE INTO ${table} (event_id, figure_id${extra ? ", decided_at" : ""})
+                  VALUES (?, ?${extra ? ", ?" : ""})`, extra ? [eventId, figureId, extra] : [eventId, figureId]);
+    } else {
+      await lrun(`DELETE FROM ${table} WHERE event_id = ? AND figure_id = ?`, [eventId, figureId]);
+    }
+  };
+  const now = new Date().toISOString();
+  await ltx(async () => {
+    await put("event_figures", prev.listed);
+    await put("event_figure_rejections", prev.struck, now);
+    await put("event_figure_additions", prev.added, now);
+  });
+}
+
+/**
  * Add a figure to a record's Terkait list, or take them off it. Either way
  * the row becomes the curator's, so the participants stage (which rebuilds
  * only its own rows) neither drops nor puts back what the curator decided.

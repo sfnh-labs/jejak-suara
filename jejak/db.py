@@ -135,6 +135,16 @@ CREATE TABLE IF NOT EXISTS event_figure_rejections (
     PRIMARY KEY (event_id, figure_id)
 );
 
+-- Related figures a curator added to a peristiwa by hand: its coverage need
+-- not name them. Re-clustering clears event_figures and promote_peristiwa
+-- re-derives it, putting these back unless they were struck since.
+CREATE TABLE IF NOT EXISTS event_figure_additions (
+    event_id   INTEGER NOT NULL,
+    figure_id  TEXT NOT NULL,
+    decided_at TEXT,
+    PRIMARY KEY (event_id, figure_id)
+);
+
 CREATE TABLE IF NOT EXISTS event_summaries (
     event_id            INTEGER PRIMARY KEY,
     summary_text        TEXT NOT NULL,

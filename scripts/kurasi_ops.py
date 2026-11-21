@@ -130,6 +130,7 @@ def not_a_person(conn, figure_id: str) -> str:
     conn.execute("UPDATE figures SET active = 0 WHERE id = ?", (figure_id,))
     conn.execute("UPDATE figure_candidates SET status = 'rejected' WHERE slug = ?", (figure_id,))
     related = conn.execute("DELETE FROM event_figures WHERE figure_id = ?", (figure_id,)).rowcount
+    conn.execute("DELETE FROM event_figure_additions WHERE figure_id = ?", (figure_id,))
     articles = conn.execute("UPDATE articles SET figure_id = NULL WHERE figure_id = ?",
                             (figure_id,)).rowcount
     records = [r[0] for r in conn.execute(

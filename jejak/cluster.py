@@ -547,7 +547,10 @@ def promote_peristiwa(conn: sqlite3.Connection) -> dict[str, int]:
             "SELECT figure_id FROM event_figure_rejections WHERE event_id = ?",
             (eid,),
         )}
-        for fid in _figures_mentioned(combined):
+        added = [r["figure_id"] for r in conn.execute(
+            "SELECT figure_id FROM event_figure_additions WHERE event_id = ?", (eid,)
+        )]
+        for fid in [*_figures_mentioned(combined), *added]:
             if fid in struck:
                 continue
             conn.execute(

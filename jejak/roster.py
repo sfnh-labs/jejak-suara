@@ -29,7 +29,7 @@ def merge_figure(conn: sqlite3.Connection, dup: str, real: str) -> list[str]:
             done.append(f"{table}: {n} rows {dup} -> {real}")
     done += _merge_participants(conn, dup, real)
     done += _merge_lesson_scopes(conn, dup, real)
-    for table in ("event_figures", "event_figure_rejections"):
+    for table in ("event_figures", "event_figure_rejections", "event_figure_additions"):
         conn.execute(
             f"""INSERT OR IGNORE INTO {table} (event_id, figure_id)
                 SELECT event_id, ? FROM {table} WHERE figure_id = ?""",
