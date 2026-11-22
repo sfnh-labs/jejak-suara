@@ -67,6 +67,7 @@ import {
   SPOT_CHECK_EVERY,
   type Confidence,
   countOpenPointsOn,
+  getLiniChain,
   getNextOpenPoint,
   getNextOpenPointOn,
   getPoint,
@@ -341,7 +342,7 @@ const PLACE = new Map<number, string>();
 
 async function cardText(p: Point): Promise<string> {
   const place = PLACE.get(p.id) ?? "";
-  const ev = await lqueryOne<{ title: string | null }>(`SELECT title FROM events WHERE id = ?`, [p.event_id]);
+  const ev = await lqueryOne<{ title: string | null; event_date: string | null }>(`SELECT title, event_date FROM events WHERE id = ?`, [p.event_id]);
   const x = p.proposal;
   const lines = [
     `<b>${esc(KIND_LABEL[p.kind].toUpperCase())}</b> · ${meter(p)}${checkTag(p)}${p.spot_check ? " · cek acak" : ""}${place}`,
@@ -370,6 +371,14 @@ async function cardText(p: Point): Promise<string> {
     if (alt.length) lines.push(`Kandidat lain: ${alt.map((c) => who(c.id, c.name)).join("; ")}.`);
     if (p.group_size > 1) lines.push(`Jawabanmu berlaku untuk ${p.group_size} kutipan sekaligus.`);
   } else {
+    if (p.kind === "lini" && x.earlier_id) {
+      // The story so far, oldest first, so the follow-up reads in order.
+      const chain = await getLiniChain(x.earlier_id);
+      lines.push("<b>Lini cerita sejauh ini</b>");
+      chain.forEach((c, i) => lines.push(
+        `${i + 1}. ${esc(day(c.event_date))} · ${esc(clip(c.title ?? `Catatan #${c.id}`, 90))}${i < chain.length - 1 && !c.confirmed ? " <i>(usulan)</i>" : ""}`));
+      lines.push(`➡️ ${esc(day(ev?.event_date ?? p.published_at))} · <i>catatan ini</i>`, "");
+    }
     lines.push(`<b>${esc(x.claim)}</b>`);
     if ((p.kind === "terkait" || p.kind === "tentang") && x.figure_id) lines.push(`Tokoh: ${who(x.figure_id, x.name ?? x.figure_id)}`);
     if (p.kind === "tentang" && (x.speaker_name || x.speaker)) lines.push(`Yang bicara: ${esc(x.speaker_name ?? x.speaker ?? "")}`);
