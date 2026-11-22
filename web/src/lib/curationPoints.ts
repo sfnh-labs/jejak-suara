@@ -87,6 +87,8 @@ export interface Point {
   id: number;
   kind: PointKind;
   event_id: number;
+  /** Whether the card's event is a record or a peristiwa. */
+  event_kind: "record" | "peristiwa" | null;
   group_size: number;
   proposal: Proposal;
   article_id: string | null;
@@ -194,7 +196,7 @@ function toPoint(r: Row, cal: Map<string, Confidence>): Point {
   };
 }
 
-const POINT_SELECT = `SELECT p.id, p.kind, p.event_id, p.group_size, p.proposal, p.article_id,
+const POINT_SELECT = `SELECT p.id, p.kind, p.event_id, (SELECT kind FROM events WHERE id = p.event_id) AS event_kind, p.group_size, p.proposal, p.article_id,
             a.source, a.url AS article_url, a.published_at, p.paragraph, p.hl_start, p.hl_end, p.score, p.bucket,
             p.status, p.answer, p.answered_by, p.answered_at, p.spot_check
        FROM curation_points p
@@ -818,11 +820,13 @@ export interface Takedown {
  * takedown does, and its open points are settled, since nothing about a
  * removed catatan is worth asking. The pipeline stops proposing them too.
  */
-export async function rejectRecord(eventId: number, reason: ReasonCode): Promise<Takedown> {
+export async function rejectRecord(eventId: number, reason: ReasonCode, alsoSettle: number[] = []): Promise<Takedown> {
   const ev = await queryOne<{ curated: Verdict | null }>(`SELECT curated FROM events WHERE id = ?`, [eventId]);
   if (!ev) throw new Error(`unknown event: ${eventId}`);
+  // Its own points, and any others asked about it (a Peristiwa card proposing it).
   const open = await query<{ id: number }>(
-    `SELECT id FROM curation_points WHERE event_id = ? AND status IN ('open', 'lewati')`, [eventId]
+    `SELECT id FROM curation_points WHERE status IN ('open', 'lewati')
+        AND (event_id = ? OR id IN (SELECT value FROM json_each(?)))`, [eventId, JSON.stringify(alsoSettle)]
   );
   await setCuration(eventId, "rejected", [reason]);
   await lrun(
