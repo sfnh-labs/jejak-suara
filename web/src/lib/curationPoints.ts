@@ -234,7 +234,8 @@ export async function getPoint(pointId: number): Promise<Point | null> {
 /**
  * The most recent open point of one kind, for answering away from /kurasi
  * (the Telegram bot): the newest catatan first, by its date and then its
- * article's. Skipped ones and those in `exclude` are left out.
+ * article's — but a lini cerita from its first link. Skipped ones and those
+ * in `exclude` are left out.
  */
 export async function getNextOpenPoint(kind: PointKind, exclude: number[] = []): Promise<Point | null> {
   if (!(await pointsReady())) return null;
@@ -244,13 +245,54 @@ export async function getNextOpenPoint(kind: PointKind, exclude: number[] = []):
         LEFT JOIN events e ON e.id = p.event_id
         WHERE p.status = 'open' AND p.kind = ? AND p.id NOT IN (SELECT value FROM json_each(?))
           AND e.curated IS NOT 'rejected'
+          -- A lini cerita is asked from its first link: one waits while the
+          -- link into its earlier catatan is still open to be asked.
+          AND NOT (p.kind = 'lini' AND EXISTS (
+                SELECT 1 FROM curation_points q
+                 WHERE q.kind = 'lini' AND q.status = 'open' AND q.id <> p.id
+                   AND q.event_id = json_extract(p.proposal, '$.earlier_id')
+                   AND json_extract(q.proposal, '$.earlier_id') IS NOT p.event_id
+                   AND q.id NOT IN (SELECT value FROM json_each(?))))
         ORDER BY e.event_date DESC, a.published_at DESC, p.id DESC
         LIMIT 1`,
-      [kind, exclude]
+      [kind, exclude, exclude]
     ),
     calibration(),
   ]);
   return row ? toPoint(row, cal) : null;
+}
+
+export interface ChainStep {
+  id: number;
+  title: string | null;
+  event_date: string | null;
+  /** The link from this one onward was confirmed, not just proposed. */
+  confirmed: boolean;
+}
+
+/**
+ * The lini cerita leading up to `eventId`, oldest first, ending with it: each
+ * step back follows the best link into the catatan that is not rejected.
+ */
+export async function getLiniChain(eventId: number, max = 6): Promise<ChainStep[]> {
+  const steps: ChainStep[] = [];
+  const seen = new Set<number>();
+  let id: number | null = eventId;
+  let confirmed = false;
+  while (id !== null && !seen.has(id) && steps.length < max) {
+    seen.add(id);
+    const ev = await queryOne<{ title: string | null; event_date: string | null }>(
+      `SELECT title, event_date FROM events WHERE id = ?`, [id]);
+    steps.unshift({ id, title: ev?.title ?? null, event_date: ev?.event_date ?? null, confirmed });
+    const back: { earlier_id: number; verdict: string | null } | null = await queryOne(
+      `SELECT l.earlier_id, l.verdict FROM followup_links l JOIN events e ON e.id = l.earlier_id
+        WHERE l.later_id = ? AND (l.verdict IS NULL OR l.verdict IN ('confirmed', 'ya'))
+          AND e.curated IS NOT 'rejected' AND e.status NOT IN ('expired', 'dissolved')
+        ORDER BY l.verdict IS NULL, l.score DESC LIMIT 1`, [id]);
+    id = back?.earlier_id ?? null;
+    confirmed = back?.verdict != null;
+  }
+  return steps;
 }
 
 /**
