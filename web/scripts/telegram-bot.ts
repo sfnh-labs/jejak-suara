@@ -407,7 +407,9 @@ function cardKeyboard(p: Point): Keyboard {
     { text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` },
     { text: "⏭ Lewati", callback_data: a("lewati") },
   ]);
-  rows.push([{ text: "📋 Catatan", callback_data: `v:${p.id}` }, { text: "🗑 Tolak catatan", callback_data: `r:${p.id}:` }]);
+  rows.push([{ text: "📋 Catatan", callback_data: `v:${p.id}` }, { text: `🗑 Tolak ${p.event_kind === "peristiwa" ? "peristiwa" : "catatan"}`, callback_data: `r:${p.id}:` }]);
+  // A Peristiwa card asks about a record; the peristiwa it proposes can go too.
+  if (p.kind === "peristiwa" && p.proposal.peristiwa_id) rows.push([{ text: "🗑 Tolak peristiwa ini", callback_data: `rp:${p.id}:` }]);
   // The article on its outlet's site, in Telegram's own browser.
   if (p.article_url && /^https?:\/\//.test(p.article_url)) {
     rows.push([{ text: `📰 Baca berita${p.source ? ` · ${clip(p.source, 28)}` : ""}`, url: p.article_url }]);
@@ -429,18 +431,18 @@ async function answeredText(p: Point): Promise<string> {
 }
 
 /** Why the catatan comes down: /kurasi's takedown reasons, but for "Lainnya", which needs a note. */
-function reasonKeyboard(p: Point): Keyboard {
+function reasonKeyboard(p: Point, kind: "r" | "rp" = "r"): Keyboard {
   return [
-    ...REASONS.filter((r) => r.code !== "other").map((r) => [{ text: r.label, callback_data: `r:${p.id}:${r.code}` }]),
+    ...REASONS.filter((r) => r.code !== "other").map((r) => [{ text: r.label, callback_data: `${kind}:${p.id}:${r.code}` }]),
     [{ text: "← Kembali", callback_data: `b:${p.id}` }],
   ];
 }
 
-async function takenDownText(p: Point, reason: string): Promise<string> {
-  const ev = await lqueryOne<{ title: string | null }>(`SELECT title FROM events WHERE id = ?`, [p.event_id]);
+async function takenDownText(eventId: number, reason: string): Promise<string> {
+  const ev = await lqueryOne<{ title: string | null; kind: string | null }>(`SELECT title, kind FROM events WHERE id = ?`, [eventId]);
   return [
-    `<b>🗑 Catatan ditolak</b> · ${esc(reasonLabel(reason))}`,
-    `<i>${esc(ev?.title ?? `Catatan #${p.event_id}`)}</i>`,
+    `<b>🗑 ${ev?.kind === "peristiwa" ? "Peristiwa" : "Catatan"} ditolak</b> · ${esc(reasonLabel(reason))}`,
+    `<i>${esc(ev?.title ?? `Catatan #${eventId}`)}</i>`,
     "Tidak tampil di situs; poin-poinnya ditutup.",
   ].join("\n");
 }
@@ -2246,17 +2248,22 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
       const out = await pipelineOp("new-figure", fig.name, ...(fig.role ? ["--role", fig.role] : []), ...(fig.org ? ["--org", fig.org] : []));
       await answer("koreksi", out.split("\n").pop()!.trim());
       note = `Tokoh baru dibuat: ${fig.name}`;
-    } else if (kind === "r") {
+    } else if (kind === "r" || kind === "rp") {
       if (!open) throw new Error("Sudah dijawab.");
+      // r takes down the card's own event; rp the peristiwa a Peristiwa card proposes.
+      const target = kind === "rp" ? Number(p.proposal.peristiwa_id) : p.event_id;
+      if (!Number.isInteger(target) || target <= 0) throw new Error("Peristiwanya tidak ditemukan.");
+      const what = kind === "rp" || p.event_kind === "peristiwa" ? "peristiwa" : "catatan";
       if (!code) {
-        await edit(msg.message_id, `${await cardText(p)}\n\n<b>🗑 Tolak catatan ini? Alasannya:</b>`, reasonKeyboard(p));
+        const name = kind === "rp" ? ` “${esc(String(p.proposal.title ?? ""))}”` : "";
+        await edit(msg.message_id, `${await cardText(p)}\n\n<b>🗑 Tolak ${what}${name || " ini"}? Alasannya:</b>`, reasonKeyboard(p, kind));
       } else {
         if (!REASONS.some((r) => r.code === code && code !== "other")) throw new Error("Alasan tidak dikenal.");
-        const t = await rejectRecord(p.event_id, code as ReasonCode);
+        const t = await rejectRecord(target, code as ReasonCode, [p.id]);
         await forget(s, p.id);
         s.takedowns[p.id] = t;
-        await edit(msg.message_id, await takenDownText(p, code), [[{ text: "Batalkan", callback_data: `x:${p.id}` }]]);
-        note = "Catatan ditolak";
+        await edit(msg.message_id, await takenDownText(target, code), [[{ text: "Batalkan", callback_data: `x:${p.id}` }]]);
+        note = what === "peristiwa" ? "Peristiwa ditolak" : "Catatan ditolak";
       }
     } else if (kind === "x") {
       const t = s.takedowns[p.id];
@@ -2270,7 +2277,7 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
       } else {
         await edit(msg.message_id, await answeredText(back));
       }
-      note = "Catatan dipulihkan";
+      note = "Dipulihkan";
     } else if (kind === "b") {
       if (!open) throw new Error("Sudah dijawab.");
       delete s.picks[p.id];
