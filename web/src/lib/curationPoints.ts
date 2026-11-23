@@ -813,6 +813,7 @@ export interface Takedown {
   event_id: number;
   prev: Verdict | null;
   settled: number[];
+  reason?: ReasonCode;
 }
 
 /**
@@ -833,7 +834,7 @@ export async function rejectRecord(eventId: number, reason: ReasonCode, alsoSett
     `UPDATE curation_points SET status = 'settled' WHERE id IN (SELECT value FROM json_each(?))`,
     [JSON.stringify(open.map((r) => r.id))]
   );
-  return { event_id: eventId, prev: ev.curated === "rejected" ? null : ev.curated, settled: open.map((r) => r.id) };
+  return { event_id: eventId, prev: ev.curated === "rejected" ? null : ev.curated, settled: open.map((r) => r.id), reason };
 }
 
 /** Undo rejectRecord: the catatan back as it was, and its points asked again. */

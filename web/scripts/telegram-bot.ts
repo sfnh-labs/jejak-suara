@@ -173,7 +173,8 @@ interface State {
   /** Messages sent alongside a card (📄 paragraphs), deleted once it is answered. */
   extras: Record<string, number[]>;
   /** Catatan taken down from a card (card's point -> takedown), for its Batalkan. */
-  takedowns: Record<string, Takedown>;
+  /** Takedowns made from a card, in order; one saved before the record-and-peristiwa pair was a lone one. */
+  takedowns: Record<string, Takedown | Takedown[]>;
   /** A card's 📋 Catatan message (point -> message), the quote being put right there, */
   view: Record<string, number>;
   viewQuote: Record<string, number>;
@@ -431,11 +432,37 @@ async function answeredText(p: Point): Promise<string> {
 }
 
 /** Why the catatan comes down: /kurasi's takedown reasons, but for "Lainnya", which needs a note. */
-function reasonKeyboard(p: Point, kind: "r" | "rp" = "r"): Keyboard {
+function reasonKeyboard(p: Point, kind: "r" | "rp" | "ra" = "r"): Keyboard {
   return [
     ...REASONS.filter((r) => r.code !== "other").map((r) => [{ text: r.label, callback_data: `${kind}:${p.id}:${r.code}` }]),
-    [{ text: "← Kembali", callback_data: `b:${p.id}` }],
+    // Back from a second takedown is the first one's message, which keeps its undo.
+    [{ text: "← Kembali", callback_data: kind === "ra" ? `rb:${p.id}` : `b:${p.id}` }],
   ];
+}
+
+const takedownsOf = (s: State, id: number): Takedown[] => {
+  const t = s.takedowns[id];
+  return t ? (Array.isArray(t) ? t : [t]) : [];
+};
+
+/**
+ * On a Peristiwa card the record and the peristiwa it proposes can each be
+ * taken down; once one is, the message offers the other, and undoes both.
+ */
+function takenDownKeyboard(s: State, p: Point): Keyboard {
+  const down = new Set(takedownsOf(s, p.id).map((t) => t.event_id));
+  const rows: Keyboard = [[{ text: "Batalkan", callback_data: `x:${p.id}` }]];
+  const peristiwa = Number(p.proposal.peristiwa_id);
+  if (p.kind === "peristiwa" && peristiwa > 0) {
+    if (!down.has(peristiwa)) rows.push([{ text: "🗑 Tolak juga peristiwa ini", callback_data: `ra:${p.id}:` }]);
+    else if (!down.has(p.event_id)) rows.push([{ text: "🗑 Tolak juga catatan ini", callback_data: `ra:${p.id}:` }]);
+  }
+  return rows;
+}
+
+async function takenDownAll(s: State, p: Point): Promise<string> {
+  const parts = await Promise.all(takedownsOf(s, p.id).map((t) => takenDownText(t.event_id, t.reason ?? "")));
+  return parts.join("\n\n");
 }
 
 async function takenDownText(eventId: number, reason: string): Promise<string> {
@@ -2261,14 +2288,34 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
         if (!REASONS.some((r) => r.code === code && code !== "other")) throw new Error("Alasan tidak dikenal.");
         const t = await rejectRecord(target, code as ReasonCode, [p.id]);
         await forget(s, p.id);
-        s.takedowns[p.id] = t;
-        await edit(msg.message_id, await takenDownText(target, code), [[{ text: "Batalkan", callback_data: `x:${p.id}` }]]);
+        s.takedowns[p.id] = [t];
+        await edit(msg.message_id, await takenDownAll(s, p), takenDownKeyboard(s, p));
         note = what === "peristiwa" ? "Peristiwa ditolak" : "Catatan ditolak";
       }
+    } else if (kind === "ra" || kind === "rb") {
+      // The other half of a Peristiwa card, after one was taken down from it.
+      const done = takedownsOf(s, p.id);
+      if (!done.length) throw new Error("Tidak ada penolakan di sini; buka /kurasi.");
+      const peristiwa = Number(p.proposal.peristiwa_id);
+      const target = done.some((t) => t.event_id === peristiwa) ? p.event_id : peristiwa;
+      if (p.kind !== "peristiwa" || !(peristiwa > 0) || done.some((t) => t.event_id === target)) throw new Error("Keduanya sudah ditolak.");
+      const what = target === peristiwa ? "peristiwa" : "catatan";
+      if (kind === "rb") {
+        await edit(msg.message_id, await takenDownAll(s, p), takenDownKeyboard(s, p));
+      } else if (!code) {
+        const name = target === peristiwa ? ` “${esc(String(p.proposal.title ?? ""))}”` : " ini";
+        await edit(msg.message_id, `${await takenDownAll(s, p)}\n\n<b>🗑 Tolak juga ${what}${name}? Alasannya:</b>`, reasonKeyboard(p, "ra"));
+      } else {
+        if (!REASONS.some((r) => r.code === code && code !== "other")) throw new Error("Alasan tidak dikenal.");
+        s.takedowns[p.id] = [...done, await rejectRecord(target, code as ReasonCode)];
+        await edit(msg.message_id, await takenDownAll(s, p), takenDownKeyboard(s, p));
+        note = what === "peristiwa" ? "Peristiwa juga ditolak" : "Catatan juga ditolak";
+      }
     } else if (kind === "x") {
-      const t = s.takedowns[p.id];
-      if (!t) throw new Error("Penolakan ini tidak bisa dibatalkan dari sini; buka /kurasi.");
-      await restoreRecord(t);
+      const ts = takedownsOf(s, p.id);
+      if (!ts.length) throw new Error("Penolakan ini tidak bisa dibatalkan dari sini; buka /kurasi.");
+      // Latest first, so a point both settled is reopened by the first one.
+      for (const t of [...ts].reverse()) await restoreRecord(t);
       delete s.takedowns[p.id];
       const back = (await getPoint(p.id))!;
       if (back.status === "open") {
