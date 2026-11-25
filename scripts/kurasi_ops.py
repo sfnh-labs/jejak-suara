@@ -14,6 +14,7 @@ page calls this script the moment the curator decides:
     python scripts/kurasi_ops.py cv-draft <proposal-id>    # draft CV entries (Ollama)
     python scripts/kurasi_ops.py jabatan-answer <point-id> <ya|bukan|koreksi|lewati> [--role R --org O]
     python scripts/kurasi_ops.py jabatan-undo <point-id> [--salah]
+    python scripts/kurasi_ops.py points                  # refresh the curation points, as the pipeline does
 
 Prints one line saying what happened. Exits 1, with the reason on stderr,
 when the decision cannot be carried out (a page address already taken, an
@@ -183,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     nf.add_argument("--role")
     nf.add_argument("--org")
     sub.add_parser("refresh")
+    sub.add_parser("points")
     sub.add_parser("rework").add_argument("request_id", type=int)
     sub.add_parser("rework-accept").add_argument("request_id", type=int)
     sub.add_parser("cv-draft").add_argument("proposal_id", type=int)
@@ -221,6 +223,10 @@ def main(argv: list[str] | None = None) -> int:
             line = offices.answer(conn, args.point_id, args.answer, args.role, args.org)
         elif args.cmd == "jabatan-undo":
             line = offices.undo(conn, args.point_id, args.salah)
+        elif args.cmd == "points":
+            from jejak import curation_points
+            out = curation_points.run(conn)
+            line = f"{out['settled']} points settled, {sum(v for k, v in out.items() if k.startswith('open_'))} open"
         else:
             line = f"{candidate_queue.refresh(conn)} names in the queue"
         conn.commit()

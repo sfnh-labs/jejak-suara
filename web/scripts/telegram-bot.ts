@@ -70,7 +70,7 @@ import {
   getLiniChain,
   getNextOpenPoint,
   getNextOpenPointOn,
-  getPoint,
+  getPoint as getStoredPoint,
   rejectRecord,
   restoreRecord,
   undoPoint,
@@ -93,6 +93,32 @@ const KURASI_URL = (process.env.KURASI_URL ?? "").replace(/\/$/, "");
 const API = (process.env.TELEGRAM_API ?? "https://api.telegram.org").replace(/\/$/, "");
 const STATE_KEY = "telegram_bot";
 const POLL_SECONDS = 50;
+
+// After any change from the chat, the curation points are refreshed as the
+// pipeline does (kurasi_ops.py points, a few seconds), in the background, one
+// run at a time; then the open cards are redrawn and those the change
+// answered are closed. Polling turns short meanwhile so that lands promptly.
+let pointsDirty = false;
+let pointsRefresh: Promise<void> | null = null;
+let pointsFresh = false;
+
+function refreshPoints(): void {
+  if (!pointsDirty || pointsRefresh) return;
+  pointsDirty = false;
+  pointsRefresh = pipelineOp("points")
+    .then(() => { pointsFresh = true; })
+    .catch((e) => console.error(`telegram-bot: points refresh: ${e instanceof Error ? e.message : e}`))
+    .finally(() => { pointsRefresh = null; });
+}
+
+/** Redraw the open cards in the chat from the refreshed points; topUp closes the rest. */
+async function redrawCards(s: State): Promise<void> {
+  for (const [id, msg] of Object.entries(s.sent)) {
+    const p = await getPoint(Number(id));
+    // "message is not modified" when nothing changed: nothing to do.
+    if (p?.status === "open") await edit(msg, await cardText(p), cardKeyboard(p)).catch(() => {});
+  }
+}
 
 // SQLite makes an empty file where JEJAK_DB points if there is none, so a
 // start from the wrong folder would answer into nothing: refuse instead.
@@ -419,7 +445,7 @@ function cardKeyboard(p: Point): Keyboard {
   return rows;
 }
 
-const VERDICT: Record<string, string> = { ya: "✅ Ya", bukan: "❌ Bukan", koreksi: "✏️ Dikoreksi", lewati: "⏭ Dilewati" };
+const VERDICT: Record<string, string> = { ya: "✅ Ya", bukan: "❌ Bukan", koreksi: "✏️ Dikoreksi", lewati: "⏭ Dilewati", settled: "☑️ Selesai", auto: "🤖 Otomatis" };
 
 async function answeredText(p: Point): Promise<string> {
   const head = `${VERDICT[p.status] ?? p.status}${p.correction ? ` → ${esc(p.correction)}` : ""}`;
@@ -492,8 +518,27 @@ async function topUp(s: State): Promise<void> {
   for (const [id, msg] of Object.entries(s.sent)) {
     const p = await getPoint(Number(id));
     if (p && p.status === "open") continue;
-    await forget(s, Number(id));
-    await edit(msg, p ? `${await answeredText(p)}\n<i>dijawab di /kurasi</i>` : "<i>Poin ini sudah tidak ada.</i>");
+    // A 📋 view open beside it stays: the change that closed the card may be
+    // one being made there.
+    const n = Number(id);
+    const view = s.view[n];
+    if (view) s.extras[n] = (s.extras[n] ?? []).filter((m) => m !== view);
+    const kept = view ? {
+      picks: s.picks[`v${n}`], found: s.picks[`v${n}f`], fig: s.newFig[`v${n}`],
+      quote: s.viewQuote[n], undo: s.viewUndo[n],
+    } : null;
+    await forget(s, n);
+    if (view && kept) {
+      s.view[n] = view;
+      (s.extras[n] ??= []).push(view);
+      if (kept.picks) s.picks[`v${n}`] = kept.picks;
+      if (kept.found) s.picks[`v${n}f`] = kept.found;
+      if (kept.fig) s.newFig[`v${n}`] = kept.fig;
+      if (kept.quote !== undefined) s.viewQuote[n] = kept.quote;
+      if (kept.undo) s.viewUndo[n] = kept.undo;
+    }
+    const why = p?.status === "settled" ? "terjawab oleh perubahan lain" : p?.status === "auto" ? "dijawab otomatis" : "dijawab di /kurasi";
+    await edit(msg, p ? `${await answeredText(p)}\n<i>${why}</i>` : "<i>Poin ini sudah tidak ada.</i>");
   }
   // More open cards than BATCH (it was lowered): take the extra ones back out of the chat.
   for (const id of Object.keys(s.sent).sort((a, b) => s.sent[b] - s.sent[a]).slice(0, Math.max(0, Object.keys(s.sent).length - BATCH))) {
@@ -1193,6 +1238,62 @@ async function figureCard(s: State, id: string, note = ""): Promise<[string, Key
   }
   rows.push([{ text: "Tutup", callback_data: "f:x" }]);
   return [lines.join("\n"), rows];
+}
+
+// /peristiwa: a peristiwa found by words in its title, opened in the 📋 view
+// as if from a card. That view is keyed by a point; one opened this way has
+// none, so it stands on a stand-in point, id = -event id, that no card shares
+// and whose card buttons refuse (it is never open).
+
+/** A stand-in point for the 📋 view of an event opened without a card. */
+function eventPoint(eventId: number): Point {
+  return {
+    id: -eventId, kind: "peristiwa", event_id: eventId, event_kind: "peristiwa", group_size: 1,
+    proposal: {} as Point["proposal"], article_id: null, source: null, article_url: null, published_at: null,
+    paragraph: null, hl_start: null, hl_end: null, score: null, bucket: null, status: "settled",
+    answered_by: null, answered_at: null, spot_check: false, correction: null, effect: "",
+    confidence: { agreed: 0, answered: 0, value: null },
+  };
+}
+
+/** A point by id, or the stand-in for an event's view (a negative id). */
+async function getPoint(id: number): Promise<Point | null> {
+  if (id < 0) {
+    const ev = await lqueryOne<{ id: number }>(`SELECT id FROM events WHERE id = ?`, [-id]);
+    return ev ? eventPoint(ev.id) : null;
+  }
+  return getStoredPoint(id);
+}
+
+const PERISTIWA_FOUND = 10;
+
+/** Peristiwa whose title has every word typed (any case or accent), newest first; all of them for none. */
+async function findPeristiwa(q: string) {
+  const rows = await lquery<{ id: number; title: string | null; event_date: string | null; curated: string | null }>(
+    `SELECT id, title, event_date, curated FROM events
+      WHERE kind = 'peristiwa' AND status NOT IN ('expired', 'dissolved')
+      ORDER BY event_date DESC, id DESC`
+  );
+  const words = fold(q.slice(0, 200)).split(/\s+/).filter(Boolean);
+  const hits = rows.filter((r) => {
+    const t = fold(r.title ?? "");
+    // From the start of a word: "korup" finds korupsi, "wapres" not cawapres.
+    return words.every((w) => new RegExp(`(^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(t));
+  });
+  return { words, hits };
+}
+
+/** /peristiwa [kata]: the search, or the newest, as a list that opens the 📋 view. */
+async function peristiwaCommand(q: string): Promise<void> {
+  const { words, hits } = await findPeristiwa(q);
+  const shown = hits.slice(0, PERISTIWA_FOUND);
+  const head = words.length
+    ? `<b>📰 Peristiwa “${esc(q)}”</b>${hits.length > shown.length ? ` · ${hits.length} cocok, ${shown.length} terbaru` : ""}`
+    : "<b>📰 Peristiwa terbaru</b> <i>(cari: /peristiwa kata)</i>";
+  const list = shown.map((r, i) =>
+    `<b>${i + 1}.</b> ${esc(day(r.event_date))} · ${esc(r.title ?? `Peristiwa #${r.id}`)}${r.curated === "rejected" ? " <i>(ditolak)</i>" : ""}`).join("\n");
+  const buttons: Keyboard = shown.map((r, i) => [{ text: clip(`${i + 1}. ${r.title ?? `#${r.id}`}`, 40), callback_data: `v:${-r.id}` }]);
+  await send(shown.length ? `${head}\n${list}` : `${head}\n<i>tidak ada</i>`, buttons);
 }
 
 /** A list of figures to open, as a new /tokoh message. */
@@ -2339,7 +2440,7 @@ async function onCallback(s: State, q: NonNullable<Update["callback_query"]>): P
   } catch (e) {
     note = e instanceof Error ? e.message : String(e);
     // Show the card as it now stands, so a stale one doesn't stay tappable.
-    const p = Number.isInteger(id) ? await getPoint(id).catch(() => null) : null;
+    const p = Number.isInteger(id) && id > 0 ? await getPoint(id).catch(() => null) : null;
     if (msg && p && p.status !== "open") {
       await forget(s, p.id);
       const undoable = p.answered_by === "curator" && ["ya", "bukan", "koreksi", "lewati"].includes(p.status);
@@ -2356,6 +2457,7 @@ async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<v
   const rest = text.trim().replace(/^\/\S+\s*/, "").trim();
   if (cmd === "/status") await send(await status());
   else if (cmd === "/tokoh") await tokohCommand(s, rest);
+  else if (cmd === "/peristiwa") await peristiwaCommand(rest);
   else if (cmd === "/draf") {
     if (!(await sendDrafts(s, true))) await send("Tidak ada draf tulis ulang yang menunggu.");
   }
@@ -2408,6 +2510,7 @@ async function main(): Promise<void> {
       { command: "kandidat", description: "Kandidat tokoh baru" },
       { command: "otomatis", description: "Jawaban otomatis per jenis" },
       { command: "tokoh", description: "Ubah data tokoh: /tokoh nama" },
+      { command: "peristiwa", description: "Cari peristiwa: /peristiwa kata" },
       { command: "organisasi", description: "Daftar organisasi: /organisasi nama" },
       { command: "draf", description: "Draf tulis ulang yang menunggu" },
       { command: "status", description: "Jumlah poin terbuka per jenis" },
@@ -2423,15 +2526,22 @@ async function main(): Promise<void> {
   console.log(`telegram-bot: up, ${Object.keys(s.sent).length} cards open in chat ${CHAT}`);
   for (;;) {
     try {
+      const poll = pointsDirty || pointsRefresh || pointsFresh ? 2 : POLL_SECONDS;
       const updates = await tg<Update[]>("getUpdates", {
-        offset: s.offset, timeout: POLL_SECONDS, allowed_updates: ["message", "callback_query"],
-      }, (POLL_SECONDS + 20) * 1000);
+        offset: s.offset, timeout: poll, allowed_updates: ["message", "callback_query"],
+      }, (poll + 20) * 1000);
       for (const u of updates) {
         s.offset = u.update_id + 1;
         const chat = u.callback_query?.message?.chat.id ?? u.message?.chat.id;
         if (String(chat) !== CHAT) continue; // anyone else who finds the bot gets nothing
         if (u.callback_query) await onCallback(s, u.callback_query);
         else if (u.message?.text) await onMessage(s, u.message);
+        pointsDirty = true;
+      }
+      refreshPoints();
+      if (pointsFresh) {
+        pointsFresh = false;
+        await redrawCards(s);
       }
       await topUp(s);
       // Saved again: topUp saved before these, and a restart in between
