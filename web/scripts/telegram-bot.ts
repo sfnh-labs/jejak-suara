@@ -608,8 +608,14 @@ async function showView(s: State, p: Point, note = ""): Promise<void> {
   s.picks[`v${p.id}`] = [...v.quotes.map((q) => `q${q.id}`), ...v.related.map((r) => `f${r.id}`)];
   const rows: Keyboard = [
     ...numbered(v.quotes.length, "🗣", (i) => `vq:${p.id}:${i}`),
-    ...numbered(v.related.length, "✖ Terkait", (i) => `vt:${p.id}:${i}`),
   ];
+  // A Terkait figure's button carries its name, two to a row, so the one
+  // taken off needs no finding in the list above the quotes.
+  v.related.forEach((r, i) => {
+    const b = { text: `✖ ${clip(r.name, 20)}`, callback_data: `vt:${p.id}:${i}` };
+    if (i % 2 === 0) rows.push([b]);
+    else rows[rows.length - 1].push(b);
+  });
   rows.push([{ text: "➕ Tambah Terkait", callback_data: `va:${p.id}` }]);
   const back = s.viewUndo[p.id];
   if (back) rows.push([{ text: back.added ? `↩ Batalkan tambah ${clip(back.name, 18)}` : `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }]);
