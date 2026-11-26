@@ -218,6 +218,10 @@ interface State {
   viewEdit: Record<string, { title?: TitleEdit; down?: Takedown }>;
   /** "Ketik judul baru" prompts from a view: prompt message -> point. */
   viewTitle: Record<string, number>;
+  /** A 🗂 Peristiwa view opened from a card: view (-peristiwa id) -> the card's point. */
+  viewFrom: Record<string, number>;
+  /** The view's menu showing: 🗣 Kutipan ("q"), 👥 Terkait ("t"), or none, the main one. */
+  viewPage: Record<string, "q" | "t">;
   /** The kandidat card: its name and message, names skipped this round, what is
    *  being asked (and its prompt), a typed new figure, choices, rejects to undo. */
   cand: {
@@ -285,6 +289,8 @@ async function loadState(): Promise<State> {
       viewAdd: s.viewAdd && typeof s.viewAdd === "object" ? s.viewAdd : {},
       viewEdit: s.viewEdit && typeof s.viewEdit === "object" ? s.viewEdit : {},
       viewTitle: s.viewTitle && typeof s.viewTitle === "object" ? s.viewTitle : {},
+      viewFrom: s.viewFrom && typeof s.viewFrom === "object" ? s.viewFrom : {},
+      viewPage: s.viewPage && typeof s.viewPage === "object" ? s.viewPage : {},
       cand: {
         ...(s.cand && typeof s.cand === "object" ? s.cand : {}),
         skip: Array.isArray(s.cand?.skip) ? s.cand.skip : [],
@@ -303,7 +309,7 @@ async function loadState(): Promise<State> {
       },
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, viewAdd: {}, viewEdit: {}, viewTitle: {}, cand: { skip: [], rejected: {} }, autoSeen: [], fig: {}, org: {}, drafts: {}, reworkPrompts: {}, reworkWho: {}, publish: { trouble: [] } };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, viewAdd: {}, viewEdit: {}, viewTitle: {}, viewFrom: {}, viewPage: {}, cand: { skip: [], rejected: {} }, autoSeen: [], fig: {}, org: {}, drafts: {}, reworkPrompts: {}, reworkWho: {}, publish: { trouble: [] } };
   }
 }
 
@@ -381,9 +387,16 @@ async function cardText(p: Point): Promise<string> {
   const place = PLACE.get(p.id) ?? "";
   const ev = await lqueryOne<{ title: string | null; event_date: string | null }>(`SELECT title, event_date FROM events WHERE id = ?`, [p.event_id]);
   const x = p.proposal;
+  // A Peristiwa card names two events: the catatan asked about, and the
+  // peristiwa (by its title now, renamed or not) it would join.
+  const peristiwa = p.kind === "peristiwa" && Number(x.peristiwa_id) > 0
+    ? await lqueryOne<{ title: string | null }>(`SELECT title FROM events WHERE id = ?`, [Number(x.peristiwa_id)])
+    : null;
+  const was = String(x.title ?? "");
+  const now = (t: string) => (peristiwa?.title && was ? t.split(was).join(peristiwa.title) : t);
   const lines = [
     `<b>${esc(KIND_LABEL[p.kind].toUpperCase())}</b> · ${meter(p)}${checkTag(p)}${p.spot_check ? " · cek acak" : ""}${place}`,
-    `<i>${esc(ev?.title ?? `Catatan #${p.event_id}`)}</i>`,
+    `${peristiwa ? "Catatan: " : ""}<i>${esc(ev?.title ?? `Catatan #${p.event_id}`)}</i>`,
     "",
   ];
   if (p.paragraph) {
@@ -416,11 +429,11 @@ async function cardText(p: Point): Promise<string> {
         `${i + 1}. ${esc(day(c.event_date))} · ${esc(clip(c.title ?? `Catatan #${c.id}`, 90))}${i < chain.length - 1 && !c.confirmed ? " <i>(usulan)</i>" : ""}`));
       lines.push(`➡️ ${esc(day(ev?.event_date ?? p.published_at))} · <i>catatan ini</i>`, "");
     }
-    lines.push(`<b>${esc(x.claim)}</b>`);
+    lines.push(`<b>${esc(now(x.claim))}</b>`);
     if ((p.kind === "terkait" || p.kind === "tentang") && x.figure_id) lines.push(`Tokoh: ${who(x.figure_id, x.name ?? x.figure_id)}`);
     if (p.kind === "tentang" && (x.speaker_name || x.speaker)) lines.push(`Yang bicara: ${esc(x.speaker_name ?? x.speaker ?? "")}`);
     if (p.kind === "jabatan") lines.push(`Sekarang tertulis: ${x.current ? esc(x.current) : "<i>kosong</i>"}`);
-    lines.push(`<b>Jika Ya:</b> ${esc(p.effect)}`);
+    lines.push(`<b>Jika Ya:</b> ${esc(now(p.effect))}`);
     lines.push(`<b>Jika Bukan:</b> ${esc(noEffect(p))}`);
   }
   return lines.join("\n");
@@ -437,25 +450,35 @@ function cardKeyboard(p: Point): Keyboard {
     // long one gets a row to itself, short ones go at most two to a row.
     rows.push([{ text: "Bukan tokoh yang dilacak", callback_data: a("nt") }]);
     if (x.figure_id) rows.push([{ text: `Bukan ${x.name ?? "dia"}, belum tahu siapa`, callback_data: a("bukan") }]);
+    rows.push([{ text: "🔎 Tokoh lain", callback_data: `k:${p.id}:0` }, { text: "⏩ Lewati", callback_data: a("lewati") }]);
   } else {
-    rows.push([{ text: "Ya", callback_data: a("ya") }, { text: "Bukan", callback_data: a("bukan") }]);
+    // The decision on one line, Ya last, where the thumb lands.
+    rows.push([
+      { text: "⏩ Lewati", callback_data: a("lewati") },
+      { text: "❌ Bukan", callback_data: a("bukan") },
+      { text: "✔️ Ya", callback_data: a("ya") },
+    ]);
+    // Koreksi answers "not this, but that": named for what it puts instead.
+    const other: Partial<Record<PointKind, string>> = {
+      peristiwa: "🔀 Peristiwa lain", lini: "🔀 Catatan lain", terkait: "🔀 Tokoh lain", tentang: "🔀 Tokoh lain", jabatan: "✏️ Jabatan lain",
+    };
+    // On a Peristiwa card it is in the 🗂 Peristiwa view, beside the peristiwa it replaces.
+    if (!(p.kind === "peristiwa" && Number(p.proposal.peristiwa_id) > 0)) rows.push([{ text: other[p.kind] ?? "✏️ Koreksi", callback_data: `k:${p.id}:0` }]);
   }
-  rows.push([
-    { text: p.kind === "pembicara" ? "🔎 Tokoh lain" : "✏️ Koreksi", callback_data: `k:${p.id}:0` },
-    { text: "⏭ Lewati", callback_data: a("lewati") },
-  ]);
-  rows.push([{ text: "📋 Catatan", callback_data: `v:${p.id}` }, { text: `🗑 Tolak ${p.event_kind === "peristiwa" ? "peristiwa" : "catatan"}`, callback_data: `r:${p.id}:` }]);
-  // A Peristiwa card asks about a record; the peristiwa it proposes can go too.
-  if (p.kind === "peristiwa" && p.proposal.peristiwa_id) rows.push([{ text: "🗑 Tolak peristiwa ini", callback_data: `rp:${p.id}:` }]);
-  // The article on its outlet's site, in Telegram's own browser.
+  // Each event on the card opens its own view, where it is renamed or
+  // rejected: the catatan, and on a Peristiwa card the peristiwa it would join.
+  const views: Keyboard[number] = [{ text: `📋 ${p.event_kind === "peristiwa" ? "Peristiwa" : "Catatan"}`, callback_data: `v:${p.id}` }];
+  if (p.kind === "peristiwa" && Number(p.proposal.peristiwa_id) > 0) views.push({ text: "🗂 Peristiwa", callback_data: `vpe:${p.id}` });
+  rows.push(views);
+  if (KURASI_URL) rows.push([{ text: "Buka di /kurasi", url: `${KURASI_URL}/kurasi/${p.event_id}` }]);
+  // The article on its outlet's site, in Telegram's own browser: always the last row.
   if (p.article_url && /^https?:\/\//.test(p.article_url)) {
     rows.push([{ text: `📰 Baca berita${p.source ? ` · ${clip(p.source, 28)}` : ""}`, url: p.article_url }]);
   }
-  if (KURASI_URL) rows.push([{ text: "Buka di /kurasi", url: `${KURASI_URL}/kurasi/${p.event_id}` }]);
   return rows;
 }
 
-const VERDICT: Record<string, string> = { ya: "✅ Ya", bukan: "❌ Bukan", koreksi: "✏️ Dikoreksi", lewati: "⏭ Dilewati", settled: "☑️ Selesai", auto: "🤖 Otomatis" };
+const VERDICT: Record<string, string> = { ya: "✔️ Ya", bukan: "❌ Bukan", koreksi: "✏️ Dikoreksi", lewati: "⏩ Dilewati", settled: "☑️ Selesai", auto: "🤖 Otomatis" };
 
 async function answeredText(p: Point): Promise<string> {
   const head = `${VERDICT[p.status] ?? p.status}${p.correction ? ` → ${esc(p.correction)}` : ""}`;
@@ -535,7 +558,7 @@ async function topUp(s: State): Promise<void> {
     if (view) s.extras[n] = (s.extras[n] ?? []).filter((m) => m !== view);
     const kept = view ? {
       picks: s.picks[`v${n}`], found: s.picks[`v${n}f`], fig: s.newFig[`v${n}`],
-      quote: s.viewQuote[n], undo: s.viewUndo[n], made: s.viewEdit[n],
+      quote: s.viewQuote[n], undo: s.viewUndo[n], made: s.viewEdit[n], page: s.viewPage[n],
     } : null;
     await forget(s, n);
     if (view && kept) {
@@ -547,6 +570,7 @@ async function topUp(s: State): Promise<void> {
       if (kept.quote !== undefined) s.viewQuote[n] = kept.quote;
       if (kept.undo) s.viewUndo[n] = kept.undo;
       if (kept.made) s.viewEdit[n] = kept.made;
+      if (kept.page) s.viewPage[n] = kept.page;
     }
     const why = p?.status === "settled" ? "terjawab oleh perubahan lain" : p?.status === "auto" ? "dijawab otomatis" : "dijawab di /kurasi";
     await edit(msg, p ? `${await answeredText(p)}\n<i>${why}</i>` : "<i>Poin ini sudah tidak ada.</i>");
@@ -658,23 +682,40 @@ function numbered(n: number, label: string, data: (i: number) => string): Keyboa
 }
 
 /** Send the view, or redraw it in place; `note` says what just changed. */
-async function showView(s: State, p: Point, note = ""): Promise<void> {
+async function showView(s: State, p: Point, note = "", replyTo?: number): Promise<void> {
   const v = await viewText(p, note);
   if (!v) throw new Error("Catatannya tidak ditemukan.");
   s.picks[`v${p.id}`] = [...v.quotes.map((q) => `q${q.id}`), ...v.related.map((r) => `f${r.id}`)];
-  const rows: Keyboard = [
-    ...numbered(v.quotes.length, "🗣", (i) => `vq:${p.id}:${i}`),
-  ];
-  // A Terkait figure's button carries its name, two to a row, so the one
-  // taken off needs no finding in the list above the quotes.
-  v.related.forEach((r, i) => {
-    const b = { text: `✖ ${clip(r.name, 20)}`, callback_data: `vt:${p.id}:${i}` };
-    if (i % 2 === 0) rows.push([b]);
-    else rows[rows.length - 1].push(b);
-  });
-  rows.push([{ text: "➕ Tambah Terkait", callback_data: `va:${p.id}` }]);
+  // A view sent fresh starts on its main menu; a redraw stays where it was.
+  if (!s.view[p.id]) delete s.viewPage[p.id];
+  const page = s.viewPage[p.id];
+  const rows: Keyboard = [];
   const back = s.viewUndo[p.id];
-  if (back) rows.push([{ text: back.added ? `↩ Batalkan tambah ${clip(back.name, 18)}` : `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }]);
+  const undo = back ? [{ text: back.added ? `↩ Batalkan tambah ${clip(back.name, 18)}` : `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }] : null;
+  if (page === "q") {
+    // 🗣 Kutipan: a quote's number, to put its speaker right.
+    rows.push(...numbered(v.quotes.length, "🗣", (i) => `vq:${p.id}:${i}`));
+    rows.push([{ text: "← Kembali", callback_data: `vm:${p.id}:` }]);
+    await drawView(s, p, `${v.text}\n\n<b>🗣 Pilih nomor kutipan yang pembicaranya salah.</b>`, rows, replyTo);
+    return;
+  }
+  if (page === "t") {
+    // 👥 Terkait: a figure's button carries its name, two to a row.
+    v.related.forEach((r, i) => {
+      const b = { text: `✖ ${clip(r.name, 20)}`, callback_data: `vt:${p.id}:${i}` };
+      if (i % 2 === 0) rows.push([b]);
+      else rows[rows.length - 1].push(b);
+    });
+    rows.push([{ text: "➕ Tambah Terkait", callback_data: `va:${p.id}` }]);
+    if (undo) rows.push(undo);
+    rows.push([{ text: "← Kembali", callback_data: `vm:${p.id}:` }]);
+    await drawView(s, p, `${v.text}\n\n<b>👥 Ketuk nama untuk menghapusnya dari Terkait.</b>`, rows, replyTo);
+    return;
+  }
+  const lists = [{ text: `👥 Terkait · ${v.related.length}`, callback_data: `vm:${p.id}:t` }];
+  if (v.quotes.length) lists.unshift({ text: `🗣 Kutipan · ${v.quotes.length}`, callback_data: `vm:${p.id}:q` });
+  rows.push(lists);
+  if (undo) rows.push(undo);
   const unchecked = await getUncheckedCount(p.event_id);
   if (unchecked) rows.push([{ text: `🔍 Cek ${unchecked} keputusan otomatis`, callback_data: `vc:${p.id}` }]);
   rows.push([{ text: "👤 Ubah data tokoh", callback_data: `vf:${p.id}` }, { text: "✍️ Tulis ulang", callback_data: `vw:${p.id}` }]);
@@ -683,13 +724,21 @@ async function showView(s: State, p: Point, note = ""): Promise<void> {
     v.rejected ? { text: `♻️ Pulihkan ${v.what}`, callback_data: `vdu:${p.id}` } : { text: `🗑 Tolak ${v.what}`, callback_data: `vd:${p.id}` },
   ]);
   if (s.viewEdit[p.id]?.title) rows.push([{ text: "↩ Kembalikan judul lama", callback_data: `vgu:${p.id}` }]);
+  // Opened from a Peristiwa card still open: the card's "not this one, that one".
+  const card = s.viewFrom[p.id];
+  if (card && s.sent[card]) rows.push([{ text: "🔀 Bukan peristiwa ini: pilih yang lain", callback_data: `vk:${p.id}` }]);
   rows.push([{ text: "Tutup", callback_data: `vx:${p.id}` }]);
+  await drawView(s, p, v.text, rows, replyTo);
+}
+
+/** The view's message: redrawn in place, or sent under the card (or `replyTo`). */
+async function drawView(s: State, p: Point, text: string, rows: Keyboard, replyTo?: number): Promise<void> {
   const at = s.view[p.id];
   if (at) {
-    await edit(at, v.text, rows);
+    await edit(at, text, rows);
     return;
   }
-  const id = await send(v.text, rows, { reply_parameters: { message_id: s.sent[p.id] ?? 0, allow_sending_without_reply: true } });
+  const id = await send(text, rows, { reply_parameters: { message_id: replyTo ?? s.sent[p.id] ?? 0, allow_sending_without_reply: true } });
   s.view[p.id] = id;
   (s.extras[p.id] ??= []).push(id);
 }
@@ -773,6 +822,21 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
     await showView(s, p);
     return "";
   }
+  if (kind === "vpe") {
+    // The peristiwa a Peristiwa card proposes, in a view of its own (the one
+    // /peristiwa opens), sent fresh under the card.
+    const id = Number(p.proposal.peristiwa_id);
+    if (!(id > 0)) throw new Error("Peristiwanya tidak ditemukan.");
+    const ev = eventPoint(id);
+    const old = s.view[ev.id];
+    if (old) {
+      await drop(old);
+      delete s.view[ev.id];
+    }
+    s.viewFrom[ev.id] = p.id;
+    await showView(s, ev, "", msgId);
+    return "";
+  }
   // The tap came from the view itself: its message, even after a restart.
   s.view[p.id] = msgId;
   if (kind === "vx") {
@@ -782,7 +846,27 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
     delete s.viewQuote[p.id];
     delete s.viewUndo[p.id];
     delete s.viewEdit[p.id];
+    delete s.viewFrom[p.id];
+    delete s.viewPage[p.id];
     return "";
+  }
+  if (kind === "vm") {
+    // The view's menus: 🗣 Kutipan, 👥 Terkait, or (no code) the main one.
+    if (code === "q" || code === "t") s.viewPage[p.id] = code;
+    else delete s.viewPage[p.id];
+    await showView(s, p);
+    return "";
+  }
+  if (kind === "vk") {
+    // The choice is made on the card, just above: the view makes way for it.
+    const c = s.viewFrom[p.id] ? await getPoint(s.viewFrom[p.id]) : null;
+    const at = c ? s.sent[c.id] : undefined;
+    if (!c || !at || c.status !== "open") throw new Error("Kartunya sudah dijawab.");
+    await drop(msgId);
+    delete s.view[p.id];
+    delete s.viewFrom[p.id];
+    await showEvents(s, c, at, 0);
+    return "Pilih peristiwanya di kartu";
   }
   if (kind === "vq") {
     await showQuoteFix(s, p, Number(viewPick(s, p, Number(code), "q")));
@@ -2349,7 +2433,9 @@ async function forget(s: State, pointId: number): Promise<void> {
   delete s.viewQuote[pointId];
   delete s.viewUndo[pointId];
   delete s.viewEdit[pointId];
+  delete s.viewPage[pointId];
   for (const [m, id] of Object.entries(s.viewTitle)) if (id === pointId) delete s.viewTitle[m];
+  for (const [v, id] of Object.entries(s.viewFrom)) if (id === pointId) delete s.viewFrom[v];
   for (const [m, id] of Object.entries(s.prompts)) if (id === pointId) delete s.prompts[m];
   for (const [m, id] of Object.entries(s.viewPrompts)) if (id === pointId) delete s.viewPrompts[m];
   for (const [m, id] of Object.entries(s.viewAdd)) if (id === pointId) delete s.viewAdd[m];
