@@ -293,6 +293,22 @@ CREATE TABLE IF NOT EXISTS curation_labels (
     decided_at TEXT NOT NULL
 );
 
+-- Which articles of a peristiwa a curator says belong to its story ('in') and
+-- which do not ('out'), from the Telegram 📋 view. jejak/cluster_labels.py
+-- moves an 'out' article off the event, keeps the clustering from putting
+-- the pairs back together or apart, and scores clustering rules against them.
+-- `anchor_id`: an article of the story the 'out' one was judged against.
+CREATE TABLE IF NOT EXISTS cluster_labels (
+    article_id TEXT NOT NULL,
+    event_id   INTEGER NOT NULL,   -- the peristiwa it was judged on
+    verdict    TEXT NOT NULL,      -- 'in' | 'out'
+    anchor_id  TEXT,
+    decided_by TEXT NOT NULL DEFAULT 'curator',
+    decided_at TEXT NOT NULL,
+    applied_at TEXT,               -- when an 'out' article was moved off
+    PRIMARY KEY (article_id, event_id)
+);
+
 -- The names awaiting a curator in /kurasi/kandidat: evidence refreshed by
 -- jejak/candidate_queue.py from figure_mentions, decisions written by the
 -- curator. A promote or reject is applied the moment it is made

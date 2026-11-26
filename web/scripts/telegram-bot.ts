@@ -73,6 +73,9 @@ import {
   getPoint as getStoredPoint,
   rejectRecord,
   restoreRecord,
+  confirmClusterRest,
+  getClusterArticles,
+  setClusterOut,
   setEventTitle,
   undoPoint,
   undoTitle,
@@ -677,6 +680,7 @@ async function showView(s: State, p: Point, note = ""): Promise<void> {
   if (back) rows.push([{ text: back.added ? `↩ Batalkan tambah ${clip(back.name, 18)}` : `↩ Kembalikan ${clip(back.name, 22)}`, callback_data: `vr:${p.id}` }]);
   const unchecked = await getUncheckedCount(p.event_id);
   if (unchecked) rows.push([{ text: `🔍 Cek ${unchecked} keputusan otomatis`, callback_data: `vc:${p.id}` }]);
+  if (v.what === "peristiwa") rows.push([{ text: "🧩 Artikel: mana yang bukan kejadian ini?", callback_data: `vk:${p.id}:0` }]);
   rows.push([{ text: "👤 Ubah data tokoh", callback_data: `vf:${p.id}` }, { text: "✍️ Tulis ulang", callback_data: `vw:${p.id}` }]);
   rows.push([
     { text: "✏️ Ganti judul", callback_data: `vg:${p.id}` },
@@ -701,6 +705,52 @@ function viewPick(s: State, p: Point, i: number, kind: "q" | "f"): string {
   const pick = of[i];
   if (!pick) throw new Error("Daftar ini sudah berubah; buka 📋 Catatan lagi.");
   return pick.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// 🧩 A peristiwa's articles: 🚫 the ones that are another story, then ✅ the
+// rest as one. The pipeline moves the 🚫 ones off at its next run, keeps the
+// clustering to both, and scores its rules against them (cluster-eval).
+
+const CLUSTER_PAGE = 15;
+
+async function showClusterArticles(s: State, p: Point, page: number, note = ""): Promise<void> {
+  const all = await getClusterArticles(p.event_id);
+  if (!all.length) throw new Error("Peristiwa ini tidak punya artikel.");
+  const pages = Math.ceil(all.length / CLUSTER_PAGE);
+  page = Math.min(Math.max(0, page), pages - 1);
+  const shown = all.slice(page * CLUSTER_PAGE, (page + 1) * CLUSTER_PAGE);
+  s.picks[`v${p.id}k`] = shown.map((a) => a.id);
+  const item = await getItem(p.event_id);
+  const out = all.filter((a) => a.verdict === "out").length;
+  const confirmed = all.filter((a) => a.verdict === "in").length;
+  const lines = [
+    `<b>🧩 Artikel peristiwa ini</b> (${all.length} artikel, ${new Set(all.map((a) => a.source)).size} media${pages > 1 ? ` · hal. ${page + 1}/${pages}` : ""})`,
+    `<i>${esc(item?.title ?? `Peristiwa #${p.event_id}`)}</i>`,
+    "",
+    ...shown.map((a, i) => {
+      const mark = a.verdict === "out" ? "🚫 " : a.verdict === "in" ? "✔ " : "";
+      const t = `${mark}${esc(a.source)} · ${esc(day(a.published_at))} · ${esc(clip(a.title ?? "(tanpa judul)", 90))}`;
+      return `<b>${page * CLUSTER_PAGE + i + 1}.</b> ${a.verdict === "out" ? `<s>${t}</s>` : t}`;
+    }),
+    "",
+    "<i>🚫 = bukan kejadian ini: keluar dari peristiwa pada proses berikutnya. ✅ menandai sisanya satu kejadian. Keduanya menjadi contoh untuk menguji aturan pengelompokan.</i>",
+  ];
+  if (out || confirmed) lines.push(`🚫 ${out} · ✔ ${confirmed}`);
+  if (note) lines.push("", note);
+  const rows: Keyboard = [];
+  shown.forEach((a, i) => {
+    if (i % 5 === 0) rows.push([]);
+    const n = page * CLUSTER_PAGE + i + 1;
+    rows[rows.length - 1].push({ text: a.verdict === "out" ? `↩ ${n}` : `🚫 ${n}`, callback_data: `vko:${p.id}:${page}.${i}` });
+  });
+  const nav: Keyboard[number] = [];
+  if (page > 0) nav.push({ text: "‹ Sebelumnya", callback_data: `vk:${p.id}:${page - 1}` });
+  if (page < pages - 1) nav.push({ text: "Berikutnya ›", callback_data: `vk:${p.id}:${page + 1}` });
+  if (nav.length) rows.push(nav);
+  rows.push([{ text: "✅ Sisanya satu kejadian", callback_data: `vki:${p.id}:${page}` }]);
+  rows.push([{ text: "← Kembali", callback_data: `v:${p.id}` }]);
+  await edit(s.view[p.id], lines.join("\n"), rows);
 }
 
 /** One quote's speaker to put right: the view with that quote's choices. */
@@ -787,6 +837,28 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
   if (kind === "vq") {
     await showQuoteFix(s, p, Number(viewPick(s, p, Number(code), "q")));
     return "";
+  }
+  if (kind === "vk") {
+    await showClusterArticles(s, p, Number(code) || 0);
+    return "";
+  }
+  if (kind === "vko") {
+    const [page, i] = (code ?? "").split(".").map(Number);
+    const aid = s.picks[`v${p.id}k`]?.[i];
+    if (!aid) throw new Error("Daftar ini sudah berubah; buka 🧩 Artikel lagi.");
+    const a = (await getClusterArticles(p.event_id)).find((x) => x.id === aid);
+    if (!a) throw new Error("Artikel ini sudah tidak di peristiwa ini.");
+    const out = a.verdict !== "out";
+    await setClusterOut(p.event_id, aid, out);
+    await showClusterArticles(s, p, page, out
+      ? `🚫 ${esc(a.source)}: bukan kejadian ini; keluar pada proses berikutnya.`
+      : `↩ ${esc(a.source)} tetap di peristiwa ini.`);
+    return out ? "Ditandai bukan kejadian ini" : "Dibatalkan";
+  }
+  if (kind === "vki") {
+    const n = await confirmClusterRest(p.event_id);
+    await showClusterArticles(s, p, Number(code) || 0, `✅ ${n} artikel ditandai satu kejadian.`);
+    return "Sisanya satu kejadian";
   }
   if (kind === "vt") {
     const fid = viewPick(s, p, Number(code), "f");

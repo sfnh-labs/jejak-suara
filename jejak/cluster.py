@@ -14,7 +14,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     import numpy as np
@@ -250,14 +250,17 @@ def _sits_with(ev: _Open, vec, lead: set[str], idf: _Idf) -> bool:
 
 def _best_event(open_events: list[_Open], vec, toks: set[str], when: datetime,
                 figure_id: str | None, window: timedelta, idf: _Idf,
-                lead: set[str] | None = None) -> _Open | None:
-    """The open event an article belongs to, or None for a new one."""
+                lead: set[str] | None = None,
+                allowed: Callable[[_Open], bool] | None = None) -> _Open | None:
+    """The open event an article belongs to, or None for a new one.
+
+    `allowed` turns down an event the curator's labels keep the article from."""
     is_general = figure_id is None
     threshold = PERISTIWA_THRESHOLD if is_general else THRESHOLD
     min_shared = PERISTIWA_MIN_SHARED if is_general else MIN_SHARED
     match, best = None, threshold
     for ev in open_events:
-        if ev.figure_id != figure_id:
+        if ev.figure_id != figure_id or (allowed is not None and not allowed(ev)):
             continue
         if abs((when - ev.when).total_seconds()) > window.total_seconds():
             continue
@@ -435,6 +438,9 @@ def cluster(conn: sqlite3.Connection) -> dict[str, int]:
         stats["clustered"] += 1
 
     conn.commit()
+    # Articles the curator took off a peristiwa leave it before it is retitled.
+    from jejak import cluster_labels
+    stats["split_off"] = cluster_labels.apply_out(conn)
     stats["retitled"] = retitle_events(conn)
     stats.update(promote_peristiwa(conn))
     stats["pruned"] = prune_candidates(conn)
@@ -606,8 +612,10 @@ def prune_candidates(conn: sqlite3.Connection) -> int:
         conn.commit()
         return len(kept)
     marks = ",".join("?" * len(stale))
+    # Nor one the curator labelled: it is what cluster-eval measures against.
     doomed = (f"SELECT id FROM articles WHERE event_id IN ({marks}) AND id NOT IN "
-              "(SELECT article_id FROM figure_mentions)")
+              "(SELECT article_id FROM figure_mentions) AND id NOT IN "
+              "(SELECT article_id FROM cluster_labels)")
     conn.execute(f"DELETE FROM article_scans WHERE article_id IN ({doomed})", stale)
     conn.execute(f"DELETE FROM articles WHERE id IN ({doomed})", stale)
     conn.execute(
@@ -648,6 +656,69 @@ def _move_quotes(conn: sqlite3.Connection, article_id: str, event_id: int) -> No
         conn.execute("DELETE FROM event_quotes WHERE id = ?", (q["id"],))
 
 
+def _peristiwa_articles(conn: sqlite3.Connection, since: str) -> tuple[dict, list]:
+    """recluster_peristiwa's material: the peristiwa dated `since` or later
+    and their general articles, oldest first."""
+    # Expired too: a repair leaves its under-corroborated pieces expired, and a
+    # later repair under better rules has to be able to regroup them.
+    statuses = ("candidate", "new", "summarized", "approved", "expired")
+    marks = ",".join("?" * len(statuses))
+    old_events = {r["id"]: r for r in conn.execute(
+        f"""SELECT id, status, curated FROM events
+             WHERE kind = 'peristiwa' AND event_date >= ? AND status IN ({marks})""",
+        (since, *statuses))}
+    if not old_events:
+        return {}, []
+    ids = ",".join(str(i) for i in old_events)
+    arts = conn.execute(
+        f"""SELECT id, source, title, summary, body, published_at, event_id FROM articles
+             WHERE event_id IN ({ids}) AND figure_id IS NULL
+             ORDER BY published_at, id""").fetchall()
+    return old_events, arts
+
+
+def _regroup(conn: sqlite3.Connection, arts: list, window: timedelta,
+             labels=None) -> tuple[list[_Open], list[list[sqlite3.Row]]]:
+    """Cluster `arts` afresh under the current peristiwa rules.
+
+    With `labels` (cluster_labels.Labels) the curator's word wins: an article
+    goes with the articles it was confirmed with, and never with one it was
+    marked apart from. cluster-eval leaves them out, to measure the rules.
+    """
+    texts = {a["id"]: _text(a) for a in arts}
+    toks = {a["id"]: _tokens(texts[a["id"]]) for a in arts}
+    leads = {a["id"]: _lead_tokens(a) for a in arts}
+    idf = _Idf(leads.values())
+    clusters: list[_Open] = []
+    members: list[list[sqlite3.Row]] = []
+    where: dict[str, int] = {}
+    for a in arts:
+        aid = a["id"]
+        vec = _embed_article(conn, aid, texts[aid])
+        when = _parse(a["published_at"])
+        hit = allowed = None
+        if labels:
+            apart = labels.apart.get(aid, set())
+
+            def allowed(ev: _Open, apart=apart) -> bool:
+                return not any(where.get(x) == ev.event_id for x in apart)
+
+            for x in sorted(labels.together.get(aid, ())):
+                if x in where and allowed(clusters[where[x]]):
+                    hit = clusters[where[x]]
+                    break
+        if hit is None:
+            hit = _best_event(clusters, vec, toks[aid], when, None, window, idf, leads[aid], allowed)
+        if hit is None:
+            hit = _Open(len(clusters), None, when, _unit(vec), vec, set())
+            clusters.append(hit)
+            members.append([])
+        hit.add(vec, toks[aid], leads[aid])
+        members[hit.event_id].append(a)
+        where[aid] = hit.event_id
+    return clusters, members
+
+
 def recluster_peristiwa(conn: sqlite3.Connection, since: str, apply: bool = False) -> dict:
     """Cluster again, under the current rules, the general articles of the
     peristiwa dated `since` or later: the repair for peristiwa that drifted
@@ -665,47 +736,28 @@ def recluster_peristiwa(conn: sqlite3.Connection, since: str, apply: bool = Fals
 
     Without `apply` nothing is written: the counts say what it would do.
     """
-    # Expired too: a repair leaves its under-corroborated pieces expired, and a
-    # later repair under better rules has to be able to regroup them.
-    statuses = ("candidate", "new", "summarized", "approved", "expired")
-    marks = ",".join("?" * len(statuses))
-    old_events = {r["id"]: r for r in conn.execute(
-        f"""SELECT id, status, curated FROM events
-             WHERE kind = 'peristiwa' AND event_date >= ? AND status IN ({marks})""",
-        (since, *statuses))}
+    old_events, arts = _peristiwa_articles(conn, since)
     if not old_events:
         return {"events": 0}
-    ids = ",".join(str(i) for i in old_events)
-    arts = conn.execute(
-        f"""SELECT id, source, title, summary, body, published_at, event_id FROM articles
-             WHERE event_id IN ({ids}) AND figure_id IS NULL
-             ORDER BY published_at, id""").fetchall()
-    texts = {a["id"]: _text(a) for a in arts}
-    toks = {a["id"]: _tokens(texts[a["id"]]) for a in arts}
-    leads = {a["id"]: _lead_tokens(a) for a in arts}
-    idf = _Idf(leads.values())
+    from jejak import cluster_labels
+    labels = cluster_labels.load(conn)
     window = timedelta(days=WINDOW_DAYS)
+    clusters, members = _regroup(conn, arts, window, labels)
 
-    clusters: list[_Open] = []
-    members: list[list[sqlite3.Row]] = []
-    for a in arts:
-        vec = _embed_article(conn, a["id"], texts[a["id"]])
-        when = _parse(a["published_at"])
-        hit = _best_event(clusters, vec, toks[a["id"]], when, None, window, idf, leads[a["id"]])
-        if hit is None:
-            hit = _Open(len(clusters), None, when, _unit(vec), vec, set())
-            clusters.append(hit)
-            members.append([])
-        hit.add(vec, toks[a["id"]], leads[a["id"]])
-        members[hit.event_id].append(a)
-
-    # Ids go to the biggest clusters first, each to the event most of its
-    # articles came from.
+    # Ids go to the clusters the curator confirmed first, then to the biggest,
+    # each to the event most of its articles came from.
     taken: dict[int, int] = {}
-    order = sorted(range(len(clusters)), key=lambda i: -len(members[i]))
+    order = sorted(range(len(clusters)), key=lambda i: (
+        not any(a["id"] in labels.home for a in members[i]), -len(members[i])))
     for i in order:
-        for eid, _ in Counter(a["event_id"] for a in members[i]).most_common():
-            if eid not in taken.values():
+        # A cluster holding articles the curator confirmed on an event keeps
+        # that event's id, whatever the rest of it came from.
+        votes = Counter(a["event_id"] for a in members[i])
+        for a in members[i]:
+            if a["id"] in labels.home:
+                votes[labels.home[a["id"]]] += len(members[i])
+        for eid, _ in votes.most_common():
+            if eid in old_events and eid not in taken.values():
                 taken[i] = eid
                 break
     outlets = [len({a["source"] for a in m}) for m in members]

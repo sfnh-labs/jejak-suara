@@ -128,6 +128,11 @@ def main(argv: list[str] | None = None) -> int:
                           help="cluster recent peristiwa again under the current rules")
     p_rc.add_argument("since", help="peristiwa dated this day or later (YYYY-MM-DD)")
     p_rc.add_argument("--apply", action="store_true", help="write it; without, only count")
+    p_ce = sub.add_parser("cluster-eval",
+                          help="score the peristiwa clustering against the curator's article labels")
+    p_ce.add_argument("since", help="replay peristiwa dated this day or later (YYYY-MM-DD)")
+    p_ce.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                      help="try a jejak.cluster constant at another value (repeatable)")
     # Curation upkeep: draft what /kurasi left undone, learn from the curator.
     sub.add_parser("kurasi")
     sub.add_parser("organizations")
@@ -255,6 +260,13 @@ def main(argv: list[str] | None = None) -> int:
             print("doubtful-speakers:", curation_points.open_doubtful_speakers(conn))
         if args.cmd == "recluster-peristiwa":
             print("recluster-peristiwa:", cluster_mod.recluster_peristiwa(conn, args.since, apply=args.apply))
+        if args.cmd == "cluster-eval":
+            from . import cluster_labels
+            sets = dict(x.split("=", 1) for x in args.set)
+            unknown = [k for k in sets if not hasattr(cluster_mod, k)]
+            if unknown:
+                raise SystemExit(f"no such constant in jejak.cluster: {', '.join(unknown)}")
+            print("cluster-eval:", cluster_labels.evaluate(conn, args.since, {k: float(v) for k, v in sets.items()}))
         if args.cmd == "kurasi":
             from . import kurasi
             print("kurasi:", kurasi.run_stage(conn))
