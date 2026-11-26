@@ -839,6 +839,86 @@ export async function rejectRecord(eventId: number, reason: ReasonCode, alsoSett
   return { event_id: eventId, prev: ev.curated === "rejected" ? null : ev.curated, settled: open.map((r) => r.id), reason };
 }
 
+// ---------------------------------------------------------------------------
+// Which articles of a peristiwa belong to its story: the curator's labels
+// that jejak/cluster_labels.py applies, keeps and scores clustering against.
+
+/** One article on a peristiwa, with the curator's label for it there. */
+export interface ClusterArticle {
+  id: string;
+  source: string;
+  title: string | null;
+  published_at: string | null;
+  /** 'out': leaves the peristiwa at the next pipeline run. */
+  verdict: "in" | "out" | null;
+}
+
+/** cluster_labels arrives with the pipeline's migration; a bot run before that adds it itself. */
+let clusterLabelsReady = false;
+async function ensureClusterLabels(): Promise<void> {
+  if (clusterLabelsReady) return;
+  await lrun(`CREATE TABLE IF NOT EXISTS cluster_labels (
+    article_id TEXT NOT NULL, event_id INTEGER NOT NULL, verdict TEXT NOT NULL, anchor_id TEXT,
+    decided_by TEXT NOT NULL DEFAULT 'curator', decided_at TEXT NOT NULL, applied_at TEXT,
+    PRIMARY KEY (article_id, event_id))`);
+  clusterLabelsReady = true;
+}
+
+/** The peristiwa's articles, oldest first, each with its label. */
+export async function getClusterArticles(eventId: number): Promise<ClusterArticle[]> {
+  await ensureClusterLabels();
+  return query<ClusterArticle>(
+    `SELECT a.id, a.source, a.title, a.published_at, l.verdict
+       FROM articles a
+       LEFT JOIN cluster_labels l ON l.article_id = a.id AND l.event_id = a.event_id
+      WHERE a.event_id = ? AND a.figure_id IS NULL
+      ORDER BY a.published_at NULLS FIRST, a.id`, [eventId]);
+}
+
+/**
+ * Mark an article as not part of the peristiwa's story ('out'), or clear its
+ * label (null). An 'out' is judged against the story the peristiwa stands
+ * for: an article the curator confirmed there, else its oldest article left.
+ */
+export async function setClusterOut(eventId: number, articleId: string, out: boolean): Promise<void> {
+  await ensureClusterLabels();
+  if (!out) {
+    await lrun(`DELETE FROM cluster_labels WHERE event_id = ? AND article_id = ?`, [eventId, articleId]);
+    return;
+  }
+  const anchor = await queryOne<{ id: string }>(
+    `SELECT a.id FROM articles a
+       LEFT JOIN cluster_labels l ON l.article_id = a.id AND l.event_id = a.event_id
+      WHERE a.event_id = ? AND a.figure_id IS NULL AND a.id <> ? AND l.verdict IS NOT 'out'
+      ORDER BY l.verdict IS 'in' DESC, a.published_at NULLS FIRST, a.id LIMIT 1`, [eventId, articleId]);
+  if (!anchor) throw new Error("Ini artikel terakhir peristiwa ini; tolak peristiwanya saja.");
+  await lrun(
+    `INSERT INTO cluster_labels (article_id, event_id, verdict, anchor_id, decided_at)
+     VALUES (?, ?, 'out', ?, ?)
+     ON CONFLICT (article_id, event_id) DO UPDATE
+        SET verdict = 'out', anchor_id = excluded.anchor_id, decided_at = excluded.decided_at, applied_at = NULL`,
+    [articleId, eventId, anchor.id, new Date().toISOString()]);
+}
+
+/** Every article on the peristiwa not marked 'out' is its story: 'in'. Returns how many. */
+export async function confirmClusterRest(eventId: number): Promise<number> {
+  await ensureClusterLabels();
+  const now = new Date().toISOString();
+  const rest = await query<{ id: string }>(
+    `SELECT a.id FROM articles a
+       LEFT JOIN cluster_labels l ON l.article_id = a.id AND l.event_id = a.event_id
+      WHERE a.event_id = ? AND a.figure_id IS NULL AND l.verdict IS NOT 'out'`, [eventId]);
+  await ltx(async () => {
+    for (const r of rest) {
+      await lrun(
+        `INSERT INTO cluster_labels (article_id, event_id, verdict, decided_at) VALUES (?, ?, 'in', ?)
+         ON CONFLICT (article_id, event_id) DO UPDATE SET verdict = 'in', anchor_id = NULL, decided_at = excluded.decided_at`,
+        [r.id, eventId, now]);
+    }
+  });
+  return rest.length;
+}
+
 /** An event's title before the curator renamed it, for undoTitle. */
 export interface TitleEdit {
   event_id: number;
