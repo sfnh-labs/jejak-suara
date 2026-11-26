@@ -662,6 +662,10 @@ _MIGRATIONS = {
         # own act, 'about' = coverage concerning them that they did not do.
         # Set by a curator's rework in /kurasi.
         ("framing", "TEXT"),
+        # 'curator' = the title was set by hand (the Telegram bot's ✏️ Ganti
+        # judul); the pipeline leaves it: no retitling from headlines, no
+        # summary's title over it. NULL = the pipeline's to change.
+        ("title_by", "TEXT"),
     ],
     "sentiment": [
         ("samples_json", "TEXT"),
