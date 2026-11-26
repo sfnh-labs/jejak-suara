@@ -472,7 +472,7 @@ def retitle_events(conn: sqlite3.Connection) -> int:
 
     Events that have been summarized are skipped: their title is generated in
     the figure's own voice, and copying a source headline back over it would
-    undo exactly that.
+    undo exactly that. So are events a curator named (title_by).
     """
     changed = 0
     rows = conn.execute(
@@ -481,7 +481,8 @@ def retitle_events(conn: sqlite3.Connection) -> int:
                     WHERE a.event_id = e.id
                     ORDER BY a.published_at LIMIT 1) AS current_title
              FROM events e
-            WHERE NOT EXISTS (SELECT 1 FROM event_summaries s
+            WHERE e.title_by IS NULL
+              AND NOT EXISTS (SELECT 1 FROM event_summaries s
                                WHERE s.event_id = e.id)"""
     ).fetchall()
     for row in rows:

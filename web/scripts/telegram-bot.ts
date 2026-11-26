@@ -73,7 +73,9 @@ import {
   getPoint as getStoredPoint,
   rejectRecord,
   restoreRecord,
+  setEventTitle,
   undoPoint,
+  undoTitle,
   KIND_LABEL,
   NOT_TRACKED,
   officeCorrection,
@@ -81,6 +83,7 @@ import {
   type PointAnswer,
   type PointKind,
   type Takedown,
+  type TitleEdit,
 } from "@/lib/curationPoints";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
@@ -210,6 +213,11 @@ interface State {
   viewUndo: Record<string, { id: string; name: string; added?: boolean; prev?: ListedPrev }>;
   viewPrompts: Record<string, number>;
   viewAdd: Record<string, number>;
+  /** Made in a 📋 view and undone there: the title before ✏️ Ganti judul (the
+   *  first one, through any later), and the takedown from 🗑 Tolak. */
+  viewEdit: Record<string, { title?: TitleEdit; down?: Takedown }>;
+  /** "Ketik judul baru" prompts from a view: prompt message -> point. */
+  viewTitle: Record<string, number>;
   /** The kandidat card: its name and message, names skipped this round, what is
    *  being asked (and its prompt), a typed new figure, choices, rejects to undo. */
   cand: {
@@ -275,6 +283,8 @@ async function loadState(): Promise<State> {
       viewUndo: s.viewUndo && typeof s.viewUndo === "object" ? s.viewUndo : {},
       viewPrompts: s.viewPrompts && typeof s.viewPrompts === "object" ? s.viewPrompts : {},
       viewAdd: s.viewAdd && typeof s.viewAdd === "object" ? s.viewAdd : {},
+      viewEdit: s.viewEdit && typeof s.viewEdit === "object" ? s.viewEdit : {},
+      viewTitle: s.viewTitle && typeof s.viewTitle === "object" ? s.viewTitle : {},
       cand: {
         ...(s.cand && typeof s.cand === "object" ? s.cand : {}),
         skip: Array.isArray(s.cand?.skip) ? s.cand.skip : [],
@@ -293,7 +303,7 @@ async function loadState(): Promise<State> {
       },
     };
   } catch {
-    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, viewAdd: {}, cand: { skip: [], rejected: {} }, autoSeen: [], fig: {}, org: {}, drafts: {}, reworkPrompts: {}, reworkWho: {}, publish: { trouble: [] } };
+    return { offset: 0, sent: {}, picks: {}, prompts: {}, newFig: {}, extras: {}, takedowns: {}, view: {}, viewQuote: {}, viewUndo: {}, viewPrompts: {}, viewAdd: {}, viewEdit: {}, viewTitle: {}, cand: { skip: [], rejected: {} }, autoSeen: [], fig: {}, org: {}, drafts: {}, reworkPrompts: {}, reworkWho: {}, publish: { trouble: [] } };
   }
 }
 
@@ -525,7 +535,7 @@ async function topUp(s: State): Promise<void> {
     if (view) s.extras[n] = (s.extras[n] ?? []).filter((m) => m !== view);
     const kept = view ? {
       picks: s.picks[`v${n}`], found: s.picks[`v${n}f`], fig: s.newFig[`v${n}`],
-      quote: s.viewQuote[n], undo: s.viewUndo[n],
+      quote: s.viewQuote[n], undo: s.viewUndo[n], made: s.viewEdit[n],
     } : null;
     await forget(s, n);
     if (view && kept) {
@@ -536,6 +546,7 @@ async function topUp(s: State): Promise<void> {
       if (kept.fig) s.newFig[`v${n}`] = kept.fig;
       if (kept.quote !== undefined) s.viewQuote[n] = kept.quote;
       if (kept.undo) s.viewUndo[n] = kept.undo;
+      if (kept.made) s.viewEdit[n] = kept.made;
     }
     const why = p?.status === "settled" ? "terjawab oleh perubahan lain" : p?.status === "auto" ? "dijawab otomatis" : "dijawab di /kurasi";
     await edit(msg, p ? `${await answeredText(p)}\n<i>${why}</i>` : "<i>Poin ini sudah tidak ada.</i>");
@@ -611,7 +622,7 @@ function saidBy(q: QuoteRow): string {
   return `${written} → ${q.assigned_by === "curator" ? "bukan tokoh yang dilacak ✔" : "❔ belum dikenali"}`;
 }
 
-async function viewText(p: Point, note = ""): Promise<{ text: string; quotes: QuoteRow[]; related: Listed[] } | null> {
+async function viewText(p: Point, note = ""): Promise<{ text: string; quotes: QuoteRow[]; related: Listed[]; what: "peristiwa" | "catatan"; rejected: boolean } | null> {
   const item = await getItem(p.event_id);
   if (!item) return null;
   // A record's Terkait list, or a peristiwa's related figures: one list here.
@@ -633,7 +644,7 @@ async function viewText(p: Point, note = ""): Promise<{ text: string; quotes: Qu
     : "<i>tidak ada</i>");
   if (item.quotes.length > quotes.length) lines.push(`<i>…dan ${item.quotes.length - quotes.length} kutipan lain, di /kurasi.</i>`);
   if (note) lines.push("", note);
-  return { text: lines.join("\n"), quotes, related };
+  return { text: lines.join("\n"), quotes, related, what: item.kind === "peristiwa" ? "peristiwa" : "catatan", rejected: item.curated === "rejected" };
 }
 
 /** Numbered buttons, four to a row. */
@@ -667,6 +678,11 @@ async function showView(s: State, p: Point, note = ""): Promise<void> {
   const unchecked = await getUncheckedCount(p.event_id);
   if (unchecked) rows.push([{ text: `🔍 Cek ${unchecked} keputusan otomatis`, callback_data: `vc:${p.id}` }]);
   rows.push([{ text: "👤 Ubah data tokoh", callback_data: `vf:${p.id}` }, { text: "✍️ Tulis ulang", callback_data: `vw:${p.id}` }]);
+  rows.push([
+    { text: "✏️ Ganti judul", callback_data: `vg:${p.id}` },
+    v.rejected ? { text: `♻️ Pulihkan ${v.what}`, callback_data: `vdu:${p.id}` } : { text: `🗑 Tolak ${v.what}`, callback_data: `vd:${p.id}` },
+  ]);
+  if (s.viewEdit[p.id]?.title) rows.push([{ text: "↩ Kembalikan judul lama", callback_data: `vgu:${p.id}` }]);
   rows.push([{ text: "Tutup", callback_data: `vx:${p.id}` }]);
   const at = s.view[p.id];
   if (at) {
@@ -765,6 +781,7 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
     delete s.view[p.id];
     delete s.viewQuote[p.id];
     delete s.viewUndo[p.id];
+    delete s.viewEdit[p.id];
     return "";
   }
   if (kind === "vq") {
@@ -860,6 +877,49 @@ async function onView(s: State, kind: string, p: Point, code: string | undefined
     delete s.viewUndo[p.id];
     await showView(s, p, back.added ? `↩ ${esc(back.name)} tidak jadi ditambahkan.` : `↩ ${esc(back.name)} kembali di Terkait.`);
     return back.added ? "Dibatalkan" : "Dikembalikan";
+  }
+  if (kind === "vg") {
+    const id = await send("Ketik judul barunya. Judul yang diganti di sini tetap; pipeline tidak menggantinya lagi.", undefined, {
+      reply_parameters: { message_id: msgId, allow_sending_without_reply: true },
+      reply_markup: { force_reply: true, input_field_placeholder: "Judul baru" },
+    });
+    s.viewTitle[id] = p.id;
+    return "";
+  }
+  if (kind === "vgu") {
+    const t = s.viewEdit[p.id]?.title;
+    if (!t) throw new Error("Tidak ada judul yang bisa dikembalikan.");
+    await undoTitle(t);
+    delete s.viewEdit[p.id].title;
+    await showView(s, p, "↩ Judul lama dikembalikan.");
+    return "Judul dikembalikan";
+  }
+  if (kind === "vd") {
+    // The view's own event: a peristiwa found with /peristiwa, or a card's catatan.
+    const v = await viewText(p);
+    if (!v) throw new Error("Catatannya tidak ditemukan.");
+    const What = v.what === "peristiwa" ? "Peristiwa" : "Catatan";
+    if (!code) {
+      await edit(msgId, `${v.text}\n\n<b>🗑 Tolak ${v.what} ini? Alasannya:</b>`, [
+        ...REASONS.filter((r) => r.code !== "other").map((r) => [{ text: r.label, callback_data: `vd:${p.id}:${r.code}` }]),
+        [{ text: "← Kembali", callback_data: `v:${p.id}` }],
+      ]);
+      return "";
+    }
+    if (!REASONS.some((r) => r.code === code && code !== "other")) throw new Error("Alasan tidak dikenal.");
+    const t = await rejectRecord(p.event_id, code as ReasonCode, p.id > 0 ? [p.id] : []);
+    (s.viewEdit[p.id] ??= {}).down = t;
+    await showView(s, p, `🗑 ${What} ditolak · ${esc(reasonLabel(code))}. Tidak tampil di situs; poin-poinnya ditutup.`);
+    return `${What} ditolak`;
+  }
+  if (kind === "vdu") {
+    // Taken down here: back as it was, its points asked again. Taken down
+    // elsewhere (no record of it here): just back on the site.
+    const t = s.viewEdit[p.id]?.down ?? { event_id: p.event_id, prev: null, settled: [] };
+    await restoreRecord(t);
+    if (s.viewEdit[p.id]) delete s.viewEdit[p.id].down;
+    await showView(s, p, "♻️ Dipulihkan; tampil lagi di situs.");
+    return "Dipulihkan";
   }
   const quoteId = s.viewQuote[p.id];
   if (!quoteId) throw new Error("Pilih kutipannya lagi.");
@@ -2204,6 +2264,23 @@ async function onReply(s: State, replyTo: number, text: string, own: number): Pr
     await drop(own);
     return true;
   }
+  const titleOf = s.viewTitle[replyTo];
+  if (titleOf) {
+    delete s.viewTitle[replyTo];
+    try {
+      const p = await getPoint(titleOf);
+      if (!p) throw new Error("Catatannya sudah tidak ada.");
+      const before = await setEventTitle(p.event_id, text);
+      (s.viewEdit[p.id] ??= {}).title ??= before;
+      if (s.view[p.id]) await showView(s, p, "✏️ Judul diganti. Pipeline tidak menggantinya lagi.");
+      else await send("✏️ Judul diganti.");
+    } catch (e) {
+      await send(esc(e instanceof Error ? e.message : String(e)));
+    }
+    await drop(replyTo);
+    await drop(own);
+    return true;
+  }
   const addOf = s.viewAdd[replyTo];
   if (addOf) {
     delete s.viewAdd[replyTo];
@@ -2271,6 +2348,8 @@ async function forget(s: State, pointId: number): Promise<void> {
   delete s.view[pointId];
   delete s.viewQuote[pointId];
   delete s.viewUndo[pointId];
+  delete s.viewEdit[pointId];
+  for (const [m, id] of Object.entries(s.viewTitle)) if (id === pointId) delete s.viewTitle[m];
   for (const [m, id] of Object.entries(s.prompts)) if (id === pointId) delete s.prompts[m];
   for (const [m, id] of Object.entries(s.viewPrompts)) if (id === pointId) delete s.viewPrompts[m];
   for (const [m, id] of Object.entries(s.viewAdd)) if (id === pointId) delete s.viewAdd[m];
@@ -2475,7 +2554,7 @@ async function onMessage(s: State, m: NonNullable<Update["message"]>): Promise<v
     } else {
       await showNextCandidate(s);
     }
-  } else await send("Perintah: /lagi (isi ulang kartu), /kandidat (kandidat tokoh), /otomatis (jawaban otomatis), /tokoh [nama] (ubah data tokoh), /organisasi [nama] (daftar organisasi), /draf (draf tulis ulang), /status (jumlah yang menunggu).");
+  } else await send("Perintah: /lagi (isi ulang kartu), /kandidat (kandidat tokoh), /otomatis (jawaban otomatis), /tokoh [nama] (ubah data tokoh), /peristiwa [kata] (cari, ganti judul atau tolak peristiwa), /organisasi [nama] (daftar organisasi), /draf (draf tulis ulang), /status (jumlah yang menunggu).");
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -2510,7 +2589,7 @@ async function main(): Promise<void> {
       { command: "kandidat", description: "Kandidat tokoh baru" },
       { command: "otomatis", description: "Jawaban otomatis per jenis" },
       { command: "tokoh", description: "Ubah data tokoh: /tokoh nama" },
-      { command: "peristiwa", description: "Cari peristiwa: /peristiwa kata" },
+      { command: "peristiwa", description: "Cari, ganti judul, tolak: /peristiwa kata" },
       { command: "organisasi", description: "Daftar organisasi: /organisasi nama" },
       { command: "draf", description: "Draf tulis ulang yang menunggu" },
       { command: "status", description: "Jumlah poin terbuka per jenis" },

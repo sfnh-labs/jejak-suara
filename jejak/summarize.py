@@ -542,10 +542,11 @@ def store_draft(conn: sqlite3.Connection, draft: dict) -> None:
     # Replacing both here — grounded in the actual documents, in the model's
     # open vocabulary rather than a fixed list — is what makes a record read as
     # the figure's own entry and lets the type taxonomy grow with the archive.
-    # Either can come back empty, in which case the earlier value is kept.
+    # Either can come back empty, in which case the earlier value is kept,
+    # and a title the curator set (title_by) is kept over the draft's.
     sets, params = ["status = 'approved'"], []
     if draft["title"]:
-        sets.append("title = ?")
+        sets.append("title = CASE WHEN title_by IS NULL THEN ? ELSE title END")
         params.append(draft["title"])
     if draft["category"]:
         sets.append("event_type = ?")

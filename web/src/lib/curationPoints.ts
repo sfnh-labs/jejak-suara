@@ -837,6 +837,43 @@ export async function rejectRecord(eventId: number, reason: ReasonCode, alsoSett
   return { event_id: eventId, prev: ev.curated === "rejected" ? null : ev.curated, settled: open.map((r) => r.id), reason };
 }
 
+/** An event's title before the curator renamed it, for undoTitle. */
+export interface TitleEdit {
+  event_id: number;
+  title: string | null;
+  title_by: string | null;
+}
+
+/** events.title_by arrives with the pipeline's migration; a bot run before that adds it itself. */
+let titleByReady = false;
+async function ensureTitleBy(): Promise<void> {
+  if (titleByReady) return;
+  const cols = await query<{ name: string }>(`PRAGMA table_info(events)`);
+  if (!cols.some((c) => c.name === "title_by")) await lrun(`ALTER TABLE events ADD COLUMN title_by TEXT`);
+  titleByReady = true;
+}
+
+/**
+ * Name an event by hand. The pipeline keeps a curator's title (title_by):
+ * no retitling from headlines, no summary's title over it.
+ */
+export async function setEventTitle(eventId: number, title: string): Promise<TitleEdit> {
+  const clean = title.replace(/\s+/g, " ").trim();
+  if (!clean) throw new Error("Judulnya kosong.");
+  if (clean.length > 300) throw new Error("Judulnya terlalu panjang: paling banyak 300 huruf.");
+  await ensureTitleBy();
+  const ev = await queryOne<{ title: string | null; title_by: string | null }>(`SELECT title, title_by FROM events WHERE id = ?`, [eventId]);
+  if (!ev) throw new Error(`unknown event: ${eventId}`);
+  await lrun(`UPDATE events SET title = ?, title_by = 'curator' WHERE id = ?`, [clean, eventId]);
+  return { event_id: eventId, title: ev.title, title_by: ev.title_by };
+}
+
+/** Undo setEventTitle: the title back, and the pipeline's to change again if it was. */
+export async function undoTitle(t: TitleEdit): Promise<void> {
+  await ensureTitleBy();
+  await lrun(`UPDATE events SET title = ?, title_by = ? WHERE id = ?`, [t.title, t.title_by, t.event_id]);
+}
+
 /** Undo rejectRecord: the catatan back as it was, and its points asked again. */
 export async function restoreRecord(t: Takedown): Promise<void> {
   await setCuration(t.event_id, t.prev);
