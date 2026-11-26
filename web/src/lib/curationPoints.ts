@@ -824,10 +824,12 @@ export interface Takedown {
 export async function rejectRecord(eventId: number, reason: ReasonCode, alsoSettle: number[] = []): Promise<Takedown> {
   const ev = await queryOne<{ curated: Verdict | null }>(`SELECT curated FROM events WHERE id = ?`, [eventId]);
   if (!ev) throw new Error(`unknown event: ${eventId}`);
-  // Its own points, and any others asked about it (a Peristiwa card proposing it).
+  // Its own points, Peristiwa cards proposing it as a catatan's peristiwa,
+  // and any others named.
   const open = await query<{ id: number }>(
     `SELECT id FROM curation_points WHERE status IN ('open', 'lewati')
-        AND (event_id = ? OR id IN (SELECT value FROM json_each(?)))`, [eventId, JSON.stringify(alsoSettle)]
+        AND (event_id = ? OR id IN (SELECT value FROM json_each(?))
+             OR (kind = 'peristiwa' AND json_extract(proposal, '$.peristiwa_id') = ?))`, [eventId, JSON.stringify(alsoSettle), eventId]
   );
   await setCuration(eventId, "rejected", [reason]);
   await lrun(
